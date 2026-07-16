@@ -28,6 +28,8 @@ flowchart LR
 - **`/ship <feature>`** — ship one user-observable feature end-to-end. Chains researcher → story → spec → BE-builder → FE-builder → acceptance verifier → validator → fix loop → PR. Run N times across the milestone.
 - **`/release`** — cut a SemVer release. Computes bump from `CHANGELOG.md` `[Unreleased]`, renames the section, bumps all six plugin manifests (Claude · Qoder · CodeBuddy), validates, commits, tags, pushes, verifies GitHub Release. Run when `[Unreleased]` has accumulated enough user-visible content.
 - **`/builder-profile`** (opt-in, auxiliary — not part of the core pipeline) — read your own local Claude Code transcripts and write a markdown snapshot of how you actually use an AI coding agent to `~/.claude/builder-profile.md`. 100% local (no upload). Gated pipeline: deterministic stats → evidence gate → cold-read → adversarial verify → independent verification. Default descriptive — a mirror (operating modes, signature moves, honest about what couldn't be measured), not a score card; 1-10 scores only behind `--scores`. Independent of `/init-harness → /ship → /release`.
+- **`/research <question>`** (auxiliary — not part of the core pipeline) — a cited answer to **one** question without opening a brainstorm. Wraps PLC's own research protocol (`references/brainstorm-research-protocol.md`): dispatches parallel Tier-1/Tier-2 survey agents, synthesizes a cited recommendation, and (by default) runs a blind 2nd-agent verification, then writes a report to `docs/research/`. `--quick` skips the 2nd-agent (caps confidence at 🟡); `--tier1` for non-UX questions. Produces a research **artifact** — it does NOT lock a decision or write the qa-log (that stays brainstorm's job). The PLC-native alternative to reaching for an external deep-research tool.
+- **`/handoff`** (auxiliary — not part of the core pipeline) — write a schema-enforced, MOMENT-tense mid-session continuity snapshot to `RESUME.md` (the doc the SessionStart:resume hook reads) plus a *conditional* journal FACT, so the next session resumes with zero re-derivation. Captures the invisible state git can't recover — current task+phase, next concrete action, a staleness anchor (HEAD SHA + branch + timestamp), and (when non-empty) decisions / what-NOT-to-retry / blockers / gotchas. Refuses to write on a missing core field; never fabricates rationale (`references/handoff-snapshot.md`). The in-repo, MOMENT-tense counterpart to an external end-of-session tool — completes the "give PLC's guts a button" trio with `/research` + `/review`.
 
 Between commands: every PR updates `[Unreleased]` + carries one category label + uses a Conventional Commits title (see [`CONTRIBUTING.md`](CONTRIBUTING.md)). The Validator (cadence step 2, read-only) catches builder lies; the Acceptance Verifier (cadence step 1.5) writes one test per AC; deterministic handlers (`.claude/handlers/`) inject auth / secrets / pre-flight lint / migration safety before the LLM ever sees them.
 
@@ -54,7 +56,7 @@ A **process layer**, not a code generator. It wraps the underlying [`superpowers
 
 If you ship features through an AI agent and don't want to re-explain your dev process every new project, this skill is the contract.
 
-**Framed as a harness.** Borrowing Tejas Kumar's vocabulary: this skill IS an agent harness — the deterministic scaffolding around the LLM that grounds it in reality. Tool registry (subagents: researcher / story-writer / spec-writer / BE-builder / FE-builder / acceptance-verifier / validator / code-reviewer / journal-writer), guardrails (Red Flags + Mandatory Conventions), context management (`/clear` discipline + handoff + RESUME), agent loop (per-phase + per-task cadence + `/ship` orchestrator), verify step (acceptance verifier + validator + dual-track smoke), deterministic handlers (auth / secret / lint / migration safety injected as pre-steps), and lie detection (validator cross-references builder claims against the diff). Full mapping in `SKILL.md` §"This skill IS an agent harness".
+**Framed as a harness.** Borrowing Tejas Kumar's vocabulary: this skill IS an agent harness — the deterministic scaffolding around the LLM that grounds it in reality. Tool registry (subagents: researcher / story-writer / spec-writer / BE-builder / FE-builder / acceptance-verifier / validator / reviewer / journal-writer), guardrails (Red Flags + Mandatory Conventions), context management (`/clear` discipline + handoff + RESUME), agent loop (per-phase + per-task cadence + `/ship` orchestrator), verify step (acceptance verifier + validator + dual-track smoke), deterministic handlers (auth / secret / lint / migration safety injected as pre-steps), and lie detection (validator cross-references builder claims against the diff). Full mapping in `SKILL.md` §"This skill IS an agent harness".
 
 ## When to use
 
@@ -101,7 +103,7 @@ Full workflow burns ~100–300 K tokens per phase. Earn it; don't spend it on tr
 | Phase PRD (opt-in) | `docs/superpowers/specs/…-prd.md` |
 | Phase plan | `docs/superpowers/plans/…` |
 | Research notes | `docs/research/…` |
-| Handoff | `docs/handoff/YYYY-MM-DD-phase-X.Y-handoff.md` |
+| Phase-delivery handoff | *retired* — §7 findings fold into the journal FACT (`references/journal-schema.md`). **Not** the `/handoff` continuity command (that writes `docs/RESUME.md`, above). |
 | Journal | `docs/iteration-journal.md` (append-only, TOC at top) |
 | Milestone state | `docs/RESUME.md` |
 | Whole-plan map | `docs/ROADMAP.md` (milestone table + status, updated at milestone boundaries) |
@@ -209,7 +211,7 @@ skills/project-lifecycle/
     ├── journal-schema.md                 6-section journal entry template
     ├── defer-vs-fix.md                   triage rule for review findings
     ├── diagnose-loop.md                  hard-bug discipline: feedback loop → ranked hypotheses → fix + regression. Iron Law + 3-Fix Rule
-    ├── close-gate.md                     deterministic done-gate — task-done / phase-done checks (journal header / fresh test-evidence / handoff sections / CHANGELOG touch / smoke / ROADMAP), portable script + manifest, pre-push-hook wiring (the un-bypassable layer) + the close-gate policy key (per-task | pr-boundary — where the human-blocking approval sits, with the self-certification attack surface written out)
+    ├── close-gate.md                     deterministic done-gate — task-done / phase-done checks (journal header / fresh test-evidence / CHANGELOG touch / smoke / ROADMAP), portable script + manifest, pre-push-hook wiring (the un-bypassable layer) + the close-gate policy key (per-task | pr-boundary — where the human-blocking approval sits, with the self-certification attack surface written out)
     ├── review-record.md                  trustworthy AI review — reviewer dispatch constraints (fresh context / read-only / tier asymmetry / refute-first / file:line evidence gate / computed verdicts), the bidirectional review record on the PR (reviewer report verbatim + builder per-finding response), finding→fix rules (reviewer snippets are untrusted input; mandatory final-pass), coverage-window check
     │
     │  ── delivery + CI ──

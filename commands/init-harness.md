@@ -9,7 +9,7 @@ Dynamic-on-the-fly harness generator (Tejas Kumar's next-step-for-harnesses idea
 ## When to use
 
 - **Fresh project** — empty repo or repo where the skill has never been wired up. `/init-harness` is the first command you run.
-- **Existing project adopting the skill** — repo has code but no `CLAUDE.md` / `RESUME.md` / `iteration-journal.md`. `/init-harness` reads the existing code, generates the scaffolding, surfaces conflicts (e.g., existing CLAUDE.md style differs from what the skill expects).
+- **Existing project adopting the skill** — repo has code but no `CLAUDE.md` / `docs/RESUME.md` (or root `RESUME.md`) / `docs/iteration-journal.md` (or root — either location counts, per the detection contract in `references/archaeology.md`). `/init-harness` reads the existing code, generates the scaffolding, surfaces conflicts (e.g., existing CLAUDE.md style differs from what the skill expects). Brownfield repos additionally get the one-time archaeology offer at CHECKPOINT 1 (baseline ROADMAP / glossary / backfilled-ADR / journal-start drafts, per `references/archaeology.md`).
 - **After a major refactor** — folder layout changed; `folder-map` is stale. `/init-harness --refresh` re-detects + proposes diff.
 
 ## When NOT to use
@@ -23,6 +23,7 @@ Dynamic-on-the-fly harness generator (Tejas Kumar's next-step-for-harnesses idea
 /init-harness               # full bootstrap, interactive
 /init-harness --refresh     # re-detect folder-map + handlers against current code; propose diff
 /init-harness --dry-run     # detect + report, write nothing
+/init-harness --archaeology # run/re-run the brownfield archaeology pass (see references/archaeology.md)
 ```
 
 ## Chain (orchestrator executes; 4 human checkpoints)
@@ -55,11 +56,16 @@ Dynamic-on-the-fly harness generator (Tejas Kumar's next-step-for-harnesses idea
 
 Subagent returns a structured detection report. Do NOT proceed to generation until detection is complete.
 
+### Phase 1b — Archaeology pass (brownfield only, read-only, opt-in)
+
+Runs only when Phase 0 inventory found NO plc artifacts AND Phase 1 confirmed substantial existing code (detection contract in `references/archaeology.md`), AND the user accepted the offer at CHECKPOINT 1 — or `--archaeology` was passed explicitly. Fan out the three read-only subagents (position/roadmap · glossary · ADR archaeology) with read budgets per `references/archaeology.md`; controller assembles the journal adoption preamble, the `docs/RESUME.md` initial state (root `RESUME.md` if the project already uses that location), and the `docs/adoption-snapshot.md` review index. All outputs are AI-inferred drafts carrying provenance headers; they join Phase 2's generate/merge set (checkpoints 2-4 unchanged).
+
 ### ⏸ HUMAN CHECKPOINT 1 — Confirm detected stack
 
 4. Show the detection report. Ask user:
    - "Detected: <stack summary>. Anything wrong / missing?"
    - If user corrects (e.g., "we also use Redis for caching, you missed it"), incorporate into the model BEFORE generating.
+   - On brownfield repos (per the Phase 1b conditions) the checkpoint additionally asks the one-time archaeology offer — gated by the `archaeology` policy key (`done YYYY-MM-DD | skipped`; unset = ask; any value = never re-ask; `--archaeology` stays available after `skipped`).
 
 ### Phase 2 — Generate / merge artifacts
 
@@ -131,6 +137,11 @@ If single-layer project: `folder-map: single-layer` (skip BE/FE split in /ship).
 domain-docs: ./CONTEXT.md            # or ./CONTEXT-MAP.md
 html-policy: ask                     # ask | always-md | always-html
 smoke-mode: guided                   # ask | self | guided
+comprehension: off                   # off | lite | full — anti-cognitive-offloading co-discovery round per phase
+close-gate: per-task                 # per-task | pr-boundary — where the human-blocking close approval sits
+archetype: auto                      # auto | builder | prototyper | sweeper | grower | maintainer | off
+retention: { distill: on }           # doc-retention; hot-caps/archive-dir default when omitted; mirrored into the close-gate manifest — see references/retention.md
+# archaeology: (leave UNSET)          # written only when the offer is answered: the pass sets `done YYYY-MM-DD`; declining sets `skipped`. Pre-setting a value suppresses the one-time offer.
 ```
 
 ## Pointers to deeper docs
@@ -162,7 +173,7 @@ Format per term: term name + 1-sentence definition + (optional) example.
 
 #### 7. `docs/RESUME.md` + `docs/iteration-journal.md` placeholders
 
-Create empty scaffolds with TOC stubs (per `references/document-indexing.md`) so the first phase has somewhere to write.
+Create empty scaffolds with TOC stubs (per `references/document-indexing.md`) so the first phase has somewhere to write. **When the project opts into the fragment convention** (per `references/retention.md` §"Fragment convention"), also scaffold the fragment directories with a `.gitkeep` so they exist under source control from day one: `docs/qa-log.d/.gitkeep` and `changelog.d/.gitkeep`. Empty scaffolds only — the first fragment file is written by the first brainstorm / PR / release, not by bootstrap.
 
 #### 7b. `docs/ROADMAP.md` whole-plan-map stub
 
@@ -224,7 +235,7 @@ If `.claude-plugin/` was created, ship a validator workflow too.
 ### ⏸ HUMAN CHECKPOINT 3 — Approve policy keys + handler set
 
 15. Surface:
-    - `html-policy` / `smoke-mode` defaults (with brief explanation of each option)
+    - `html-policy` / `smoke-mode` / `retention` defaults (with brief explanation of each option)
     - List of handler scaffolds to be generated
     - Ask: "Approve? Toggle any?"
 
@@ -245,6 +256,7 @@ If `.claude-plugin/` was created, ship a validator workflow too.
     - CONTEXT.md placeholder
     - docs/RESUME.md + docs/iteration-journal.md placeholders
 - docs/ROADMAP.md whole-plan-map stub
+    - docs/qa-log.d/.gitkeep + changelog.d/.gitkeep (if fragment convention adopted)
     - .claude/commands/<list>
     - .claude/handlers/<list>
     - CHANGELOG.md (if was missing)
@@ -272,6 +284,7 @@ When `/init-harness --refresh` is invoked on an already-bootstrapped project:
 4. Ask user which drift to fix.
 5. Apply fixes via the same merge flow as Phase 2.
 6. Skip CHANGELOG / release / handler-scaffold creation if those already exist.
+7. Verify the context-floor hook is armed (`context-floor.sh` referenced under `PreToolUse` in `~/.claude/settings.json` or project `.claude/settings*.json`); if not, offer to merge the wiring per `references/harness-primitives.md` §9 — append to existing `PreToolUse` arrays, never clobber. (An un-armed floor lets sessions run far past it unnoticed.)
 
 ## --dry-run mode
 

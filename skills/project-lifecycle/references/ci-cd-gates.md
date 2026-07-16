@@ -46,7 +46,6 @@ Required jobs (run on every push):
 | **Codemap drift** (if `make codemap` pattern adopted) | Codemaps not stale | `make codemap-check` (exit non-zero on drift) |
 | **Security scan** | No new high-severity findings | `bandit`, `pip-audit`, `npm audit`, `cargo audit` |
 | **E2E** (Track B) | Playwright (or equivalent) green | `playwright test` against a built preview |
-| **Handoff doc check** (skill-specific) | When a phase tag (`m*` / `phase-*`) appears in commits, assert `docs/handoff/*-handoff.md` exists for that phase | tiny custom script — see snippet below |
 
 **Optional but valuable:**
 - **Branch name check**: enforce `feat/phase-X.Y-<slug>` convention.
@@ -54,20 +53,10 @@ Required jobs (run on every push):
 - **PR title lint**: enforce conventional commits or include `[mX.Y]` tag.
 - **Bundle size diff** for frontend: report on PR comment.
 
-### Handoff doc check snippet
-
-```bash
-# In CI — fail if a phase commit landed without its handoff doc.
-phase=$(git log --format=%s "$BASE..$HEAD" \
-  | grep -oE 'm[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
-if [ -n "$phase" ]; then
-  short=${phase#m}                                  # 2.1.3
-  if ! ls docs/handoff/*phase-${short}-handoff.md 1>/dev/null 2>&1; then
-    echo "Phase $phase commits present but no docs/handoff/*phase-${short}-handoff.md" >&2
-    exit 1
-  fi
-fi
-```
+> The handoff file was retired (see `references/handoff-template.md`) — its one non-derivable
+> section (§7 findings/gotchas) now lives in the journal fragment under the FACT schema, checked
+> deterministically by `close-gate.sh phase`'s journal-touched row instead. There is no equivalent
+> per-phase-tag CI assertion to run in its place; a phase's journal-touched check already covers it.
 
 ## Layer 3: Merge protection (configured once per repo)
 
@@ -118,7 +107,6 @@ Without Layer 1 + 2 + 3 in place, the milestone-done gate is honor-based and wil
 - [ ] Schema-drift check in CI for any codegen artifact.
 - [ ] Branch protection on `main` requiring CI green + no force push.
 - [ ] `make phase-checks PHASE=X.Y` target (or equivalent) for local one-shot runs.
-- [ ] Handoff-doc-presence check (snippet above) so phase commits can't merge without their handoff.
 
 When these exist, the per-phase workflow can rely on "CI green" as a real signal. Until they exist, build them as task one of the first phase.
 
@@ -137,7 +125,7 @@ AI agents tend to over-generate "fix" attempts when CI fails — try lint fix, r
 | Trigger | Signal | Action |
 |---|---|---|
 | CI workflow refuses to start | GitHub web UI shows red ✗ with body `The job was not started because recent GitHub Actions payments have failed or your spending limit needs to be increased` | switch workflow to `workflow_dispatch` dormant + run R5 locally |
-| Copilot review job aborts mid-run | PR conversation shows `Copilot stopped work ... due to an error` linking to the same billing message | drop Copilot loop + dispatch `code-reviewer` stand-in subagent |
+| Copilot review job aborts mid-run | PR conversation shows `Copilot stopped work ... due to an error` linking to the same billing message | drop Copilot loop + dispatch a general-purpose reviewer stand-in (per `references/reviewer-brief.md`) |
 | Self-hosted runner registration fails | `api.github.com/actions/runner-registration` returns `404` | Actions is disabled at the account; same fallback applies |
 
 If none of the above triggers fire for the current PR, **use the default path**. Pattern E is a fallback, not the new normal.
@@ -198,7 +186,7 @@ jobs:
 
 ### Local R5 verify protocol (the substitute for CI runs)
 
-Document this in the project's handoff template under §4 (Manual smoke) or §5 (Automated smoke), and reference it from the workflow header comment.
+Document this in the workflow header comment itself (see the DORMANT block above) — that's the live, version-controlled copy; there is no separate handoff doc to mirror it into.
 
 **Full gate — ALL three layers, ALL three runs:**
 
@@ -219,7 +207,7 @@ Whether you ran via default CI or local Pattern E, the test evidence MUST be pos
 - **Visibility**: a comment appears in the PR thread feed; the body is collapsed below the diff and easy to miss during review.
 - **Audit trail**: comments are timestamped + attributable; the body is editable and history is hidden behind a "modified" badge.
 - **Re-runs**: when fixup commits land and tests are re-run, a new comment is posted with the new evidence — the thread shows the progression. A body edit overwrites the prior evidence and loses the trace.
-- **Reviewer expectation**: external reviewers (Copilot, code-reviewer subagent, human collaborators) read the thread top-to-bottom; the body is treated as a summary, not a proof artifact.
+- **Reviewer expectation**: external reviewers (Copilot, a general-purpose reviewer subagent, human collaborators) read the thread top-to-bottom; the body is treated as a summary, not a proof artifact.
 
 ### Required fields (same for both paths)
 
@@ -255,9 +243,9 @@ Use `gh pr comment <PR#> --body "..."` (or equivalent). Comment must include:
 Copilot's 1st pass usually completes (the review job already started); subsequent `@copilot review` triggers fail silently with the same billing error. When this happens:
 
 - **Address every 1st-pass finding** per the standard `copilot-review-loop.md` protocol (inline reply per finding, fixup commit with Fx labels).
-- **Dispatch an independent `code-reviewer` subagent** as the 2nd-pass stand-in. Brief it with: "Copilot's 2nd pass is blocked by external infra; you are the independent 2nd reviewer. Verify the fixup commit addresses each 1st-round finding correctly + spot-check for regressions the fixup might have introduced."
+- **Dispatch an independent general-purpose reviewer** (briefed per `references/reviewer-brief.md`) as the 2nd-pass stand-in. Brief it with: "Copilot's 2nd pass is blocked by external infra; you are the independent 2nd reviewer. Verify the fixup commit addresses each 1st-round finding correctly + spot-check for regressions the fixup might have introduced."
 - **Apply that subagent's findings** before merging, same standard as Copilot's findings would have been.
-- **In the PR body**, note: "Copilot 2nd pass blocked by Actions billing; independent code-reviewer subagent acted as the 2nd reviewer (see `<short summary of findings>` resolved in `<sha>`)."
+- **In the PR body**, note: "Copilot 2nd pass blocked by Actions billing; an independent general-purpose reviewer acted as the 2nd reviewer (see `<short summary of findings>` resolved in `<sha>`)."
 
 ### When to revert Pattern E
 
@@ -267,7 +255,7 @@ The moment billing is restored:
 2. Push.
 3. Verify auto-runs resume on the next PR push.
 4. Remove the dormant comment block (or leave it as historical evidence — owner's choice).
-5. Update the project's handoff template / docs to remove "local-only R5" language and reinstate "CI 3× before merge".
+5. Remove the dormant workflow header comment's "local-only R5" language (or leave it as historical evidence per step 4) — the header comment is the only place that language lived.
 
 The Pattern E commit + the restoration commit together form a clean audit trail of *why* CI was off during that interval — useful for retrospectives and for any phase whose merge was bottlenecked by the pause.
 
@@ -276,4 +264,4 @@ The Pattern E commit + the restoration commit together form a clean audit trail 
 - **Switching back to `on: push/pull_request` without first verifying billing is actually restored** — auto-runs immediately re-fail with the same billing error, re-polluting PRs.
 - **Skipping the local R5 3× loop just because there's no CI gate** — the 3× is the flake-guard, not just CI ceremony. Run it locally.
 - **Letting the workflow file rot** (out-of-sync with current build commands, test runner names) — when restored, the workflow will fail for *new* reasons. Treat it as living documentation; update it whenever the project's `package.json` scripts / test runner / e2e config changes.
-- **Documenting the local R5 protocol only in a chat session** — owner forgets the protocol three phases later. Bake into both the workflow header comment AND the handoff template §5.
+- **Documenting the local R5 protocol only in a chat session** — owner forgets the protocol three phases later. Bake it into the workflow header comment (the version-controlled, conventional-location copy).

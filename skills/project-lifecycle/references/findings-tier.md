@@ -29,7 +29,7 @@ Every smoke finding / review concern / known limitation gets a tier. The tier dr
 - Stale client-side data cache requiring user refresh
 - Missing entity name in API response (causes blank UI text but data is correct)
 
-**Action:** log in handoff doc §7, open a follow-up issue with label like `polish-X.Y` or `post-mX.Y`, add to the next polish/maintenance phase backlog.
+**Action:** log in the journal entry's findings section, open a follow-up issue with label like `polish-X.Y` or `post-mX.Y`, add to the next polish/maintenance phase backlog.
 
 ### S3 — Deferrable, later phase or out of scope
 
@@ -41,7 +41,7 @@ Every smoke finding / review concern / known limitation gets a tier. The tier dr
 - "The audit log doesn't yet have a filter UI" (separate phase scope)
 - "Should this be cached in Redis?" (perf optimization, no current pain)
 
-**Action:** log in handoff doc §7, mention in §8 as "next phase should cover" — but do NOT open an issue yet. Will get picked up when relevant milestone planning happens.
+**Action:** log in the journal entry's findings section and name the phase that should cover it — but do NOT open an issue yet. Will get picked up when relevant milestone planning happens.
 
 ## Decision tree
 
@@ -61,7 +61,7 @@ A finding surfaces. Should I fix it now?
 
 If you can't decide between S1 and S2, treat it as S1 and ask the product owner. Better to fix something that wasn't needed than ship a regression.
 
-## Findings format (in handoff doc §7 + smoke checklist findings file)
+## Findings format (journal findings section + smoke checklist findings file)
 
 Stable IDs: `F1`, `F2`, ... per phase. Once assigned, the ID does NOT change even if the finding gets fixed and moved to a different tier.
 

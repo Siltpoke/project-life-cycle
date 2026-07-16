@@ -12,7 +12,7 @@
       "description": "Skill that enforces a doc-first per-phase workflow: brainstorm with research gate, planned execution with per-task cadence, dual-track smoke (manual + Playwright), phase delivery handoff, and milestone-done gate. Designed to be the same workflow across all your projects.",
       "source": "./",
       "category": "workflow",
-      "version": "1.0.0"
+      "version": "3.0.0"
     }
   ]
 }

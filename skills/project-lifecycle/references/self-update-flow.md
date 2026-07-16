@@ -48,7 +48,7 @@ Triggered when user says: "update the workflow to X", "add this rule to the skil
 To prove a change on a real phase before (or after) merging — without cutting a release:
 
 ```
-claude --plugin-dir ~/Projects/project-life-cycle
+claude --plugin-dir /path/to/your/clone/project-life-cycle
 ```
 
 - The working-tree version of the plugin loads for that session and **shadows the installed marketplace version** (same plugin name → local wins for the session).
@@ -95,5 +95,5 @@ The skill is the high-water mark of process discipline. Adding a rule means ever
 If a new Claude Code session starts and the user says "update the workflow," the agent should:
 
 1. Read this doc (`references/self-update-flow.md`) first.
-2. Find the repo via the user (or search common locations: `~/Projects/project-life-cycle`, `~/Code/`, `~/repos/`, etc.).
+2. Find the repo via the user (or search common clone locations: `~/Code/`, `~/repos/`, `~/src/`, `~/Projects/`, etc.).
 3. Work on a feature branch in the repo; follow the default update flow above.

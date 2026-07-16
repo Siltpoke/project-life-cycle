@@ -27,11 +27,11 @@ So: a separate same-family reviewer removes the biggest bias term but keeps a **
 
 ## The review record — two companion PR comments
 
-In `pr-boundary` mode (and on any PR where reviewer subagents ran), the PR carries the full bidirectional review conversation. Both files are drafted to `docs/pr-drafts/` first (normal draft-first workflow), then posted via `--body-file`.
+In `pr-boundary` mode (and on any PR where reviewer subagents ran), the PR carries the full bidirectional review conversation. Both files are drafted to the session scratchpad first (normal draft-first workflow, `references/pr-comment-template.md` §"Draft-first workflow" — the draft dies with the session, the posted PR comment is the durable record), then posted via `--body-file`.
 
 ### Comment A — review verbatim
 
-`docs/pr-drafts/YYYY-MM-DD-<slug>-review-verbatim.md`
+`<session scratchpad>/YYYY-MM-DD-<slug>-review-verbatim.md`
 
 - **Scope header per round**: commit range reviewed (`merge-base..<SHA>`), what the reviewer could see (working tree vs committed), method (read code / ran tests / exercised app), and an explicit **"not reviewed"** list — the honest negative space.
 - **The reviewer's report AS RETURNED — the writer must not edit, condense, or re-synthesize it.** A writer that summarizes its own auditor's reasoning is a self-serving channel: the live incident was a "verbatim" comment that silently shrank the reviewer's reasoning by ~60%, dropping exactly the exploratory traces the merger needed. Mechanism: save the subagent's final report to the draft file untouched; long reports go inside `<details>` folds, never get shortened.
@@ -40,7 +40,7 @@ In `pr-boundary` mode (and on any PR where reviewer subagents ran), the PR carri
 
 ### Comment B — builder response
 
-`docs/pr-drafts/YYYY-MM-DD-<slug>-builder-response.md`
+`<session scratchpad>/YYYY-MM-DD-<slug>-builder-response.md`
 
 Per finding, in the reviewer's order:
 

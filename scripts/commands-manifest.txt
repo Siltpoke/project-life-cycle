@@ -15,3 +15,8 @@ ship.md
 release.md
 init-harness.md
 builder-profile.md
+capture.md
+cognition-distill.md
+research.md
+review.md
+handoff.md

@@ -99,7 +99,9 @@ Re-trigger `@copilot review` after every fixup-commit round, no matter how small
 1. **Fix introduced a new finding** — common when fixing a Zod schema gap or renaming a field; downstream callers may not have been migrated.
 2. **Copilot graded the fix** — even a "still has a minor concern" follow-up is signal the user should see before merge.
 
-Stop the loop only when Copilot's response is either explicitly "no actionable issues" OR the user signs off on remaining items (deferred with reason in-thread).
+Stop the loop when Copilot's response is either explicitly "no actionable issues" OR the user signs off on remaining items (deferred with reason in-thread).
+
+**Hard round cap: 3 re-triggered rounds maximum.** The loop does not converge on its own — every fixup adds new text, and new text is fresh nitpick surface (observed: a prose PR ran 10 → 5 → 1 → 1 → 4 findings across five rounds; both real bugs surfaced by round 2). After round 3: remaining CRITICAL/IMPORTANT findings are fixed WITHOUT re-triggering another review; remaining minor findings are reply-deferred in-thread (`Deferred by round-cap: logged as S3 follow-up`) and the PR proceeds to the user's merge decision. This is a loop guard independent of reviewer judgment — never "just one more round."
 
 ## When to skip the loop
 
@@ -108,8 +110,8 @@ Stop the loop only when Copilot's response is either explicitly "no actionable i
 | Pure docs-only PR (no `.ts` / `.py` / `.go` etc.) | OK to skip; flag in PR body |
 | Trivial 1-line fix that doesn't touch security / state / DB | OK to skip; flag in PR body |
 | User explicitly says "merge it, skip Copilot" | OK to skip; record reason in PR body |
-| GitHub Actions billing-paused (Copilot's runner blocked) — 1st pass completed | **Run 1st-pass loop fully + use independent `code-reviewer` subagent as 2nd-pass stand-in** — see `ci-cd-gates.md` §Pattern E + below |
-| GitHub Actions billing-paused — 1st pass also failed to spawn (Copilot reviewed: 0 findings) | Default path is NOT skipped — it failed. Dispatch **two sequential `code-reviewer` subagent passes** (one as initial reviewer, one as 2nd-pass to confirm clean). Record in the PR-comment evidence that Copilot reviewed 0 findings due to the billing block. |
+| GitHub Actions billing-paused (Copilot's runner blocked) — 1st pass completed | **Run 1st-pass loop fully + use an independent general-purpose reviewer (per `references/reviewer-brief.md`) as 2nd-pass stand-in** — see `ci-cd-gates.md` §Pattern E + below |
+| GitHub Actions billing-paused — 1st pass also failed to spawn (Copilot reviewed: 0 findings) | Default path is NOT skipped — it failed. Dispatch **two sequential general-purpose reviewer passes** (per `references/reviewer-brief.md`) (one as initial reviewer, one as 2nd-pass to confirm clean). Record in the PR-comment evidence that Copilot reviewed 0 findings due to the billing block. |
 | Phase delivery PR (any non-trivial feature) | **MANDATORY — never skip** |
 | Stacked PR where base is a feature branch | **MANDATORY — same as standalone** |
 
@@ -120,11 +122,11 @@ GitHub Actions billing-paused (`The job was not started because recent GitHub Ac
 When that happens:
 
 1. **Treat the 1st-pass findings as the standard 1st round.** Address every inline comment per the per-finding-reply protocol above. Fixup commits with `Fx-NN` labels. Re-trigger `@copilot review` once to confirm billing is still blocked (don't assume — sometimes it intermittently works).
-2. **Dispatch an independent `code-reviewer` subagent as the 2nd-pass stand-in.** Brief it with:
+2. **Dispatch an independent general-purpose reviewer (per `references/reviewer-brief.md`) as the 2nd-pass stand-in.** Brief it with:
     > "Copilot's 2nd pass is blocked by external infra (GitHub Actions billing). You are the independent 2nd reviewer for fixup commit `<sha>` on PR #<N>. Verify each Fx label actually addresses its 1st-round Copilot finding correctly, AND spot-check for regressions the fixup might have introduced (type safety / immutability / new dead code / test coverage gaps). Report CRITICAL / IMPORTANT / MINOR / NIT with file:line."
 3. **Apply that subagent's findings** before merging — same standard as Copilot's findings would have been. Per-finding reply not strictly required (no Copilot thread to reply *to*), but record what was fixed + which SHA in the PR body or in the journal.
 4. **In the PR body**, note the stand-in arrangement:
-   > Copilot 2nd-pass blocked by Actions billing. Independent `code-reviewer` subagent stood in — found `<N>` IMPORTANT items, resolved in `<sha>`. See the journal entry for this phase for full list.
+   > Copilot 2nd-pass blocked by Actions billing. An independent general-purpose reviewer stood in — found `<N>` IMPORTANT items, resolved in `<sha>`. See the journal entry for this phase for full list.
 5. **Loop the stand-in TWICE max** — once to surface findings, once to confirm the fixup is clean. Pass 1 = independent review against the fixup commit; pass 2 = re-loop the same prompt against the latest HEAD. **"APPROVED-CLEAN" is the CONTROLLER'S derived label, not the reviewer's verdict**: the stand-in outputs only a findings list (CRITICAL/IMPORTANT/MINOR/NIT with file:line); the controller derives APPROVED-CLEAN from "pass-2 report contains zero open CRITICAL/IMPORTANT findings" — never from an approval string the reviewer states about its own pass (per `review-record.md` dispatch constraint 6: verdicts are computed, never self-declared). If pass 2 surfaces something, fix + commit and dispatch a fresh pass-2 attempt; if the loop fails to close in 3 fixup cycles, surface to the user — likely a design-level issue the stand-in is gesturing at.
 
 The PR can merge once the stand-in's pass-2 findings list derives to APPROVED-CLEAN (zero open CRITICAL/IMPORTANT) AND the local test-evidence comment is posted on the PR (per `ci-cd-gates.md` §"Posting test evidence"). The Copilot loop closure rule ("clean OR user signs off") is satisfied because (a) 1st-pass findings are all addressed + (b) the pass-2 findings list is clean (the equivalent of Copilot's "no actionable issues" re-trigger reply).
@@ -150,8 +152,14 @@ After base merges and the PR auto-retargets to `main`, **do not re-trigger** unl
 ## Tool / API reference
 
 ```bash
-# Trigger review
+# Trigger review — comment mention (org repos with Copilot code review enabled)
 gh pr comment <N> --body "@copilot review"
+
+# Trigger review — reviewer request via API (REQUIRED on personal repos: the
+# comment mention silently does nothing there; verified with a 20+ minute wait and no response)
+gh api repos/{owner}/{repo}/pulls/<N>/requested_reviewers \
+  -f 'reviewers[]=copilot-pull-request-reviewer[bot]'
+# Re-request after each fixup round with the same call.
 
 # List inline review comments (id / path / line / body)
 gh api repos/{owner}/{repo}/pulls/<N>/comments --jq '.[] | {id, path, line, body: .body[0:200]}'

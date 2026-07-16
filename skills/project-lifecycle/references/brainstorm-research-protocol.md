@@ -4,6 +4,8 @@ How to run a single brainstorm question end-to-end without skipping research, wi
 
 The core rule: **never ask the user to choose without research first.** Recommendations are welcome; un-backed recommendations are not.
 
+**Two callers read this one protocol.** Inside a brainstorm, the per-question loop below runs as part of the Mode A/B cadence and locks a decision into the qa-log. Standalone, the `/research` command (`commands/research.md`) runs steps 1-3 (+4-5 unless `--quick`) on a single question and writes a **cited report** to `docs/research/` — no decision lock, no qa-log entry. Both entry points share this doc as the single source of truth; neither forks it.
+
 ## Mode selection (ASK FIRST, before any question)
 
 At the start of every brainstorm session, ask the user which mode they prefer. Phrase the prompt in whatever language the user has been writing in; the choice itself is what matters. Sample English version:
@@ -12,7 +14,7 @@ At the start of every brainstorm session, ask the user which mode they prefer. P
 >
 > **A — Interactive (one-by-one)**: I'll present one question at a time. For each: dispatch research, draft a recommendation, run a blind 2nd-agent verification, then surface to you for sign-off before moving to the next question. Slower wall-clock; lets you redirect mid-stream.
 >
-> **B — Batch (all-at-once)**: I'll run all N questions end-to-end (research + 2nd-agent + recommendation each), write the full Q&A to `docs/brainstorming-qa-log.md` with citations, and ping you with one review pass. Faster wall-clock; bigger commit; harder to redirect once started."
+> **B — Batch (all-at-once)**: I'll run all N questions end-to-end (research + 2nd-agent + recommendation each), write the full Q&A to the branch's `docs/qa-log.d/<date>-<branch-slug>.md` fragment with citations, and ping you with one review pass. Faster wall-clock; bigger commit; harder to redirect once started."
 
 Wait for user choice. Default if user does not pick: ask again — never assume.
 
@@ -23,7 +25,7 @@ Both modes use the same 7-step per-question protocol below. They differ only in 
 
 ## Recording is mandatory regardless of mode
 
-Every brainstorm session writes to `docs/brainstorming-qa-log.md` with:
+Every brainstorm session writes to the current branch's `docs/qa-log.d/<date>-<branch-slug>.md` fragment (one fragment per branch — append to it if it already exists, per `references/retention.md` §"Fragment convention") with:
 
 - **Verbatim user message** that triggered the brainstorm — copy exactly, no paraphrase.
 - **Verbatim controller framing** — the exact Q text presented to user.
@@ -32,7 +34,49 @@ Every brainstorm session writes to `docs/brainstorming-qa-log.md` with:
 - **2nd-agent reasoning** — verbatim, including disagreement details if any.
 - **User decision text** — verbatim, including any nuance or constraint they added.
 
+**Fallback (un-adopted projects):** if the repo hasn't wired up `docs/qa-log.d/`, write directly to the project-wide `docs/brainstorming-qa-log.md` monolith instead — this remains a fully supported path, just not the default for projects that have adopted the fragment convention.
+
 See "Documenting the Q&A" section at end of this doc for the entry template. Citations are NOT optional even for compressed (skip-2nd-agent) decisions — minimum 1 research link per locked decision, even if it's a single doc page.
+
+## Reference-share capture (byproduct — gated, armed by key)
+
+Separate from recording the Q&A: during the research loop the user often **shares an external
+reference** for you to analyze (a repo/paper/blog/tool/video/talk link, an offline doc dropped in
+by local path / DOI such as a downloaded PDF, or an explicitly-shared AI-chat log / screenshot /
+pasted note — illustrative, not exhaustive; the log header's `Type` enum is the live source).
+When such an offer-worthy reference is shared **and**
+the user-global `references-log:` key is armed, fire the gated capture offer from
+`references/references-log.md` — "log this to your references-log? y/n", never silent. This
+mirrors the intent-gate's "Capture trigger — rationale signals" byproduct pattern: it rides the
+research you're already doing, at most one plain y/n, and skips rather than nags when unsure.
+Keep the bar high (offer-worthy guard in `references/references-log.md`); it is off entirely
+when the key is unset.
+
+## Ordering the decisions (dependency-first)
+
+Before running the per-question loop, **order the phase's open decisions by dependency and walk
+the tree upstream-first** — resolve a decision before the decisions whose *option space* depends
+on its lock. The decision-tree-traversal framing here was inspired by Matt Pocock's `grilling`
+skill ([`mattpocock/skills`](https://github.com/mattpocock/skills), MIT), which likewise resolves a plan's decisions branch by branch in
+dependency order.
+
+Why order matters: a downstream question's candidate options often only exist once an upstream
+choice is locked. Asking "which export columns?" before "export format — PDF or Excel?" wastes a
+round — the column set differs per format. Lock the format first; the column question reshapes.
+
+Practical rule:
+
+1. **List the N open decisions**, then sketch the dependency edges (A must lock before B when B's
+   options change with A). A one-line-per-edge note in the qa-log is enough; no formal graph.
+2. **Resolve roots first** — decisions with no unlocked upstream. Only surface a downstream Q once
+   every decision it depends on is locked.
+3. **When a lock reshapes a downstream Q**, re-frame that Q against the new constraint before
+   surfacing it (its options may have shrunk, or a new option may have appeared).
+4. **Independent decisions** (no edges between them) may be surfaced in any order — in Mode B they
+   can all run in parallel through steps 1-6.
+
+This is orthogonal to the "one question per message" rule: ordering decides *which* question is
+next; the per-message rule still means you surface exactly one at a time.
 
 ## The 7-step per-question loop
 
@@ -227,7 +271,9 @@ Tentative recommendation: <option> [🟢 / 🟡 / 🔴]
 
 If a structured choice UI is available, present 2-4 options with the recommendation marked, but the message body must still carry the research summary so the user can override on substance.
 
-**Hard rule:** ONE question per message. No "and while we're here, also Q5 + Q6 + Q7." If you've drafted 4 Q's, ask Q1, wait for the answer, then ask Q2.
+**Hard rule — one question per message.** No "and while we're here, also Q5 + Q6 + Q7." If you've drafted 4 Q's, ask Q1, wait for the answer, then ask Q2.
+
+**Hard rule — no citation, no send.** A surfaced recommendation whose "**Why** (research-backed)" block carries zero citation URLs is a **malformed message** — not a message you forgot to finish, a message you must not send. Treat a missing citation line the way you'd treat a syntax error: it blocks output. If you're about to present a decision and the research lines are empty, you skipped step 2 — go back and run it, or (if it genuinely qualifies) compress it *and cite the one URL that compression still requires*. There is no valid surfaced decision with an empty citation block.
 
 ## Banned patterns
 
@@ -235,6 +281,7 @@ If a structured choice UI is available, present 2-4 options with the recommendat
 - **"I recommend X because [my opinion]"** — opinion alone. Must cite ≥1 reference product or industry-standard source.
 - **Asking a list of 4+ questions in one message** — overloads the user, makes per-decision research impossible to surface clearly.
 - **Skipping the blind 2nd-agent because "the answer is obvious"** — obvious answers are where confirmation bias hides. The 2nd-agent step is cheap. Run it.
+- **Compress-by-default — declaring decisions "trivial / standard" to skip research** — the single most common way this protocol silently degrades. Compression is a named, justified exception (see "When to compress"); if you can't name which criterion applies, run the full loop. Skipping research is never one of the things compression buys you.
 - **Inventing flow shapes / labels / defaults** without checking what reference products do. Inventing patterns is a regression vs surveying the field.
 - **Tier 1 only** for UX decisions — too-professional design, fails novice audience.
 - **Tier 2 only** for compliance-touching decisions — friendly but non-compliant ships legal risk.
@@ -243,7 +290,7 @@ If a structured choice UI is available, present 2-4 options with the recommendat
 
 ## Documenting the Q&A
 
-Each brainstorm session lands in the project-wide `docs/brainstorming-qa-log.md`. The file must carry an index at the top (see `references/document-indexing.md`) — every per-phase section gets an anchor link.
+Each brainstorm session lands in the current branch's `docs/qa-log.d/<date>-<branch-slug>.md` fragment (monolith `docs/brainstorming-qa-log.md` fallback for un-adopted projects). **Fragments carry no TOC** — they are short-lived hot files that compile into the hot monolith at milestone close (`retention-drain.sh drain qa-log`, per `references/retention.md` §"Fragment convention") and are then deleted. The **compiled hot monolith** (`docs/brainstorming-qa-log.md`) is what must carry the index at the top (see `references/document-indexing.md`) — every per-phase section gets an anchor link, mirroring the journal-fragment rule (`references/retention.md` §"Fragment convention" → Journal).
 
 **Per-phase section template:**
 
@@ -296,13 +343,29 @@ A locked Q is NEVER deleted from the log. If the user later changes their mind, 
 
 ## When to compress
 
-For questions that pass these tests, you may compress the protocol:
+Compression is a **narrow, self-justified exception — not a default.** The failure this section
+exists to prevent is the inverse of its intent: the model quietly declares a real decision
+"trivial / already established," skips research, and opinion-polls the user. If you find yourself
+compressing more than the occasional decision in a phase, you are almost certainly abusing the
+loophole — stop and run the full protocol.
 
-- The decision matches an established pattern already locked in a previous phase of the same project (e.g. "use the same date-range preset list as a prior phase's filter")
-- The decision is a trivial mechanical detail (file naming, import order, etc.) with no UX or compliance surface
-- The user has explicitly said "go fast, skip the protocol on this one"
+**Before compressing, name the criterion out loud** (in the qa-log entry) — exactly one of:
 
-Compression = skip step 4 (blind 2nd-agent) and tag as 🟢 if matching an established pattern. **Never** skip step 2 (research) — even a 1-paragraph cite is enough.
+- **Established pattern** — this decision matches one *already locked in a previous phase of the
+  same project*, and you can cite the prior lock (phase + decision). Not "feels standard" — an
+  actual prior lock in this repo's qa-log.
+- **Trivial mechanical detail** — file naming, import order, lint config: no UX, no compliance, no
+  domain-vocabulary surface. If it touches any user-observable behavior, it is not trivial.
+- **User opt-out** — the user explicitly said "go fast, skip the protocol on this one" *for this
+  decision*. A general "move quickly" is not a per-decision opt-out.
+
+If you cannot name which one applies, it does not qualify — run the full protocol.
+
+**Compression = skip step 4 (blind 2nd-agent) only.** It NEVER skips step 2 (research): every
+locked decision, compressed or not, carries **≥1 citation URL** in its qa-log entry — even a
+single doc page. A locked decision with zero citations is a protocol violation, not a compressed
+decision. Tag a compressed established-pattern decision 🟢 (citing the prior lock); tag a
+compressed trivial decision 🟡.
 
 ## Anti-pattern recovery
 

@@ -18,6 +18,7 @@ Controller (the orchestrating agent) prepares each implementer prompt:
 - **Adapt-to-existing-patterns guidance** — when the plan was written before the codebase matured, the live code may have established conventions (typed wrappers, helper objects, naming) that the plan snippet doesn't reflect. The controller MUST tell the implementer to use the live conventions, not blindly copy the plan.
 - **First-of-its-kind detection** — if this task is the first to introduce a new tooling category (test runner, language toolchain, container runtime, contract format, etc.), the controller MUST either insert a bootstrap step or list the missing infra in the prompt.
 - **Test priority confirmation (when task involves tests)** — controller MUST confirm with the user which behaviors matter most BEFORE the implementer writes tests. You can't test everything. Critical paths + complex logic, not exhaustive edge-case enumeration. Surface the proposed test list to the user; let them prune. Note: **acceptance tests are NOT the builder's job** — they're written in step 1.5 by an independent verifier against `user-story.md` ACs. Builder writes unit + integration tests for the code it produces.
+- **Per-task verification command + no-placeholder plan check** — each task in the plan doc should carry an explicit, **runnable verification command** (the exact `pytest -k …` / `npm test -- -t …` / `curl …` / build invocation that proves THIS task works) plus its `Depends-on` edge; the controller passes that command into the implementer brief and confirms it ran green before accepting `DONE`. A plan entry that is a vague placeholder ("add validation", "wire it up later") with no concrete files-touched estimate and no verify command is **not ready to dispatch** — send it back to planning first. This tightens the plan→execute handoff: the implementer knows exactly what "done" means for this task, and the controller holds a concrete per-task oracle instead of only the phase-level test-evidence. Distinct from step 1.5 — that verifier checks `user-story.md` ACs independently; this is the builder's own per-task self-check. (General engineering practice; note the plan-doc's per-task detail is legitimate here because the plan is consumed immediately by this phase's cadence — unlike a long-lived issue body, where `issue-breakdown.md` deliberately keeps file paths OUT because they rot before an async agent picks the ticket up.)
 - **Vertical-slice TDD enforcement** — implementer MUST work in tracer-bullet cycles: 1 test → minimal impl → next test → minimal impl. Never write all tests first then all impl ("horizontal slicing" produces tests that verify imagined shape, not real behavior, and pass when behavior actually breaks). Refactor only while GREEN.
 - **Pre-flight assumption block (MANDATORY before any code)** — implementer MUST output an assumption block BEFORE writing the first line of code. Format:
   ```
@@ -46,10 +47,26 @@ Controller (the orchestrating agent) prepares each implementer prompt:
     - Every changed line must trace to a sentence in the task text.
   ```
   Rationale: Karpathy: "they sometimes change/remove comments and code they don't understand as side effects, even if it is orthogonal to the task at hand." Surgical-scope clause is the counter-instruction.
-- **Status reporting format** — DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT.
+- **Soft time budget (MANDATORY line in implementer brief)** —
+  ```
+  Soft budget: note the start time (`date`) in your pre-flight block, and
+  note a fresh `date` each time the controller confirms after a STOP —
+  active-work elapsed accumulates between a resume and the next STOP, so
+  waiting on controller confirmation never counts. Re-check elapsed time
+  every ~10 tool calls. Past ~15 minutes of active work, STOP and return
+  SPLIT_PROPOSED with (a) a summary of what is already done — leave it
+  UNCOMMITTED; nothing is committed or pushed until the controller's
+  split-vs-continue decision — and (b) a proposed split of the remainder
+  into vertical slices. Do not push through a 25-minute task silently.
+  ```
+  Soft means report-back, not kill: the controller reviews the proposal and either dispatches the slices or explicitly authorizes continuing (recorded in the journal "Plan deviations"; the task then ends in its single `feat(...)` commit as usual — the invariant is never relaxed). On a split, the done-so-far work becomes the first slice's starting state, committed by that slice under the normal one-task-one-commit rule — and the slice-1 dispatch **names the inherited uncommitted diff as explicit input**: slice 1's pre-flight block must restate assumptions covering that inherited code (adopt-or-flag — a flag returns BLOCKED and routes back to the controller for a re-split decision, the same way an FE mismatch goes back to the BE builder) before adding its own work. The budget is a **best-effort heuristic, not a trusted control**: an LLM's elapsed-time introspection is unreliable even with the `date` proxy, so the pre-split rule below is the primary (static) control and this is only the runtime backstop. A SPLIT_PROPOSED return also holds the background verification tail — per §"Background-by-default" the tail fires only on the claimed-complete statuses (DONE / DONE_WITH_CONCERNS), so verifier/CQ dispatch only after the controller's decision produces such a return. Rationale: the top wall-clock offenders in measured runs were 26-30 minute opaque synchronous implementer calls (top-2 single ops: 29m40s, 26m08s) — the controller learns nothing until they return.
+- **Controller pre-split rule (before dispatch)** — when the task's plan text predicts more than one file-cluster (touches multiple unrelated modules/directories, or its description contains several independently-shippable verbs), pre-split it into vertical tracer-bullet slices and dispatch each as its own task (one slice = one commit; same invariant as ever). The soft budget above is the runtime backstop; this rule is the cheaper static catch. Risk: over-splitting adds dispatch overhead — when unsure, keep it one task and let the soft budget decide at runtime.
+- **Status reporting format** — DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT | SPLIT_PROPOSED (soft budget exceeded; carries the done-so-far list + proposed slices).
 - **Builder Summary on completion** — required on split-phase dispatches; recommended on single-implementer dispatches. Schema in `builder-split.md` §Builder Summary format. Frontend builder's input includes the Backend Summary; mismatch flags go BACK to backend builder, never silently massaged on the client.
 
 The implementer commits the work as a `feat(...)` (or `test(...)` / `fix(...)` if appropriate) commit and reports back.
+
+For a **non-technical audience** (`adaptive`/`plain`), while building, watch for high-value app-improvement opportunities (frontend loading/images/lists; backend caching/pagination/indexes/N+1) and surface them inline in plain language + offer to apply, per `references/proactive-tips.md` (anti-nag rules apply: high-value only, one tip, never re-surface a declined one). Skipped under `audience: technical`.
 
 ## Step 1.5: Acceptance verifier
 
@@ -129,6 +146,49 @@ Different lifecycles. Unit tests change when impl changes; acceptance tests chan
 
 Acceptance verifier commits as `test(acceptance): phase X.Y AC1-N coverage` — separate from builder's `feat(...)` commit. Failed-then-fixed flows get a follow-up `fix(...)` commit from the builder, then the verifier re-runs (no new commit if tests didn't change).
 
+## Background-by-default: the verification tail (steps 1.5 → 2 ∥ 3)
+
+**The rule:** the post-implementation verification tail dispatches as
+`run_in_background` agents the moment the implementer returns **with a
+claimed-complete status (DONE / DONE_WITH_CONCERNS)** — a SPLIT_PROPOSED return is
+an intentionally-incomplete diff, so the tail holds until the controller's
+split-vs-continue decision produces a real return (reviewing a diff nobody claimed
+finished only manufactures noise); the controller does NOT sit idle watching them. Measured
+sessions ran validators sync + one-at-a-time (33m of one 4h19m session; 7 serial diff
+reviews = 24m in another) while the parallel primitive already existed and was already
+the habit for acceptance verifiers — the waste was pure default-habit, ~30-60m/phase.
+
+Dispatch timing follows the real data dependencies, nothing else:
+
+- **Code-quality review (step 3)** needs only the builder's diff + Builder Summary →
+  dispatch in background **the moment the implementer returns**. Pin its scope to THIS
+  task's commits at dispatch time — `<previous-task tip>..<builder-commit-SHA>` (on the
+  phase's first task that is the branch fork point; on later tasks it is NOT `merge-base..`,
+  which would sweep the whole phase-to-date diff back into every review). The pin exists
+  because the concurrently-running acceptance verifier lands a `test(acceptance)` commit
+  mid-flight, so a generic "review the diff" instruction would race against it (the old
+  sequential order never had this ambiguity).
+- **Acceptance verifier (step 1.5)** reads only the story + Builder Summaries (never
+  implementation source — its own contract above forbids it) and writes only
+  `tests/acceptance/*` → same background batch at implementer-return.
+- **Validator (step 2)** consumes the Acceptance Verifier Report (its lie-detection
+  cross-checks builder claims against it) → dispatch in background **the moment the
+  verifier report lands**. When step 1.5 is skipped (no `user-story.md`) but the full
+  cadence runs, the validator joins the initial batch at implementer-return. On a
+  **compressed** cadence there is no separate validator at all — the single merged
+  validator+CQ pass (per §"Cadence Compression" below) dispatches at implementer-return.
+
+**Block at the fixup step, not at dispatch.** Step 4 is the first point that needs both
+reports — that is the ONLY sync point. Between dispatch and there, the controller keeps
+working: journal-entry prep, next-task grounding (reading the next task's plan text +
+files), PR-draft scaffolding. Sync early only when a gate decision genuinely needs a
+result sooner.
+
+**Risk containment:** none of the three agents writes implementation source (the
+verifier writes only `tests/acceptance/*`), so background concurrency cannot conflict. A background agent that dies or returns BLOCKED surfaces
+at the fixup-step wait — treat a missing report exactly like a failed report (re-dispatch
+once, then surface to the user; never proceed to fixup with a verification hole).
+
 ## Step 2: Spec + AC compliance review (Validator)
 
 Independent subagent. **Strictly read-only on source.** Lens: **does the implementation satisfy the user story and spec, with no scope drift in either direction?**
@@ -145,7 +205,8 @@ Inputs (read-only):
 - docs/superpowers/specs/<...>-design.md (spec)
 - docs/superpowers/plans/<...>.md (plan)
 - Builder Summaries from step 1
-- Acceptance Verifier Report from step 1.5
+- Acceptance Verifier Report from step 1.5 (when step 1.5 ran; absent on skip/compress —
+  lie-detection then cross-checks against Builder Summaries + the diff only)
 - Implementation source on disk (git diff vs base branch)
 
 What you do (every check, every run):
@@ -159,11 +220,16 @@ What you do (every check, every run):
      call that logs "sent email" / "saved record" / "logged in user"):
      does the code actually do the asserted thing, or does it only log
      the assertion without performing the action? Compare against the
-     acceptance verifier's tool-trace report. False success = lie =
-     CRITICAL.
+     acceptance verifier's tool-trace report when it exists; without a
+     verifier report (skip/compress), the diff itself must demonstrate
+     the asserted behavior. False success = lie = CRITICAL.
    - For any "verified" / "tested" / "works" claim in builder
      summaries: trace to the actual test result (acceptance verifier
-     report). Unverifiable claim = CRITICAL.
+     report when it exists; otherwise a test the diff itself contains —
+     located via the Builder Summary's citation, independently
+     re-runnable by the validator; a narrative "tests passing" claim
+     alone never counts). Unverifiable claim = CRITICAL — absence
+     of a verifier report never downgrades an untraceable claim.
    Rationale: LLMs default to claiming success because the training
    reward favored confident outputs. The validator is the read-only
    harness component that catches this. (See Tejas Kumar's "Harnesses in
@@ -186,7 +252,7 @@ What you do (every check, every run):
 5. CLAUDE.md / convention adherence:
    - Any pattern divergence from established codebase conventions?
    - Any duplicate logic that should reuse an existing helper?
-6. Security (per `security-reviewer` lens but read-only):
+6. Security (per the security lens of `references/reviewer-brief.md`, read-only):
    - Auth checks on new endpoints?
    - Tenant isolation on multi-tenant queries?
    - Secrets/PII in logs?
@@ -263,13 +329,13 @@ After fix dispatched, re-run validator on the new diff. Iterate until CLEAN.
 
 ## Step 3: Code quality review
 
-> **Parallelize with step 2.** The validator (step 2) and this code-quality pass are
-> both independent read-only passes over the same diff — no data dependency once the
-> builder has returned. Dispatch them concurrently (one message, two `Agent` calls,
-> or `run_in_background` + `Monitor`) to cut wall-clock. Only the builder→reviewers
-> edge is sequential. See `references/harness-primitives.md` §4.
+> **Background-by-default.** This pass dispatches as a background agent at
+> implementer-return, in the same batch as the acceptance verifier; the validator joins
+> when the verifier report lands. The controller blocks only at the fixup step. Full
+> rule + dependency graph: §"Background-by-default: the verification tail" above;
+> platform mechanics: `references/harness-primitives.md` §4.
 
-Independent subagent (dispatch via `superpowers:requesting-code-review`, or an equivalent reviewer agent). Lens: **is the implementation well-built?** The same reviewer dispatch constraints as step 2 apply (`references/review-record.md`) — and steps 2/3 are intentionally **different lenses, not clones**: distinct prompts (ideally distinct tiers) is what makes a multi-reviewer pass worth more than one reviewer voting twice.
+Independent subagent — dispatch a general-purpose agent briefed per `references/reviewer-brief.md` (or `superpowers:requesting-code-review`, or your own reviewer). Lens: **is the implementation well-built?** The same reviewer dispatch constraints as step 2 apply (`references/review-record.md`) — and steps 2/3 are intentionally **different lenses, not clones**: distinct prompts (ideally distinct tiers) is what makes a multi-reviewer pass worth more than one reviewer voting twice.
 
 Standard concerns: design, naming, error handling, security, a11y (UI), performance, test quality.
 
@@ -338,6 +404,10 @@ Adoption note: on a project currently mid-phase, this takes effect from the next
 
 Separate `docs:` commit. Follows the 6-section schema in `journal-schema.md`. Covers the **whole task** (all of its commits), not each commit individually.
 
+**Write path:** the entry appends to the current branch's fragment file `docs/journal.d/<date>-<branch-slug>.md` — one fragment per BRANCH, not per task; if the fragment already exists, append to it. Fragments carry no TOC (short-lived hot files); at milestone close they are compiled into `docs/archive/journal/YYYY-MM.md` and deleted (see `references/retention.md` §"Fragment convention"). Projects without `docs/journal.d/` keep appending to the monolith path in the close-gate manifest (`journal`) — the gate accepts either.
+
+Naming is branch-, not phase-, keyed: under WIP=1 a branch and a phase are effectively the same unit of work, so this still reads as "one fragment per phase" in practice — but keying the filename on the branch specifically is what keeps two branches active at once (or a branch that outlives one phase) from colliding on a shared filename.
+
 ### Approval timing — the `close-gate` policy key
 
 Projects that adopt a human-blocking close approval (a CLAUDE.md rule that the Task Close Report awaits the user's "ok" before commit) control WHERE that approval sits via `close-gate: per-task | pr-boundary` in CLAUDE.md:
@@ -378,6 +448,27 @@ After the phase's work is validated (step 2) and quality-reviewed (step 3) — t
 
 Why here: this is the repo's own `verify-loop.md` ("give the LLM a way to check its own work, or it self-grades and lies") **turned on the human**, and structurally the validator's lie-detection (cross-reference a claim against the diff) applied to the user's *claimed understanding* instead of a builder's claimed work. Reversible behavior — **NOT an ADR** (fails the `adr.md` hard-to-reverse criterion).
 
+## Track close — distill, then archive
+
+Runs once per closed track (after merge), before the milestone-close drain (`references/retention.md` §"The three tiers").
+
+1. **Distill.** Read the track's `docs/superpowers/specs/*` and `plans/*`. Extract ONLY what is **not derivable from a live source** — the reasoning of the day, the rejected options and why, the traps hit. Write it as a FACT entry (schema: `references/journal-schema.md` §"The FACT entry") into the current journal fragment (`docs/journal.d/<date>-<branch-slug>.md`, per the "Write path" note under Step 5). Length is unbounded; **tense is not** — every claim is about that day.
+
+   **Do not copy** anything derivable: file inventories (git has them), test results (the run has them), the PR body (GitHub has it), code blocks (the code has them, and it has since moved). Measured: 26.4% of the sampled corpus's spec bytes were literal code blocks — every one of them a copy that has since drifted.
+
+2. **Archive the working docs.** For each spec/plan of the closed track:
+
+   ```bash
+   bash scripts/retention-drain.sh archive-working docs/superpowers/specs/<file>.md
+   bash scripts/retention-drain.sh archive-working docs/superpowers/plans/<file>.md
+   ```
+
+   They move to `<archive_dir>/working/…` — out of the hot read/grep path, still on disk, still searchable. **Never `rm`** — deletion is deferred until distill quality is proven over 2-3 tracks (`references/retention.md` §"The three tiers", Deep-cold row). Record the pre-move path + the SHA in the FACT entry's `Source:` field.
+
+3. **Commit** as a `docs:` commit alongside the track's journal entry.
+
+**Why the spec/plan leave the hot path.** They are **working state**, not documentation — consumed by the cadence during the track and false the moment the track lands. Measured: **12 of 12** sampled plans described a future that had already shipped; a spec still named a rendering library the code had stopped using three months earlier. An agent reading them does not gain context — it is poisoned by a confident description of a system that no longer exists. This is the same MOMENT-vs-STATE law that governs journal tense (`references/journal-schema.md` §"Tense"): *a document that records a MOMENT does not rot; a document that claims a STATE always rots* — a spec/plan is written entirely in STATE claims ("the system does X"), so by definition it cannot outlive the track that produced it. The FACT entry is the MOMENT-shaped residue that survives; the spec/plan is the STATE-shaped scaffold that is archived once it has served its purpose.
+
 ## Controller Anti-Patterns
 
 - Letting the implementer read the plan file directly — wastes context, lets implementer skip the controller-added "adapt" guidance.
@@ -386,8 +477,11 @@ Why here: this is the repo's own `verify-loop.md` ("give the LLM a way to check 
 - Skipping the acceptance verifier (step 1.5) on a user-observable phase because "the unit tests pass" — different concern; unit tests verify the implementation's internals, acceptance tests verify the user-story ACs. Both required.
 - Skipping the validator (step 2) because "code-quality review will catch it" — different lens. Validator covers correctness-vs-promise (AC coverage, scope drift, security gaps relative to spec). Code-quality covers craftsmanship (design, naming, bloat). Combining them buries critical findings under nits.
 - Skipping code quality review (step 3) because validator passed — different bug class.
+- **Blocking the main loop on a synchronous validator / code-quality review when nothing needs the result yet** — the verification tail is background-by-default; the only sync point is the fixup step. Sitting idle through a 10-30 minute sync review call is the measured top waste. Dispatch background, keep working, wait at step 4.
 - Marking task complete with open Important findings unaddressed — apply defer-vs-fix triage instead.
 - **Dispatching implementer without enforcing the pre-flight assumption block** — controller loses the chance to catch wrong assumptions before code is written; first surface of the assumption becomes the diff, by which point sunk-cost bias makes correction expensive.
+- **Dispatching a task whose plan text predicts multiple file-clusters as one implementer, or dispatching without the soft-budget line** — 26-30 minute opaque sync calls were the single worst measured UX offender; the pre-split rule is the static catch, the soft budget the runtime backstop. Both belong in every dispatch.
+- **Ignoring a SPLIT_PROPOSED return (telling the implementer "just finish it") without recording why** — the proposal is the budget doing its job; either dispatch the slices or note the authorization-to-continue in the journal "Plan deviations". Silently overriding it re-creates the opaque long call the budget exists to kill.
 - **Letting implementer skip the surgical-scope clause** — silent drive-by edits (reformatting / "improved" comments / dead-code purge orthogonal to task) pollute the diff and break review traceability. Every changed line must trace to the task text.
 - **Code reviewer skips the bloat-smell checklist because "design looks clean"** — clean design ≠ minimum design. Bloat smell is its own pass; run it explicitly.
 - **Cross-layer phase dispatched as a single implementer** — atomic-commit invariant breaks; reviewers can't isolate BE vs FE concerns; FE+BE conflate into one diff. Split per `builder-split.md`.

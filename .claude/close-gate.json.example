@@ -2,7 +2,7 @@
   "phase_docs_glob": "docs/superpowers/specs/*-phase-{PHASE}-*",
   "plan_glob": "docs/superpowers/plans/*-phase-{PHASE}-*",
   "journal": "docs/iteration-journal.md",
-  "handoff_glob": "docs/handoff/*-phase-{PHASE}-handoff.md",
+  "status_doc": "docs/STATUS.md",
   "smoke_a_glob": "docs/smoke/*-phase-{PHASE}-*checklist*",
   "smoke_b_glob": "tests/e2e/**/*phase-{PHASE}*",
   "acceptance_glob": "tests/acceptance/**/*phase-{PHASE}*",
@@ -11,5 +11,14 @@
   "test_runs_required": 1,
   "user_visible": true,
   "exempt_user_story": false,
-  "exempt_changelog": false
+  "exempt_changelog": false,
+  "retention": {
+    "hot_caps": { "resume": [200, 25], "status": [300, 30], "journal_hot": [0, 100], "qa_log_hot": [0, 50], "changelog_hot": [0, 50] },
+    "count_caps": { "specs": 10, "plans": 10, "docs_total": 150 },
+    "archive_dir": "docs/archive",
+    "coverage_floor_kb": 50,
+    "journal_dir": "docs/journal.d",
+    "qa_log_dir": "docs/qa-log.d",
+    "changelog_dir": "changelog.d"
+  }
 }

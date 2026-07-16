@@ -1,6 +1,6 @@
 # CONTEXT.md — Ubiquitous Language Glossary
 
-Project-wide domain glossary. Adopted from Eric Evans's ubiquitous-language idea from *Domain-Driven Design* (2003) and Matt Pocock's `grill-with-docs` skill ([mattpocock/skills](https://github.com/mattpocock/skills)).
+Project-wide domain glossary. Adopted from Eric Evans's ubiquitous-language idea from *Domain-Driven Design* (2003) and Matt Pocock's grilling skills ([`mattpocock/skills`](https://github.com/mattpocock/skills) → `skills/productivity`; the idea originally lived in a `grill-with-docs` skill, since reorganized into `grilling`).
 
 **Why this exists:** when AI replies stay verbose and re-explain domain terms every phase, the project is missing a shared-language anchor. CONTEXT.md anchors the vocabulary that code + docs + chat all use. Benefits: terser AI replies, tighter thinking traces, easier-to-navigate code, fewer naming drifts between spec ↔ implementation.
 

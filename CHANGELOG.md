@@ -10,6 +10,76 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 Nothing yet.
 
+## [3.0.0] - 2026-07-15
+
+### Added
+
+- Ships a deterministic close-gate that blocks pushing an incomplete phase branch.
+- Adds three standalone commands — `/research`, `/review`, and `/handoff` — so research, code review, and session handoff can each run on their own instead of only inside a full project cycle.
+
+### Removed
+
+- **BREAKING** — the unattended ("AFK") run mode is removed from this plugin and now lives in a separate project; a project that referenced it must point at that project instead. The judgment for whether a request is safe to run unattended stays part of this plugin.
+
+## [2.0.0] - 2026-07-14
+
+### Added
+
+- Adds a required evidence field to the journal's closing entry, so a decision can no longer be recorded without stating what supports it.
+- Adds a file-count cap alongside existing size caps for retained project documents, catching growth that many small files caused but no size limit noticed.
+
+### Changed
+
+- **BREAKING** — closing a phase now requires a complete journal entry (decision, reasoning, evidence, rejected alternatives, source). A project upgrading from an earlier version must write one before its next phase close.
+- Retires two standing documentation requirements (kept PR-draft bodies, a separate handoff file) in favor of the new journal entry and treating GitHub itself as the source of truth.
+
+## [1.5.0] - 2026-07-11
+
+### Added
+
+- Adds a citation-coverage check for locked research decisions, flagging any decision that carries no supporting link.
+
+### Changed
+
+- Improves guided GitHub repository setup — it can now create the repository for you, instead of only linking to GitHub's own setup guide.
+- Strengthens the research protocol: decisions are ordered by dependency, "skip research" is now a named and justified exception rather than a default, and a recommendation with no citation is treated as invalid output.
+
+## [1.4.0] - 2026-07-10
+
+### Added
+
+- Adds a plain-language mode for non-technical users, with adjustable tone, first-use term explanations, and screenshot fallbacks.
+- Adds guided GitHub repository setup and a guided deploy offer at project finish, for users without a technical background.
+- Adds proactive, opt-in suggestions for high-value best practices as they come up during development.
+- Adds an opt-in personal references log that can capture and analyze external material (repos, articles, videos) you share during research.
+
+## [1.3.0] - 2026-07-10
+
+### Added
+
+- Adds project cognition memory: captures the stated intent behind decisions (the "why"), with a capped, cited, auto-distilled summary document.
+
+## [1.2.1] - 2026-07-09
+
+### Fixed
+
+- Fixes task-list enforcement so it reliably requires a real task list (at least three items) on every run, instead of silently accepting a single item or none at all.
+
+## [1.2.0] - 2026-07-09
+
+### Changed
+
+- Documentation cleanup: completes the reference index and folds a duplicate page into its parent document.
+
+## [1.1.0] - 2026-07-09
+
+### Added
+
+- Adds a fragment-based writing convention for shared append-only documents (journal, QA log, changelog), so parallel branches of work stop colliding on the same file.
+- Adds document retention: size and line caps on hot documents, an archival step at milestone close, and a human-gated distillation step.
+- Adds a context-floor wiring check and a task-boundary reminder to clear context between phases.
+- Adds a task-list-first enforcement hook, blocking the first edit of a session until a task list exists.
+
 ## [1.0.0] - 2026-07-07
 
 ### Added
@@ -132,6 +202,7 @@ Initial release.
 - Adds a research protocol for locking design decisions, backed by a second, independent reviewer check.
 - Adds Architectural Decision Records, a domain glossary convention, and delivery templates (issue breakdown, changelog, PR body).
 
-[Unreleased]: https://github.com/Victoriakaey/project-life-cycle/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/Victoriakaey/project-life-cycle/compare/v3.0.0...HEAD
+[3.0.0]: https://github.com/Victoriakaey/project-life-cycle/compare/v1.0.0...v3.0.0
 [1.0.0]: https://github.com/Victoriakaey/project-life-cycle/compare/v0.4.0...v1.0.0
 [0.4.0]: https://github.com/Victoriakaey/project-life-cycle/releases/tag/v0.4.0

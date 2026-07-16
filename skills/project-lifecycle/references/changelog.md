@@ -66,7 +66,8 @@ PR with no category label → lands in `Other Changes` catch-all → fix before 
 Every PR that ships a user-visible change MUST:
 
 1. **Carry exactly one category label** from the taxonomy above.
-2. **Add a line to `CHANGELOG.md` `[Unreleased]`** under the right Keep-a-Changelog category, in the same commit set. Reviewers reject PRs that change skill behavior without a changelog line.
+2. **Write a `changelog.d/<date>-<branch-slug>.md` fragment** — one file per branch, not per PR/task: if the branch's fragment already exists (e.g. a second commit on the same branch), append to it rather than creating a second file — same one-fragment-per-branch rule journal and qa-log follow, per `references/retention.md` §"Fragment convention". The fragment must contain at least one category-tagged bullet (`### <Category>` heading matching the taxonomy below + the bullet), in the same commit set. Reviewers reject PRs that change skill behavior without a changelog fragment. Compilation into `CHANGELOG.md` `[Unreleased]` happens at `/release` time (`references/release-process.md`), not per-PR — see `references/retention.md` §"Fragment convention" for the naming scheme and the post-merge single-writer boundary this fragment layout depends on.
+   - **Fallback (un-adopted projects):** if the repo hasn't wired up `changelog.d/`, edit `CHANGELOG.md` `[Unreleased]` directly instead — this remains a fully supported path, just not the default for projects that have adopted the fragment convention.
 3. **Include a release-notes-style PR body** (per `handoff-template.md` 3-section format: §1 What was done + §2 Why this approach + §3 Requirements satisfied). The §1 prose intro becomes the line GitHub surfaces in the release notes when the PR is merged.
 4. **Title in conventional-commits style** (`feat: ...`, `fix: ...`, `feat!: ...` for breaking, `docs: ...`, etc.) — this is what auto-release-notes displays as the bullet text alongside the PR number.
 
@@ -82,9 +83,12 @@ When in doubt, add the entry. Over-documentation is recoverable; under-documenta
 
 ## Releasing (cut a version)
 
+Prefer `/release`, which automates this entire walkthrough (and, under the fragment convention, **compiles all `changelog.d/*.md` fragments into `[Unreleased]` before the rename** — see `references/release-process.md` §"Per-release artifact updates" step 1). The manual steps below are the fallback when `/release` can't run; on a fragment-adopting project, do step 0 first.
+
 When `[Unreleased]` has accumulated enough to warrant a tag:
 
-1. Decide the version bump per SemVer:
+0. **(fragment-adopting projects)** Compile `changelog.d/*.md` fragments into `[Unreleased]` first — group bullets under the 6 categories, byte-verify they landed, then `git rm` the fragments (same atomic commit as the rename below). Skip if the project hasn't adopted `changelog.d/`.
+1. Decide the version bump per SemVer — from the effective set (inline `[Unreleased]` **plus** any not-yet-compiled `changelog.d/` fragments):
    - **MAJOR** if any `breaking` PR is in the unreleased set.
    - **MINOR** if any `feature` / `new-reference` / `new-command` is in.
    - **PATCH** if only `fix` / `docs` / `chore` are in.
@@ -101,7 +105,7 @@ When `[Unreleased]` has accumulated enough to warrant a tag:
 ## Anti-patterns
 
 - **PR opened without a category label** → next release notes land items in "Other Changes" catch-all; reviewer asks author to label before merge.
-- **PR opened without a CHANGELOG `[Unreleased]` entry** on a user-visible change → blocked; author adds the line in a follow-up commit on the same PR.
+- **PR opened without a CHANGELOG fragment (or, on un-adopted projects, an `[Unreleased]` entry)** on a user-visible change → blocked; author adds the fragment (or line) in a follow-up commit on the same PR.
 - **CHANGELOG entries written in commit-message tone** ("refactor X for clarity") → rewrite in user-facing tone ("Renamed the `validator` agent's output section from `Spec compliance` to `AC coverage`"). Audience is upgraders, not git archaeologists.
 - **Bullets without file / endpoint / command identifiers** ("Improved the cadence" — improved how? which step?) → name the artifact; bullet must be greppable.
 - **Releases cut without renaming `[Unreleased]` first** → next contributor adds entries under the wrong section; rebase to fix or accept the drift in the following release.

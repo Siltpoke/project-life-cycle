@@ -30,6 +30,10 @@ Example:
 /ship Build invoice reminders for invoices unpaid for more than 7 days.
 ```
 
+## Step 0 — Materialize the chain as a task list (FIRST action, before Phase 0)
+
+Before dispatching any subagent, the controller emits the phase chain as a `TaskCreate` task list — **one `TaskCreate` call per phase below** (Phase 0 research → … → the final smoke + PR), plus the 3 human checkpoints as their own tasks. `TaskCreate` creates one task per call; enumerate each phase, never just announce "N-phase chain". The wrap-up phases (journal / smoke / PR / test-evidence) are **non-optional tasks**. Mark each `in_progress`→`completed` via `TaskUpdate` as the chain advances. Announcing the chain length without emitting the tasks is a skip — the tail phases are the ones that silently drop once the build "feels done".
+
 ## Chain (controller executes in order)
 
 ### Phase 0 — Codebase research (read-only)
@@ -163,7 +167,7 @@ Commits as `docs(journal): <phase> <feature>`.
 ### Phase 10 — Smoke + PR
 
 - Dual-track smoke per `~/.claude/skills/project-lifecycle/references/smoke-tracks.md` (Track A manual checklist + Track B Playwright/equivalent acceptance test set — Track B = the acceptance tests from Phase 5)
-- Handoff doc per `~/.claude/skills/project-lifecycle/references/handoff-template.md`
+- No handoff doc — that file was retired; its one non-derivable content (findings/gotchas) lands in the journal FACT entry at track close (`~/.claude/skills/project-lifecycle/references/journal-schema.md` §"The FACT entry"; `~/.claude/skills/project-lifecycle/references/cadence.md` §"Track close"), the PR body's §1-3 come from `~/.claude/skills/project-lifecycle/references/handoff-template.md`'s retained appendix template instead
 - Push branch
 - Open PR with 3-section body (§1 What was done w/ Use cases / §2 Why this approach / §3 Requirements satisfied — close each AC explicitly)
 - Post test evidence as PR COMMENT (raw output blocks per `~/.claude/skills/project-lifecycle/references/ci-cd-gates.md`)
@@ -183,6 +187,7 @@ Everything between checkpoints (research, build BE, build FE, verify, validate, 
 
 ## Anti-patterns
 
+- Running the chain without first emitting each phase as a `TaskCreate` task (Step 0) → the wrap-up phases (journal / smoke / PR) silently drop once the build "feels done".
 - Using `/ship` for a 1-line fix → just do it inline.
 - Using `/ship` for an entire milestone → too coarse; use phase-level `project-lifecycle` workflow.
 - Skipping HUMAN CHECKPOINT 1 because "the story is obvious" → the obvious feature is where scope creep starts.
@@ -198,5 +203,5 @@ Everything between checkpoints (research, build BE, build FE, verify, validate, 
 - `~/.claude/skills/project-lifecycle/references/cadence.md` — full per-task cadence (6 steps) this command automates
 - `~/.claude/skills/project-lifecycle/references/user-story.md` — story format used at Phase 1
 - `~/.claude/skills/project-lifecycle/references/builder-split.md` — BE/FE split used at Phase 3+4
-- `/plan` — heavier planner for non-vertical-slice work
-- `/code-review` — manual reviewer for diffs that didn't go through `/ship`
+- `superpowers:writing-plans` (or your own planning command) — heavier planner for non-vertical-slice work
+- `/review` — PLC-native reviewer for diffs that didn't go through `/ship` (dispatches `references/reviewer-brief.md`)

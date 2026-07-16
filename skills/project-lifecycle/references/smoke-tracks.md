@@ -91,7 +91,7 @@ Track A passes, Track B fails → **debug Track B first.** Either the test is wr
 
 ## Test runner one-liner
 
-A `make phase-checks PHASE=X.Y` (or equivalent task-runner target) should run the project's BE tests + FE unit tests + E2E suite scoped to the phase. Its output feeds the handoff doc §5 + §6.
+A `make phase-checks PHASE=X.Y` (or equivalent task-runner target) should run the project's BE tests + FE unit tests + E2E suite scoped to the phase. Its output feeds the journal FACT entry's test evidence + the PR body.
 
 Example shape for a Python BE + Node FE project (adapt to your stack):
 ```make

@@ -96,7 +96,7 @@ flowchart LR
 | Phase PRD（opt-in） | `docs/superpowers/specs/…-prd.md` |
 | Phase plan | `docs/superpowers/plans/…` |
 | Research notes | `docs/research/…` |
-| Handoff | `docs/handoff/YYYY-MM-DD-phase-X.Y-handoff.md` |
+| 阶段交付 handoff | *已退休* —— §7 的 findings 折进 journal FACT（`references/journal-schema.md`）。**不是** `/handoff` 连续性命令（那个写 `docs/RESUME.md`）。 |
 | Journal | `docs/iteration-journal.md`（append-only，顶部 TOC） |
 | Milestone state | `docs/RESUME.md` |
 | 全计划地图 | `docs/ROADMAP.md`（milestone 表 + 状态，milestone 边界更新） |
@@ -204,7 +204,7 @@ skills/project-lifecycle/
     ├── journal-schema.md                 6-section journal 条目模板
     ├── defer-vs-fix.md                   review finding 分流规则
     ├── diagnose-loop.md                  硬 bug 纪律：反馈循环 → 排序假说 → 修 + 回归。Iron Law + 3-Fix Rule
-    ├── close-gate.md                     确定性 done-gate —— task-done / phase-done 检查（journal header / 新鲜 test-evidence / handoff sections / CHANGELOG touch / smoke / ROADMAP），可移植脚本 + manifest，pre-push hook 接线（不可绕过层）+ close-gate policy key（per-task | pr-boundary —— 人类阻塞批准的位置，自我认证攻击面写明）
+    ├── close-gate.md                     确定性 done-gate —— task-done / phase-done 检查（journal header / 新鲜 test-evidence / CHANGELOG touch / smoke / ROADMAP），可移植脚本 + manifest，pre-push hook 接线（不可绕过层）+ close-gate policy key（per-task | pr-boundary —— 人类阻塞批准的位置，自我认证攻击面写明）
     ├── review-record.md                  可信 AI review —— reviewer dispatch 约束（fresh context / 只读 / tier 不对称 / refute-first / file:line 证据门 / verdict 由代码算），PR 上的双向 review record（reviewer 报告原样 + builder 逐条回应），finding→fix 规则（reviewer snippet = untrusted input；final-pass 强制），覆盖窗口检查
     │
     │  ── 交付 + CI ──

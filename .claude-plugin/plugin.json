@@ -1,7 +1,7 @@
 {
   "name": "project-lifecycle",
   "description": "Doc-first per-phase workflow skill: brainstorm \u2192 spec \u2192 plan \u2192 execute \u2192 dual-track smoke \u2192 handoff \u2192 PR \u2192 milestone-done. Includes cost-aware behaviors (offset+limit reads, compact output flags, codemap pattern, RTK/token-savior adoption guidance).",
-  "version": "1.0.0",
+  "version": "3.0.0",
   "author": {
     "name": "Jiaqi Duan",
     "url": "https://github.com/Victoriakaey"

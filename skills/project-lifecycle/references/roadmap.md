@@ -88,6 +88,8 @@ ROADMAP links into RESUME ("current milestone detail → see RESUME") and RESUME
 
 Applies to the project's **read-first status doc** (RESUME.md in this skill's default layout; STATUS.md in some projects) — NOT to the ROADMAP milestone table, which stays one line per milestone forever.
 
+> The ring is the SPECIAL CASE (for the read-first status doc) of the generalized milestone-close archival drain in `references/retention.md` §"The drain algorithm" — same window (active + 2 closed), same verbatim-move + pointer-stub rules, applied there to every known append-only doc.
+
 The structural bug this fixes: an append-forever close protocol grows the read-first file until a single Read can't load it (observed on a real project: 634 lines / 76k+ tokens — "read first every session" physically degraded). Closing paragraphs are write-once-read-rarely; the active section is read every session. Separate them.
 
 **The ring (capacity 2).** The status file's active section ("Now" / current phase) holds the active entry + the **2 most recent closed entries** only. At every milestone/track close, in ONE edit:

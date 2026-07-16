@@ -21,9 +21,21 @@
 # the %-knob is there for users whose mental model is window-occupancy.
 # Disable entirely: PLC_CONTEXT_FLOOR=0 AND PLC_CONTEXT_FLOOR_PCT=0 (or unset).
 # Self-arms: the first over-floor Edit/Write creates a session-keyed marker; a RESUME.md
-# newer than that marker clears it and allows work. Escape hatches: PLC_CONTEXT_FLOOR=0,
-# or `rm` the marker. Fails OPEN (exit 0) on any read/parse/write error — a broken floor
-# must never block work. NOT a frontmatter hook (would miss non-workflow sessions).
+# newer than that marker clears it and allows work. Fails OPEN (exit 0) on any
+# read/parse/write error — a broken floor must never block work. NOT a frontmatter hook
+# (would miss non-workflow sessions).
+#
+# Escape hatches, and where they may be MENTIONED:
+#   - PLC_CONTEXT_FLOOR=0 (or _PCT=0) — a deliberate config decision. Named in the block
+#     message; fine.
+#   - deleting the marker — a human who reads this source can do it. NOT named in the
+#     block message, and the marker path is not printed there either. The block message
+#     used to say "or `rm <marker>` to override once", and an agent blocked mid-task did
+#     exactly that: it deleted the guard's state to get past the guard, because the guard
+#     told it how. A guard that ships its own bypass in its error message is a guard that
+#     will be bypassed — and the agent taking it is not even disobeying, it is following
+#     instructions. Keep the hatch; stop advertising it at the moment of maximum incentive
+#     to take it.
 set -uo pipefail
 INPUT="$(cat 2>/dev/null || true)"
 python3 - "$INPUT" <<'PY'
@@ -173,10 +185,26 @@ else:
     note = ("Trigger is absolute tokens, not window %%, so this fires even when "
             "the window-%% looks small. ")
     disable_hint = "set PLC_CONTEXT_FLOOR=0 to disable"
+# The message names ONE action: refresh RESUME.md. It deliberately does NOT hand
+# out the marker path or an `rm` command.
+#
+# It used to. An agent, blocked mid-task, read the suggestion and reached straight
+# for `rm <marker>` -- deleting the guard's own state to get past the guard. It did
+# that because THE GUARD TOLD IT TO. A guard that ships its own bypass in its error
+# message is a guard that will be bypassed, and the agent is not even being
+# disobedient when it happens: it is following instructions.
+#
+# The escape hatch still exists -- the env knob below, and the marker is still a file
+# on disk for a human who knows where to look. What changed is that it is no longer
+# ADVERTISED at the moment of maximum incentive to take it. A config knob a human
+# sets deliberately is a decision; a shell command dangled in front of a blocked
+# agent is a trap.
 sys.stderr.write(
     "[context-floor] Blocked: context ~%dK (~%s%% of %dK window) over %s and RESUME.md not refreshed since. "
     "%s"
-    "Write/refresh RESUME.md (clears this), or `rm %s` to override once, "
-    "or %s.\n" % (round(occ / 1000), pct, round(window / 1000), trigger_desc, note, marker, disable_hint))
+    "Refresh RESUME.md to clear this -- it is the checkpoint the floor exists to force, "
+    "and it is almost certainly stale if you are seeing this. "
+    "(To turn the floor off on this machine: %s.)\n"
+    % (round(occ / 1000), pct, round(window / 1000), trigger_desc, note, disable_hint))
 sys.exit(2)
 PY

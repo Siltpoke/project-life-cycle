@@ -20,7 +20,9 @@ Runs as a read-only pass in the main loop, NOT a subagent (cost). Discipline: no
 | **Archetype** | what *kind* of work is this — make-new / make-production / delete-simplify / tune-PMF / keep-mature? | auto-infer from language → reshapes the chain Size routed into (which cadence steps fire + default oracle + diff direction). Default `Builder` (full baseline). See `#archetype--chain-shape-selector` |
 | **AFK-eligibility** | at least one strong oracle (specified/differential/golden)? scope fence definable? no irreversible class? no design judgment? | all four hold → offer AFK mode (never auto-start); any fails → HITL as usual |
 
-The AFK axis emits the same HITL/AFK vocabulary as `issue-breakdown.md` — one taxonomy, two scopes: request-level here, slice-level there. Eligible → the gate **offers** a loop contract per `afk-loop.md` ("this qualifies for AFK; want a loop contract?") and the user accepts or declines. The gate never starts a loop on its own.
+The AFK axis emits the same HITL/AFK vocabulary as `issue-breakdown.md` — one taxonomy, two scopes: request-level here, slice-level there. Eligible → the gate **offers** a loop contract ("this qualifies for AFK; want a loop contract?") and the user accepts or declines. **The gate never starts a loop on its own.**
+
+The contract has 4 mandatory fields — **Goal** (machine-checkable, fence-scoped) / **Stop** / **Budget** (rounds + hours are a floor; a blank Budget is not a contract) / **Report** — and a **runtime** executes it. This skill does not ship one. **This axis is the judgment half, and it belongs here regardless**: deciding *whether* a request may run unattended is a question about the request, not about the runtime. A project with no runtime installed can still run this gate — it just answers "yes, and you'd need one."
 
 ## Stage 2 — Confirm intent
 
@@ -29,9 +31,11 @@ The AFK axis emits the same HITL/AFK vocabulary as `issue-breakdown.md` — one 
 1. Step-back: name the problem class — **bug / missing-capability / design-choice / scope-undefined**
 2. Restate: "I read your intent as X"
 3. **Default path (ambiguous but assumable):** lay out the specific assumptions filling the blanks → user one-tap approve or corrects only the wrong line.
-4. **Exception path (ask):** ask **one** highest-Gain/Q question ONLY when a key ambiguity cannot be resolved by a reasonable assumption and getting it wrong would require redoing significant work.
+4. **Exception path (ask):** ask **one** highest-Gain/Q question ONLY when a key ambiguity cannot be resolved by a reasonable assumption and getting it wrong would require redoing significant work. **When the user is a non-technical vibe coder struggling to describe the problem** (per `references/audience-tone.md`, `adaptive`/`plain` audience), the strongest "one question" is often not words: offer the screenshot/example cue instead of or alongside the text question — *"No worries — you can paste a screenshot, or point me at an example of what you WANT it to look like. That tells me more than words."* Skipped entirely under `audience: technical`.
 
-**Brainstorm handoff:** large work → seed `superpowers:brainstorming` (Per-Phase Workflow step 1) with the confirmed intent. Do NOT re-ask intent downstream — the gate's confirmed intent IS the brainstorm seed. (Gate = first 10 seconds of a big job; full lifetime of a small one.)
+**Brainstorm handoff:** large work → seed `superpowers:brainstorming` (Per-Phase Workflow step 1) with the confirmed intent. Do NOT re-ask intent downstream — the gate's confirmed intent IS the brainstorm seed. (Gate = first 10 seconds of a big job; full lifetime of a small one.) **At new-project / first-milestone kickoff for a non-technical audience** (`adaptive`/`plain`), run the repo-intake first — a plain-language "do you have a GitHub link?" with a what-is-GitHub explainer + an offer to create the repo _for_ them (prereq-gated `gh` ladder; account sign-up + `gh auth login` stay the user's steps; guide-link fallback) when absent, ensuring local git regardless, never blocking (`references/repo-intake.md`). Skipped under `audience: technical`. This runs once at kickoff, not on mid-phase ad-hoc requests.
+
+**Early screenshot mention (once):** at the first project kickoff of a session, drop a single low-key note that this option always exists — *"Tip: if you ever can't put something into words, just send a screenshot or an example — works great."* One time, not per request. Governed by the `audience:` key (`adaptive`/`plain` only; skipped under `technical`). See `references/audience-tone.md`.
 
 ## Stage 3 — Reframe + sharpen
 
@@ -51,6 +55,26 @@ Self-refine (whole block, once): before surfacing to the user, critique the draf
 ```
 
 For a large request, this sharpened block becomes the seed the brainstorm + `user-story.md` expand on (numbered ACs = the formal version of the expectation + oracle). For a single cadence task, it becomes the task text + ACs handed to the implementer.
+
+## Capture trigger — rationale signals
+
+During the gate (or the brainstorm it seeds), a user often says more than an instruction — a
+*why*, a quality bar, or a keep/drop call ("because the reviewer chokes on 800+ line diffs",
+"good enough here means under 200ms", "keeping the legacy adapter — two client repos still
+import it"). When one of these rationale signals fires (`cognition.md` §"When to capture"),
+offer to capture it via the `/capture` flow **as a byproduct** of the gate — at most two
+elicitation questions (`cognition.md` §"Elicitation"), never a form. This is the **primary**
+capture surface; `/capture` run standalone mid-session is the manual complement.
+
+**Sibling signal — reference-share.** The same gate also watches for a *reference-share*: when
+the user brings in an offer-worthy external reference (a repo/paper/blog/tool/video/talk link, an
+offline doc by local path / DOI such as a downloaded PDF, or an explicitly-shared AI-chat log /
+screenshot / pasted note — illustrative, not exhaustive; the log header's `Type` enum is live)
+for analysis, offer to capture it
+into their global references-log — the gated y/n offer in `references/references-log.md`, armed
+only by the user-global `references-log:` key (default off). This is a distinct capture surface
+from the rationale `/capture` above: rationale → the project's cold intent-log; a shared
+reference → the user's cross-project references-log.
 
 ## Oracle ladder
 
@@ -83,7 +107,7 @@ Five archetypes, modelled on the energy a piece of work carries (not on a job ti
 | **Prototyper** | "try", "spike", "throwaway", "explore", "brand-new idea", "churn a few" | **off**: user-story, acceptance verifier (1.5), validator (2), code-quality, 80% coverage, security gate. Output is **NOT directly mergeable to main** — a good prototype **re-enters as Builder** through the full chain. Touches secrets/auth → force reclassify (not a safe Prototyper lane) | implicit (state plainly: "judged by vibes, accept that") | add, marked disposable | `experiment` |
 | **Sweeper** | "delete", "simplify", "unship", "remove", "optimize", "this is too slow/bloated" | **forbid new surface**; **on**: regression suite (deletion safety); **keep** validator (do existing ACs still pass after the simplification?); **off**: user-story | differential (behavior before == behavior after) | **subtract** — net-negative LOC OR perf-positive (the deterministic teeth, below) | `sweep` + record what was deleted + LOC delta |
 | **Grower** | "iterate", "improve PMF", "A/B", "move the metric", "increase conversion" | metric-gated: every change needs a **metric oracle + rollback path** (feature-flag mandatory). Lighter architecture review, heavier measurement. **Keep** acceptance verifier + validator (still shipping to users) | differential / metric (A/B, before-after metric) | add, must be reversible | `grow` + record metric + hypothesis + rollback |
-| **Maintainer** | "secure", "harden", "make reliable", "scale", "fix this bug" on a mature system | heaviest: security-reviewer **mandatory** (not where-relevant), regression suite **mandatory**, minimal diff, **forbid scope creep**. Force security pass even on a "BE-only" change | specified + regression golden | minimal | `maintain` |
+| **Maintainer** | "secure", "harden", "make reliable", "scale", "fix this bug" on a mature system | heaviest: security review **mandatory** (per `references/reviewer-brief.md` security lens; not where-relevant), regression suite **mandatory**, minimal diff, **forbid scope creep**. Force security pass even on a "BE-only" change | specified + regression golden | minimal | `maintain` |
 
 Two load-bearing distinctions:
 
@@ -119,4 +143,4 @@ The gate is the **front** of the pieces that already enforce precision deeper in
 | root-cause hypothesis | `diagnose-loop.md` (when the request is a bug) |
 | restate-before-code | implementer pre-flight assumption block (cadence step 1) |
 | language sharpening | `CONTEXT.md` glossary |
-| AFK-eligibility verdict | `afk-loop.md` contract + eligibility gate |
+| AFK-eligibility verdict | the 4-field loop contract (Goal / Stop / Budget / Report) + this eligibility gate. A runtime executes the contract; this skill does not ship one |

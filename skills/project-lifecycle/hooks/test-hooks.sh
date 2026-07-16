@@ -50,6 +50,161 @@ print("  PASS: emits nudge JSON on dirty phase branch")' || echo "  FAIL: emits 
 )
 rm -rf "$TMP"
 
+# D2 /clear nudge: clean tree + test-evidence (task close just passed) + occupancy vs floor.
+CNTMP="$(mktemp -d)"
+(
+  cd "$CNTMP"
+  unset PLC_CONTEXT_FLOOR PLC_CONTEXT_FLOOR_PCT PLC_CONTEXT_FLOOR_STEP PLC_CONTEXT_WINDOW
+  git init -q && git config user.email t@t && git config user.name t
+  printf '.claude/\n*.jsonl\n' > .gitignore
+  echo a > a.txt && git add .gitignore a.txt && git commit -qm init
+  git checkout -q -b feat/phase-2.0-test
+  mkdir -p .claude && echo evidence > .claude/.last-test-run   # clean + tested = task close passed
+  mktrans(){ python3 -c 'import json,sys; open(sys.argv[1],"w").write(json.dumps({"type":"assistant","message":{"usage":{"input_tokens":int(sys.argv[2]),"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}})+"\n")' "$1" "$2"; }
+  evn(){ python3 -c 'import json,sys; print(json.dumps({"session_id":"s","transcript_path":sys.argv[1]}))' "$1"; }
+
+  # under floor (120K < default 150K) → silent
+  mktrans t-low.jsonl 120000
+  OUT="$(evn "$CNTMP/t-low.jsonl" | bash "$HERE/close-gate-nudge.sh" Stop 2>/dev/null)"
+  [ -z "$OUT" ] && echo "  PASS: clear-nudge silent under floor" || echo "  FAIL: clear-nudge silent under floor (got: $OUT)"
+
+  # floor disabled → silent even far over
+  mktrans t-dis.jsonl 500000
+  OUT="$(evn "$CNTMP/t-dis.jsonl" | PLC_CONTEXT_FLOOR=0 bash "$HERE/close-gate-nudge.sh" Stop 2>/dev/null)"
+  [ -z "$OUT" ] && echo "  PASS: clear-nudge silent when floor disabled" || echo "  FAIL: clear-nudge floor=0 (got: $OUT)"
+
+  # no transcript_path in event → silent (fail-open)
+  OUT="$(echo '{}' | bash "$HERE/close-gate-nudge.sh" Stop 2>/dev/null)"
+  [ -z "$OUT" ] && echo "  PASS: clear-nudge fail-open without transcript" || echo "  FAIL: clear-nudge fail-open (got: $OUT)"
+
+  # malformed (non-JSON) event on stdin → silent + exit 0 (fail-open)
+  OUT="$(printf '{ not json' | bash "$HERE/close-gate-nudge.sh" Stop 2>/dev/null)"; RC=$?
+  { [ -z "$OUT" ] && [ "$RC" -eq 0 ]; } && echo "  PASS: clear-nudge fail-open on malformed event JSON" || echo "  FAIL: clear-nudge malformed event (rc=$RC, got: $OUT)"
+
+  # over floor (200K ≥ 150K) → emits /clear nudge JSON with occupancy
+  mktrans t-hi.jsonl 200000
+  OUT="$(evn "$CNTMP/t-hi.jsonl" | bash "$HERE/close-gate-nudge.sh" Stop 2>/dev/null)"
+  echo "$OUT" | python3 -c 'import json,sys
+d=json.load(sys.stdin)
+a=d["hookSpecificOutput"]["additionalContext"]
+assert d["hookSpecificOutput"]["hookEventName"]=="Stop"
+assert "/clear" in a and "200K" in a and "150K" in a
+print("  PASS: clear-nudge emits over floor (clean+tested)")' 2>/dev/null || echo "  FAIL: clear-nudge emits over floor (got: $OUT)"
+
+  # throttled second call → silent
+  OUT="$(evn "$CNTMP/t-hi.jsonl" | bash "$HERE/close-gate-nudge.sh" Stop 2>/dev/null)"
+  [ -z "$OUT" ] && echo "  PASS: clear-nudge throttled (silent within 10 min)" || echo "  FAIL: clear-nudge throttle (got: $OUT)"
+
+  # window-% mode: 70% of 1M = 700K floor → 720K emits (after clearing throttle)
+  rm -f .claude/.clear-nudge-last
+  mktrans t-pct.jsonl 720000
+  OUT="$(evn "$CNTMP/t-pct.jsonl" | PLC_CONTEXT_FLOOR_PCT=70 PLC_CONTEXT_WINDOW=1000000 bash "$HERE/close-gate-nudge.sh" Stop 2>/dev/null)"
+  echo "$OUT" | grep -q '/clear' && echo "  PASS: clear-nudge honors window-% floor" || echo "  FAIL: clear-nudge window-% (got: $OUT)"
+
+  # custom absolute floor honored: 90K over an 80K floor emits (default 150K would stay silent)
+  rm -f .claude/.clear-nudge-last
+  mktrans t-cust.jsonl 90000
+  OUT="$(evn "$CNTMP/t-cust.jsonl" | PLC_CONTEXT_FLOOR=80000 bash "$HERE/close-gate-nudge.sh" Stop 2>/dev/null)"
+  echo "$OUT" | grep -q '/clear' && echo "  PASS: clear-nudge honors custom PLC_CONTEXT_FLOOR" || echo "  FAIL: clear-nudge custom floor (got: $OUT)"
+
+  # dirty tree still gets the ORIGINAL close-gate nudge, not the /clear one
+  echo b > b.txt
+  OUT="$(evn "$CNTMP/t-hi.jsonl" | bash "$HERE/close-gate-nudge.sh" Stop 2>/dev/null)"
+  { echo "$OUT" | grep -q 'Definition of Done' && ! echo "$OUT" | grep -q '/clear before the next task'; } && echo "  PASS: dirty tree keeps original close-gate nudge" || echo "  FAIL: dirty tree nudge precedence (got: $OUT)"
+)
+rm -rf "$CNTMP"
+
+echo
+echo "=== tasklist-first.sh (enumerated-list guard, jq) ==="
+TLTMP="$(mktemp -d)"
+(
+  export TMPDIR="$TLTMP"
+  unset PLC_TASKLIST_GUARD PLC_TASKLIST_GATE_TASK PLC_TASKLIST_MIN
+  MDIR="$TLTMP/plc-tasklist-guard"
+  # Event builders (test harness only — python3 here is dev/CI, not the runtime hook).
+  evEdit(){ python3 -c 'import json,sys; print(json.dumps({"session_id":sys.argv[1],"tool_name":"Edit","tool_input":{"file_path":sys.argv[2]}}))' "$1" "$2"; }
+  evBash(){ python3 -c 'import json,sys; print(json.dumps({"session_id":sys.argv[1],"tool_name":"Bash","tool_input":{"command":sys.argv[2]}}))' "$1" "$2"; }
+  evTask(){ python3 -c 'import json,sys; print(json.dumps({"session_id":sys.argv[1],"tool_name":"Task","tool_input":{}}))' "$1"; }
+  evTC(){   python3 -c 'import json,sys; print(json.dumps({"session_id":sys.argv[1],"tool_name":"TaskCreate","tool_input":{}}))' "$1"; }
+  evTodo(){ python3 -c 'import json,sys; print(json.dumps({"session_id":sys.argv[1],"tool_name":"TodoWrite","tool_input":{"todos":[{"content":"x"}]*int(sys.argv[2])}}))' "$1" "$2"; }
+
+  # --- counter: one TaskCreate is NOT enough (count 1 < 3) -> edit still blocks ---
+  evTC c1 | bash "$HERE/tasklist-first.sh" mark >/dev/null 2>&1
+  evEdit c1 /tmp/x.md | bash "$HERE/tasklist-first.sh" check >/dev/null 2>&1; [ $? -eq 2 ] && echo "  PASS: single TaskCreate does not satisfy guard (1<3)" || echo "  FAIL: single TaskCreate should not satisfy"
+
+  # --- counter: three TaskCreate calls -> enumerated list exists -> edit passes ---
+  evTC c3 | bash "$HERE/tasklist-first.sh" mark >/dev/null 2>&1
+  evTC c3 | bash "$HERE/tasklist-first.sh" mark >/dev/null 2>&1
+  evTC c3 | bash "$HERE/tasklist-first.sh" mark >/dev/null 2>&1
+  { [ -e "$MDIR/c3.seen" ]; } && echo "  PASS: 3 TaskCreate calls set the seen marker" || echo "  FAIL: 3 TaskCreate should set seen"
+  evEdit c3 /tmp/x.md | bash "$HERE/tasklist-first.sh" check >/dev/null 2>&1; [ $? -eq 0 ] && echo "  PASS: allows edit after 3-task list" || echo "  FAIL: allows after 3-task list"
+
+  # --- TodoWrite shape: length >= 3 satisfies in one call; length 1 does not ---
+  evTodo t3 3 | bash "$HERE/tasklist-first.sh" mark >/dev/null 2>&1
+  { [ -e "$MDIR/t3.seen" ]; } && echo "  PASS: TodoWrite len>=3 sets seen in one call" || echo "  FAIL: TodoWrite len>=3 sets seen"
+  evTodo t1 1 | bash "$HERE/tasklist-first.sh" mark >/dev/null 2>&1
+  { [ ! -e "$MDIR/t1.seen" ]; } && echo "  PASS: TodoWrite len 1 does not set seen" || echo "  FAIL: TodoWrite len 1 should not set seen"
+
+  # --- block-once on file edit with no list ---
+  evEdit e1 /tmp/x.md | bash "$HERE/tasklist-first.sh" check >/dev/null 2>&1; RC=$?
+  { [ "$RC" -eq 2 ] && [ -f "$MDIR/e1.nudged" ]; } && echo "  PASS: blocks first edit without list" || echo "  FAIL: blocks first edit without list"
+  evEdit e1 /tmp/x.md | bash "$HERE/tasklist-first.sh" check >/dev/null 2>&1; [ $? -eq 0 ] && echo "  PASS: block-once (second edit passes)" || echo "  FAIL: block-once"
+
+  # --- Bash: git commit/push is gated; read-only Bash is not ---
+  evBash b1 'git commit -m "feat: x"' | bash "$HERE/tasklist-first.sh" check >/dev/null 2>&1; [ $? -eq 2 ] && echo "  PASS: blocks git commit without list" || echo "  FAIL: blocks git commit without list"
+  evBash b2 'git push origin feat/x'  | bash "$HERE/tasklist-first.sh" check >/dev/null 2>&1; [ $? -eq 2 ] && echo "  PASS: blocks git push without list" || echo "  FAIL: blocks git push without list"
+  evBash b3 'git status'              | bash "$HERE/tasklist-first.sh" check >/dev/null 2>&1; RC=$?
+  { [ "$RC" -eq 0 ] && [ ! -f "$MDIR/b3.nudged" ]; } && echo "  PASS: read-only Bash (git status) not gated" || echo "  FAIL: read-only Bash should pass"
+  evBash b4 'ls -la'                  | bash "$HERE/tasklist-first.sh" check >/dev/null 2>&1; [ $? -eq 0 ] && echo "  PASS: non-git Bash not gated" || echo "  FAIL: non-git Bash should pass"
+
+  # --- per-phase re-arm: a close-gate run wipes markers so the next phase re-blocks ---
+  # helper: give a session a satisfied 3-task list (seen marker set).
+  arm3(){ evTC "$1" | bash "$HERE/tasklist-first.sh" mark >/dev/null 2>&1
+          evTC "$1" | bash "$HERE/tasklist-first.sh" mark >/dev/null 2>&1
+          evTC "$1" | bash "$HERE/tasklist-first.sh" mark >/dev/null 2>&1; }
+
+  arm3 rg1
+  evBash rg1 'make task-done' | bash "$HERE/tasklist-first.sh" check >/dev/null 2>&1; RC=$?
+  { [ "$RC" -eq 0 ] && [ ! -e "$MDIR/rg1.seen" ] && [ ! -e "$MDIR/rg1.count" ] && [ ! -e "$MDIR/rg1.nudged" ]; } \
+    && echo "  PASS: 'make task-done' re-arms (wipes seen/count/nudged)" || echo "  FAIL: task-done should re-arm"
+  evEdit rg1 /tmp/x.md | bash "$HERE/tasklist-first.sh" check >/dev/null 2>&1; [ $? -eq 2 ] && echo "  PASS: next edit re-blocks after re-arm" || echo "  FAIL: next edit should re-block"
+
+  arm3 rg2
+  evBash rg2 'make phase-done PHASE=1.2' | bash "$HERE/tasklist-first.sh" check >/dev/null 2>&1
+  { [ ! -e "$MDIR/rg2.seen" ]; } && echo "  PASS: 'make phase-done' re-arms" || echo "  FAIL: phase-done should re-arm"
+
+  arm3 rg3
+  evBash rg3 'bash scripts/close-gate.sh task-done' | bash "$HERE/tasklist-first.sh" check >/dev/null 2>&1
+  { [ ! -e "$MDIR/rg3.seen" ]; } && echo "  PASS: 'close-gate.sh' path re-arms" || echo "  FAIL: close-gate.sh should re-arm"
+
+  # false-positive guard: the token inside a commit MESSAGE keeps its quote after word-split -> no re-arm.
+  arm3 rg4
+  evBash rg4 'git commit -m "task-done: ship it"' | bash "$HERE/tasklist-first.sh" check >/dev/null 2>&1
+  { [ -e "$MDIR/rg4.seen" ]; } && echo "  PASS: 'task-done' inside a commit message does NOT re-arm" || echo "  FAIL: false re-arm from commit message"
+
+  # escape hatch: PLC_TASKLIST_REARM=0 -> close-gate run does not reset.
+  arm3 rg5
+  evBash rg5 'make task-done' | PLC_TASKLIST_REARM=0 bash "$HERE/tasklist-first.sh" check >/dev/null 2>&1
+  { [ -e "$MDIR/rg5.seen" ]; } && echo "  PASS: PLC_TASKLIST_REARM=0 disables re-arm" || echo "  FAIL: REARM=0 should keep seen"
+
+  # --- Task (subagent dispatch): off by default, gated when PLC_TASKLIST_GATE_TASK=1 ---
+  evTask k1 | bash "$HERE/tasklist-first.sh" check >/dev/null 2>&1; RC=$?
+  { [ "$RC" -eq 0 ] && [ ! -f "$MDIR/k1.nudged" ]; } && echo "  PASS: Task dispatch not gated by default (intent-gate Explore safe)" || echo "  FAIL: Task should pass by default"
+  evTask k2 | PLC_TASKLIST_GATE_TASK=1 bash "$HERE/tasklist-first.sh" check >/dev/null 2>&1; [ $? -eq 2 ] && echo "  PASS: Task gated when PLC_TASKLIST_GATE_TASK=1" || echo "  FAIL: Task gated when flag on"
+
+  # --- RESUME.md exempt even with no list (deadlock guard) ---
+  evEdit r1 /some/proj/RESUME.md | bash "$HERE/tasklist-first.sh" check >/dev/null 2>&1; RC=$?
+  { [ "$RC" -eq 0 ] && [ ! -f "$MDIR/r1.nudged" ]; } && echo "  PASS: RESUME.md write exempt" || echo "  FAIL: RESUME.md exempt"
+
+  # --- escape hatch ---
+  evEdit h1 /tmp/x.md | PLC_TASKLIST_GUARD=0 bash "$HERE/tasklist-first.sh" check >/dev/null 2>&1; [ $? -eq 0 ] && echo "  PASS: PLC_TASKLIST_GUARD=0 disables" || echo "  FAIL: escape hatch"
+
+  # --- fail-open: malformed JSON / missing session_id ---
+  echo '{ not json' | bash "$HERE/tasklist-first.sh" check >/dev/null 2>&1; [ $? -eq 0 ] && echo "  PASS: fail-open on malformed input" || echo "  FAIL: fail-open malformed"
+  echo '{}' | bash "$HERE/tasklist-first.sh" check >/dev/null 2>&1; [ $? -eq 0 ] && echo "  PASS: fail-open on missing session_id" || echo "  FAIL: fail-open missing sid"
+)
+rm -rf "$TLTMP"
+
 echo
 echo "=== frontmatter YAML parses ==="
 if python3 - "$HERE/.." <<'PY'
@@ -67,6 +222,15 @@ cmds={
 assert cmds["PreToolUse"]==root+"guard.sh", cmds["PreToolUse"]
 assert cmds["Stop"]==root+"close-gate-nudge.sh Stop", cmds["Stop"]
 assert cmds["SubagentStop"]==root+"close-gate-nudge.sh SubagentStop", cmds["SubagentStop"]
+pre={m.get("matcher",""): m["hooks"][0]["command"] for m in h["PreToolUse"]}
+assert pre.get("TaskCreate|TodoWrite")==root+"tasklist-first.sh mark", pre
+# the check hook fires on a single combined matcher (distinct from guard's "Bash" key);
+# assert it exists and its matcher covers commit/edit/subagent surfaces.
+checks=[mm for mm,c in pre.items() if c==root+"tasklist-first.sh check"]
+assert len(checks)==1, ("expected exactly one check matcher", pre)
+cm=checks[0]
+for tok in ("Bash","Task","Edit","Write","MultiEdit","NotebookEdit"):
+    assert tok in cm, ("check matcher missing "+tok, cm)
 PY
 then ok "SKILL.md frontmatter hooks block valid (all 3 commands)"; else no "SKILL.md frontmatter hooks block valid (all 3 commands)"; fi
 

@@ -34,7 +34,7 @@ Horizontal slices appear productive but produce no demoable behavior until all l
 
 Each slice is tagged for execution mode:
 
-- **AFK** — Can be implemented and brought to PR-ready without human interaction; the merge itself always stays human (see `afk-loop.md` egress policy). Default; prefer this.
+- **AFK** — Can be implemented and brought to PR-ready without human interaction; **the merge itself always stays human** (egress policy: an unattended loop's terminus is a pushed `loop/` branch + an exit report, and nothing further — no PR, no merge, no tag, no publish). Default; prefer this.
 - **HITL** — Requires human interaction (architectural decision, design review, ambiguous requirement, UX call). Use sparingly.
 
 **Bias toward AFK.** HITL is a sign the slice has unresolved questions that should have been answered during brainstorm. If many slices are HITL, the brainstorm under-resolved — go back to step 1 before issue-breakdown.

@@ -4,7 +4,7 @@ How much work can run at once in a project using this skill, and who is allowed 
 
 ## WIP=1 — one active code track per project
 
-**One code track active at a time, per project.** A "code track" is anything that runs the per-task cadence (implementer → acceptance verifier → validator → code-quality review → fixup → journal) and ends in commits.
+**One code track active at a time, per project.** A "code track" is anything that runs the per-task cadence (see `cadence.md` — implementer, then the verification tail, then fixup + journal) and ends in commits.
 
 Why: every code track serializes on the same human — story/spec sign-off, close approval, smoke runs. Parallel code tracks don't speed delivery; they multiply gate load on the one serial resource (the human) and add merge risk between tracks. The bottleneck is the gate chain, not the typing speed.
 
@@ -32,6 +32,14 @@ A sidecar that wants to edit code or the status file is not a sidecar — it is 
 
 Why: two sessions editing the same status file collide. Collisions are usually loud and recoverable (stale-write refusal in the editor tooling), but recovery burns time, and the partial-write window still exists. One pen, zero ambiguity.
 
+## Append-doc fragments are conflict-free — WIP=1 still stays
+
+The single-writer rule above is about the status/roadmap file specifically. A separate layer — journal, qa-log, and CHANGELOG entries — used to share that same collision risk when every branch appended to one monolith tail. That layer is now fragment-based: each branch appends only to its own `docs/journal.d/<date>-<branch-slug>.md` / `docs/qa-log.d/<date>-<branch-slug>.md` / `changelog.d/<date>-<branch-slug>.md` file (see `references/retention.md` §"Fragment convention"). Two branches never touch the same fragment file, so this layer no longer needs a single-writer rule to stay conflict-free.
+
+**This does NOT relax WIP=1.** WIP=1's rationale was never merge mechanics — it is human gate-chain bandwidth: every code track still serializes on the same person for story/spec sign-off, close approval, and smoke runs (see "WIP=1" above). Fragments being merge-safe removes one *source* of conflict; it does nothing to the human bottleneck that WIP=1 actually guards. Relaxing WIP=1 on the strength of this fix would be a different, unevaluated claim — out of scope here, and it would need its own evidence (a multi-track trial measuring gate-chain load, not just merge cleanliness) before being considered.
+
+**The compile step is still a single-writer moment — and it runs post-merge.** Fragments stay conflict-free only as long as nothing compiles them into the shared file (hot monolith, archive, or `CHANGELOG.md`) before merge. Compile/drain runs at milestone close on an already-merged branch, or as part of `/release` — by construction the sole HEAD doing the write. Running compile pre-merge on a feature branch is banned: it relocates the exact conflict the fragment layout exists to eliminate onto the compiled file instead (see `references/retention.md` §"Post-merge single-writer boundary").
+
 ## Quick table
 
 | Want to do, while a code track is active | Allowed? |
@@ -41,6 +49,7 @@ Why: two sessions editing the same status file collide. Collisions are usually l
 | Sidecar updates STATUS/ROADMAP "just to note a finding" | ✗ — single-writer; hand the finding to the pen-holder |
 | Sidecar fixes a "tiny" bug it noticed | ✗ — that's code; log it as a finding for the active track instead |
 | Two sessions, both need the status file | ✗ — one holds the pen; the other routes writes through it |
+| Two branches each appending their own journal/qa-log/CHANGELOG fragment | ✓ — conflict-free (per-branch fragment files, no shared tail); WIP=1 still applies to the code track itself |
 
 ## Anti-patterns — STOP
 

@@ -89,8 +89,15 @@ Spec sections: {file links}
 Pre-flight assumption block: MANDATORY before any code (see cadence.md §step-1).
 Surgical scope clause: MANDATORY (see cadence.md §step-1).
 Vertical-slice TDD: MANDATORY (1 test → minimal impl → next).
+Soft time budget: MANDATORY (see cadence.md §step-1) — note start time in
+pre-flight and a fresh date at each resume-after-STOP; active work = sum
+of resume→STOP segments only (controller waits never count); re-check
+every ~10 tool calls; past ~15 min of active work, STOP and return
+SPLIT_PROPOSED (done-so-far summary, UNCOMMITTED + proposed vertical
+slices).
 
 When done, output the BACKEND SUMMARY (see below).
+Status: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT | SPLIT_PROPOSED.
 ```
 
 ## Frontend builder prompt template
@@ -122,8 +129,15 @@ Spec sections: {file links}
 Pre-flight assumption block: MANDATORY.
 Surgical scope clause: MANDATORY.
 Vertical-slice TDD: MANDATORY.
+Soft time budget: MANDATORY (see cadence.md §step-1) — note start time in
+pre-flight and a fresh date at each resume-after-STOP; active work = sum
+of resume→STOP segments only (controller waits never count); re-check
+every ~10 tool calls; past ~15 min of active work, STOP and return
+SPLIT_PROPOSED (done-so-far summary, UNCOMMITTED + proposed vertical
+slices).
 
 When done, output the FRONTEND SUMMARY.
+Status: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT | SPLIT_PROPOSED.
 ```
 
 ## Builder Summary format (both layers)
@@ -164,9 +178,10 @@ Each builder ends its run with a structured summary the next stage consumes:
 - "Reminders use BullMQ, not cron" was not in CLAUDE.md — suggest adding
 
 ### Tests passing
-- 12 unit tests passing
-- Lint clean
-- Typecheck clean
+<!-- narrative counts alone never count as evidence (cadence.md §step-2 lie
+     detection) — each claim cites the test file the diff contains -->
+- 12 unit tests passing — `tests/api/foo.test.ts`, `tests/api/bar.test.ts`
+- Lint clean, typecheck clean — commands run: `bun lint`, `bun typecheck`
 ```
 
 The **Cross-layer contract** section is what the FE builder consumes verbatim. It's the API specification frozen by the backend dispatch.

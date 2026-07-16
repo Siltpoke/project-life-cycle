@@ -16,8 +16,8 @@ Short specs, handoff docs, and design docs for a single phase do NOT need an ind
 
 ## The 5 mandatory files (default set; a project may add more)
 
-1. `docs/brainstorming-qa-log.md` — append-only across all phases
-2. `docs/iteration-journal.md` — append-only per-task
+1. `docs/brainstorming-qa-log.md` — append-only across all phases. When the project uses qa-log fragments (`docs/qa-log.d/`, per `references/retention.md` §"Fragment convention"), the TOC obligation moves to the compiled hot monolith `docs/brainstorming-qa-log.md` (qa-log compiles into the hot monolith at milestone close, unlike journal's drain-to-zero); fragments themselves carry no TOC (short-lived hot files)
+2. `docs/iteration-journal.md` — append-only per-task. When the project uses journal fragments (`docs/journal.d/`, per `references/retention.md` §"Fragment convention"), the TOC obligation moves to the compiled archive file `docs/archive/journal/YYYY-MM.md`; fragments themselves carry no TOC (short-lived hot files)
 3. `docs/RESUME.md` — append-only per-milestone progress log
 4. `docs/research/YYYY-MM-DD-mx.y-smoke-findings.md` per phase — short, but findings list grows
 5. `docs/research/YYYY-MM-DD-mx.y-mid-phase-questions.md` per phase — Q's accumulate during execution
@@ -74,7 +74,7 @@ The index lives at the very top of the file, immediately after the H1 title and 
 **When the index itself grows past 50 lines:**
 1. Add a "Latest entries" mini-section at the top of the index showing the last 3-5 entries.
 2. Keep the full index below as the source of truth.
-3. Consider archiving entries older than 3 milestones into a separate `docs/<file>-archive.md` with its own index. Cross-link from the live file.
+3. Consider archiving entries older than 3 milestones into a separate `docs/<file>-archive.md` with its own index. Cross-link from the live file. The generalized mechanic for ALL append-only docs (drain window, roll-over, pointer stubs) is `references/retention.md` §"The drain algorithm".
 
 ## When to use H3 sub-anchors
 

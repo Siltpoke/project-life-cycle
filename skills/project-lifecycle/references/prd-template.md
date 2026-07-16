@@ -95,7 +95,7 @@ Any further notes about the feature.
 | `phase-N-design.md` (spec) | Engineers + reviewers | `docs/superpowers/specs/` | After brainstorm locks |
 | `phase-N-prd.md` (this doc) | Product owner + stakeholders | `docs/superpowers/specs/` | After brainstorm locks, user-facing phases only |
 | `phase-N.md` (plan) | Implementer + reviewers | `docs/superpowers/plans/` | After spec + PRD sign-off |
-| `phase-N-handoff.md` | PR reviewers + product owner | `docs/handoff/` | After phase implementation done |
+| FACT journal entry | PR reviewers + product owner | `docs/journal.d/<date>-<branch-slug>.md` | After phase implementation done, at track close (replaces the retired `phase-N-handoff.md` — see `references/handoff-template.md`) |
 
 PRD + spec ship together for user-facing phases. PRD ships to issue tracker if project tracks; spec stays in repo.
 

@@ -1,6 +1,6 @@
 # ADR — Architectural Decision Records
 
-Lightweight markdown records for **hard-to-reverse** decisions with non-obvious trade-offs. Adopted from Matt Pocock's `grill-with-docs` skill ([mattpocock/skills](https://github.com/mattpocock/skills)).
+Lightweight markdown records for **hard-to-reverse** decisions with non-obvious trade-offs. Adopted from Matt Pocock's grilling skills ([`mattpocock/skills`](https://github.com/mattpocock/skills) → `skills/productivity`; originally a `grill-with-docs` skill, since reorganized into `grilling`).
 
 **Distinct from spec-doc locked decisions:** spec-doc decisions are phase-scoped, captured during brainstorm w/ evidence tags. ADRs are repo-wide, survive milestones, and answer "why did we do it this way?" for a future engineer who never saw the original conversation.
 

@@ -48,7 +48,7 @@ If you only adopt 2: `#` + `shift-tab`. Those alone change the daily texture of 
 |---|---|
 | `claude --resume` | Pick a past session to continue. |
 | `claude --continue` | Continue the most recent session. |
-| `/clear` | Drop the conversation context (don't drop until you have a handoff doc per the per-phase workflow). |
+| `/clear` | Drop the conversation context (run `/handoff` first — it writes the RESUME snapshot the next session reads). |
 | `/compact` | Compress context manually before auto-compact fires. |
 
 ### Setup commands (run once per machine)

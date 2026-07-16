@@ -18,12 +18,11 @@ These artifacts MUST stay markdown. The cost-benefit is already decided:
 
 | Artifact | Why force-MD |
 |---|---|
-| `docs/brainstorming-qa-log.md` | append-only audit; diff is the audit trail; subagent reads on context recall |
+| `docs/brainstorming-qa-log.md` (compiled hot monolith) + per-branch `docs/qa-log.d/<date>-<branch-slug>.md` fragments | append-only audit; diff is the audit trail; subagent reads on context recall. Fragments carry no TOC and compile into the monolith at milestone close (`references/retention.md` §"Fragment convention"); monolith direct-edit is the documented fallback for un-adopted projects |
 | `iteration-journal.md` | append-only per-task audit; diff is the audit trail; AI reads every session start |
 | `RESUME.md` | AI reads on every session start; diff drives "what changed" understanding |
 | `docs/research/YYYY-MM-DD-mX.Y-resume-note.md` | one-shot consumption by next AI session |
 | `docs/superpowers/plans/YYYY-MM-DD-phase-N-<slug>.md` | implementer + reviewer subagents read N times; token cost compounds |
-| `docs/handoff/YYYY-MM-DD-phase-X.Y-handoff.md` | body is a checklist + structured report; visuals add no value; AI reads for context |
 | PR description (GitHub body) | GitHub does not render HTML in PR body — HTML escapes to noise. MD is the only valid format. Rich companions ship as separate HTML artifact + link. |
 | backlog files | append-only deferred-decision log; diff matters |
 | `CONTEXT.md` / `CONTEXT-MAP.md` | AI reads every session for vocabulary alignment; diff is the glossary audit trail; never visual |
@@ -60,7 +59,7 @@ At milestone close, prompt:
 
 > Generate HTML milestone summary report? (rendered journal timeline + stakeholder-ready visuals + SVG diagrams of what shipped; MD canonical artifacts unchanged)
 
-If yes: generate `docs/milestone-summary/YYYY-MM-DD-mX-summary.html`. Pulls from iteration-journal, handoff docs, smoke results. Renders timeline, key decisions, evidence-strength rollup, "what works now" feature list. Reuse the CSS token palette + badge taxonomy + footer pattern from `references/html-companion-template.md` so milestone summaries look consistent with spec/design companions.
+If yes: generate `docs/milestone-summary/YYYY-MM-DD-mX-summary.html`. Pulls from iteration-journal (including each phase's FACT entry — the retired handoff file's replacement, `references/journal-schema.md` §"The FACT entry") and smoke results. Renders timeline, key decisions, evidence-strength rollup, "what works now" feature list. Reuse the CSS token palette + badge taxonomy + footer pattern from `references/html-companion-template.md` so milestone summaries look consistent with spec/design companions.
 
 **Note**: this is where iteration-journal becomes visual. The journal MD itself is force-MD (audit/diff-critical), but the milestone summary renders a timeline VIEW of the journal entries. No journal HTML file exists separately.
 
@@ -73,8 +72,12 @@ html-policy: ask | always-md | always-html
 smoke-mode: ask | self | guided
 domain-docs: ./CONTEXT.md          # or ./CONTEXT-MAP.md for multi-context repos
 comprehension: off | lite | full
+audience: adaptive | plain | technical
 close-gate: per-task | pr-boundary
+archaeology: done YYYY-MM-DD | skipped   # one-time brownfield archaeology pass (references/archaeology.md)
 archetype: auto | builder | prototyper | sweeper | grower | maintainer | off
+retention: { hot-caps: {...}, archive-dir: docs/archive, distill: on }   # doc-retention overrides; see references/retention.md
+references-log: <abs-path-to-global-repo> | off   # ⚠ user-global (~/.claude/CLAUDE.md) ONLY — cross-project personal path; see references/references-log.md
 ```
 
 Defaults:
@@ -82,18 +85,27 @@ Defaults:
 - `smoke-mode` = `ask` (skill prompts at smoke kickoff)
 - `domain-docs` = unset (skill discovers `CONTEXT.md` / `CONTEXT-MAP.md` at repo root if present; explicit pointer beats auto-discovery for multi-context or non-root layouts)
 - `comprehension` = `off` (anti-cognitive-offloading co-discovery round is opt-in; see `comprehension-co-discovery.md`)
+- `audience` = `adaptive` (plain-language floor + passive escalation for non-technical users; see `references/audience-tone.md`)
 - `close-gate` = `per-task` (where the human-blocking close approval sits; see `close-gate.md` §"Approval timing")
+- `archaeology` = unset (skill offers the archaeology pass once at the adoption entry; recording an answer stops the question forever)
 - `archetype` = `auto` (intent-gate infers the work's archetype per request + one-tap confirm; reshapes the chain Size routed into; see `intent-gate.md` §"Archetype")
+- `retention` = unset (skill defaults: RESUME 200L/25K, status 300L/30K, journal 100K, qa-log 50K; archive-dir `docs/archive`; distill on)
+- `references-log` = unset (references auto-capture off; the key is **user-global** — it belongs in `~/.claude/CLAUDE.md`, NOT any tracked project `CLAUDE.md`, because it points at a personal cross-project path; see `references/references-log.md`)
 
 Values:
 - `html-policy: always-md` → skip all HTML opt-in questions; force MD everywhere
 - `html-policy: always-html` → auto-generate HTML companion at all 3 nodes; no question
-- `smoke-mode: self` → AI gives handoff §4 path and waits for findings report
+- `smoke-mode: self` → AI gives the Track A smoke checklist path (`references/smoke-tracks.md`; the retired handoff file's §4 no longer exists — the checklist itself is the artifact) and waits for findings report
 - `smoke-mode: guided` → AI walks user through each smoke stage step by step (recommended default for solo-developer projects)
 - `comprehension: lite` → run the COMPREHEND co-discovery round once per phase (the MVP — `cadence.md` §"Comprehension Co-Discovery"); one *why*-question on the validated diff, discovery framing, non-blocking, no scoreboard, <30s
 - `comprehension: full` → accepted as a synonym of `lite`; the COMPREHEND round runs once per phase either way.
+- `audience: plain` → stay on the plain-language floor always; ignore fluency signals (inline gloss + screenshot fallback still apply; only escalation is off) (repo whose users are always non-technical). `audience: technical` → skip the tone layer entirely (no glossing, no escalation probing, no early screenshot mention — for a technical solo dev). Default `adaptive` runs the full layer. Full semantics: `references/audience-tone.md`
 - `archetype: <name>` → pins a default archetype for a repo whose work is overwhelmingly one kind (e.g. a mature service → `maintainer`); still per-request overridable. `archetype: off` → always Builder baseline (full backward-compat, no archetype reshaping). The `auto` default infers + one-tap-confirms per request, which is also the guard against archetype freezing into a fixed box. See `intent-gate.md` §"Archetype"
 - `close-gate: pr-boundary` → the per-task human-blocking approval is delegated to an independent read-only reviewer subagent; Task Close Reports are still written every task (audit trail, non-blocking); the human's blocking approval happens once per PR/merge, which MUST keep a human-written approval marker the AI cannot author (the self-certification hole stays closed). Deterministic `task-done`/`phase-done` gates are unchanged in both modes. Treat the flip as an experiment (catch parity + comprehension drift over 2-3 tracks; rollback = flip the key back). Full mechanics + attack surface in `close-gate.md` §"Approval timing"
+- `retention:` — `hot-caps: {<doc>: <lines>/<KB> | none}` (per-doc cap override; `none` is the ONLY exemption route — no exempt lists), `archive-dir: <path under docs/>` (outside `docs/` = config error, warn + fallback), `distill: on | off` (`off` skips the milestone distill step silently). Human-facing kebab keys here; `/init-harness` mirrors them into the close-gate manifest's snake_case `retention` block. Full semantics: `references/retention.md` §"Policy keys"
+- `archaeology: done YYYY-MM-DD` — pass ran on that date; never offer again. Self-heal: if the key is absent but `docs/adoption-snapshot.md` exists, write `done <snapshot generation date>`.
+- `archaeology: skipped` — user declined; never offer again, but `/init-harness --archaeology` stays available (declined-but-reachable).
+- `references-log: <absolute-path>` → arms the gated references auto-capture at brainstorm/research (`references/references-log.md`); the path must be an existing git repo (the user's global references-log). Set **once in `~/.claude/CLAUDE.md`** for all projects — never in a project `CLAUDE.md` (leaks a personal path + it's a cross-project concern). `references-log: off` or unset → feature dormant.
 
 ## Smoke interaction modes (Mode A vs Mode B)
 
@@ -102,7 +114,7 @@ At step 8 (PR + Track A smoke), AI asks unless `smoke-mode` overrides:
 > Track A smoke mode? (A) Self-serve — I give you the checklist path, you run it alone and report findings back, or (B) Guided — I walk you through each stage step-by-step, you report per-stage.
 
 ### Mode A (self-serve)
-- AI surfaces handoff doc §4 path
+- AI surfaces the Track A smoke checklist path (`references/smoke-tracks.md`) — the retired handoff file's §4 no longer exists
 - User runs Track A alone in their own time
 - User pings AI with consolidated findings list
 - AI triages S1/S2/S3 and proceeds

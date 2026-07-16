@@ -40,17 +40,20 @@ Self-contained orchestrator for cutting a release under the `project-lifecycle` 
 
 4. Current version: parse `.version` from `.claude-plugin/plugin.json` (`python3 -c "import json,sys; print(json.load(open('.claude-plugin/plugin.json'))['version'])"`).
 5. Verify `.claude-plugin/marketplace.json` plugins[0].version matches `.claude-plugin/plugin.json`. Also verify `.qoder-plugin/*` and `.codebuddy-plugin/*` (plugin.json `.version` + marketplace.json plugins[0].version) all match. Abort if any disagree — that's the bug the validator catches; fix first.
-6. Extract the `[Unreleased]` section body:
-   ```bash
-   awk '/^## \[Unreleased\]/{f=1; next} f && /^## /{exit} f' CHANGELOG.md
-   ```
-7. If the body is empty (or only whitespace + a placeholder like `_Nothing yet —_`), abort: "Nothing to release. Add entries to CHANGELOG [Unreleased] first."
+6. Build the **effective `[Unreleased]` body** — READ-ONLY, no file mutation here (the actual compile + `git rm` stays in Phase 4 step 11.5, after the human confirm, so a cancel leaves files untouched):
+   - **Read the configured changelog fragment dir first**: `.claude/close-gate.json` `retention.changelog_dir` (default `changelog.d` when the manifest, or the key, is absent). This is the same manifest key `close-gate.sh`'s `phase-done` reads for its CHANGELOG-touched check — `/release` must honor whatever override a project has set there, not assume the literal path `changelog.d/`. Use this resolved directory (call it "the changelog fragment dir" below) for the rest of this step and step 11.5.
+   - Extract the inline `[Unreleased]` section body:
+     ```bash
+     awk '/^## \[Unreleased\]/{f=1; next} f && /^## /{exit} f' CHANGELOG.md
+     ```
+   - If the changelog fragment dir exists and is non-empty, concatenate the contents of all its `*.md` fragments onto that inline body. This concatenation is the **effective body** used by steps 7, 8, and 10 — under the fragment convention the inline body is typically empty while all real content lives in the fragments, so reading the inline body alone would false-abort and mis-bump. Read only; do not compile or delete anything yet.
+7. If the **effective body** (inline + fragments) is empty (or only whitespace + a placeholder like `_Nothing yet —_`), abort: "Nothing to release. Add a `changelog.d/` fragment (or a `CHANGELOG.md [Unreleased]` entry) first."
 
 ### Phase 2 — Compute bump
 
-8. If user passed an explicit bump arg, use it. Otherwise infer:
-   - If `[Unreleased]` body contains a `### Removed` section with content OR any bullet with `BREAKING` / `breaking` → **MAJOR**.
-   - Else if contains `### Added` with content OR `### Changed` with content (the common case for new references / commands / convention changes) → **MINOR**.
+8. If user passed an explicit bump arg, use it. Otherwise infer from the **effective body** (inline `[Unreleased]` + `changelog.d/` fragments — NOT the inline body alone):
+   - If the effective body contains a `### Removed` section with content OR any bullet with `BREAKING` / `breaking` → **MAJOR**.
+   - Else if it contains `### Added` with content OR `### Changed` with content (the common case for new references / commands / convention changes) → **MINOR**.
    - Else (only `### Fixed` / `### Security` / `### Deprecated`) → **PATCH**.
 9. Compute next version: increment the right component, reset lower components to 0.
    - `0.2.0` + minor → `0.3.0`
@@ -59,7 +62,7 @@ Self-contained orchestrator for cutting a release under the `project-lifecycle` 
 
 ### Phase 3 — Human checkpoint (single AskUserQuestion)
 
-10. Ask the user once: "Cut release vX.Y.Z (BUMP)? Bumping from CURRENT_VERSION → NEW_VERSION based on N entries in [Unreleased]." Options:
+10. Ask the user once: "Cut release vX.Y.Z (BUMP)? Bumping from CURRENT_VERSION → NEW_VERSION based on N entries in [Unreleased]." (N = entries counted from the **effective body** — inline `[Unreleased]` + `changelog.d/` fragments — so the count reflects what will actually be compiled at step 11.5.) Options:
     - **Proceed** (default)
     - **Force different bump** (offer the other two; one further round if picked)
     - **Cancel**
@@ -69,6 +72,11 @@ If cancelled, exit gracefully without touching files.
 ### Phase 4 — Update files (atomic prep before commit)
 
 11. Today's date in ISO 8601: `date -u +%Y-%m-%d`.
+11.5. **Compile the changelog fragment dir's fragments into `CHANGELOG.md` `[Unreleased]`** (the dir resolved in step 6 — `retention.changelog_dir` in `.claude/close-gate.json`, default `changelog.d`), BEFORE the rename in step 12, per `references/release-process.md` §"Per-release artifact updates" step 1:
+    - Read every `*.md` fragment in that dir; group bullets by the 6 Keep-a-Changelog categories (fixed order: Added, Changed, Deprecated, Removed, Fixed, Security — omit empty ones), merging same-named `### <Category>` sections across fragments into one section per category appended under `[Unreleased]`. Within a category, keep fragments in filename (date) order.
+    - **Byte-verify** the compiled content landed in `CHANGELOG.md` (read the file back, confirm every fragment's bullets are present) BEFORE deleting anything.
+    - Only once verified, `git rm` the compiled fragments from that dir.
+    - **Zero-fragments contingency:** if the dir doesn't exist or is empty, this is a no-op — proceed to step 12 with whatever bullets are already inline under `[Unreleased]` (the documented fallback for un-adopted projects).
 12. In `CHANGELOG.md`:
     - Replace `## [Unreleased]` heading with `## [X.Y.Z] — YYYY-MM-DD` (preserving the body).
     - Insert a fresh `## [Unreleased]\n\n_Nothing yet — `git log vX.Y.Z..HEAD` for the in-flight set._\n\n---\n\n` block above it.
@@ -81,11 +89,11 @@ If cancelled, exit gracefully without touching files.
 
 ### Phase 5 — Validate
 
-16. Run `python3 scripts/validate.py`. Abort + revert (`git checkout -- .claude-plugin/ .qoder-plugin/ .codebuddy-plugin/ CHANGELOG.md`) on any error — surface the validator output.
+16. Run `python3 scripts/validate.py`. Abort + revert on any error — surface the validator output. Use the **explicit-HEAD** form so the `git rm`'d fragments are actually restored: `git checkout HEAD -- .claude-plugin/ .qoder-plugin/ .codebuddy-plugin/ CHANGELOG.md changelog.d/`. The bare `git checkout -- changelog.d/` FAILS for the fragments (the pathspec resolves against the index, which no longer holds them after `git rm` → "did not match any file(s)"); `git checkout HEAD -- …` resolves against the `HEAD` tree and restores them (they're still tracked in `HEAD` until this commit lands). The same command also cleanly reverts the in-place edits to `CHANGELOG.md` + the manifests.
 
 ### Phase 6 — Commit + tag + push
 
-17. `git add CHANGELOG.md .claude-plugin/marketplace.json .claude-plugin/plugin.json .qoder-plugin/plugin.json .qoder-plugin/marketplace.json .codebuddy-plugin/plugin.json .codebuddy-plugin/marketplace.json`.
+17. `git add CHANGELOG.md .claude-plugin/marketplace.json .claude-plugin/plugin.json .qoder-plugin/plugin.json .qoder-plugin/marketplace.json .codebuddy-plugin/plugin.json .codebuddy-plugin/marketplace.json`. The `changelog.d/` fragment removals from step 11.5 are already staged via `git rm` and ride along in this same commit — no separate `git add` needed for them.
 18. Commit:
     ```bash
     git commit -m "chore(release): vX.Y.Z
@@ -116,12 +124,12 @@ If cancelled, exit gracefully without touching files.
 
 ## Error recovery
 
-- **Validate fails** → `git checkout -- .claude-plugin/ .qoder-plugin/ .codebuddy-plugin/ CHANGELOG.md`, surface error, stop.
-- **Commit fails** → reset staged files, leave working tree alone, surface error.
+- **Validate fails** → `git checkout HEAD -- .claude-plugin/ .qoder-plugin/ .codebuddy-plugin/ CHANGELOG.md changelog.d/`, surface error, stop. The explicit-`HEAD` form is required to restore the fragments `git rm`'d in step 11.5 — a bare `git checkout -- changelog.d/` fails ("did not match any file(s)") because they're gone from the index.
+- **Commit fails** → unstage with `git reset`, then restore any `git rm`'d fragments with `git checkout HEAD -- changelog.d/` (`git reset` only unstages — it does NOT bring back files `git rm` already deleted from disk, so the working tree is NOT left intact for this file category without the explicit restore). Surface error.
 - **Push fails (auth / no upstream)** → leave commit local; instruct user to push manually.
 - **Tag push fails after commit pushed** → commit is on remote but no tag yet. Re-run only Phase 6 step 20–21 (don't re-edit files).
 - **Workflow fails** → tag is on remote; release page may or may not exist. Inspect via `gh run view <id>`. Common causes: outdated `release.yml` (no `--latest` flag, missing CHANGELOG-section extraction). Fix workflow in a follow-up PR; manually create release via `gh release create vX.Y.Z --notes-file <extracted-section>` in the meantime.
-- **Mid-flight cancel** (user hits Ctrl-C between Phase 4 and Phase 6) → run `git checkout -- .claude-plugin/ .qoder-plugin/ .codebuddy-plugin/ CHANGELOG.md` to undo the file edits before retrying.
+- **Mid-flight cancel** (user hits Ctrl-C between Phase 4 and Phase 6) → run `git checkout HEAD -- .claude-plugin/ .qoder-plugin/ .codebuddy-plugin/ CHANGELOG.md changelog.d/` to undo the file edits (including any `changelog.d/` fragment removals from step 11.5) before retrying. The explicit-`HEAD` form is required — the bare form can't restore `git rm`'d fragments.
 
 ## Anti-patterns
 

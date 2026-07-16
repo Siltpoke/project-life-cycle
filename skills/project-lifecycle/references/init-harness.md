@@ -13,11 +13,14 @@ A project is bootstrapped when these artifacts exist + are wired together:
 | `CLAUDE.md` (repo root) | ✅ | Universal project rules + folder-map + policy keys; auto-loaded into every Claude Code session |
 | `CONTEXT.md` (or `CONTEXT-MAP.md` + per-context `CONTEXT.md`) | ✅ (placeholder OK) | Ubiquitous-language domain glossary; lazy-populated during brainstorms |
 | `docs/RESUME.md` | ✅ (placeholder OK) | Current milestone state; updated at every phase boundary |
-| `docs/iteration-journal.md` | ✅ (placeholder OK) | Per-task journal; append-only with TOC |
+| `docs/iteration-journal.md` | ✅ (placeholder OK) | Per-task journal (or per-phase fragments under `docs/journal.d/` — see `references/retention.md` §"Fragment convention"); append-only with TOC |
+| `docs/qa-log.d/` | ✅ (scaffold OK, only when the fragment convention is adopted) | Per-branch brainstorm Q&A fragments (`<date>-<branch-slug>.md`) that compile into the hot monolith `docs/brainstorming-qa-log.md` at milestone close — see `references/retention.md` §"Fragment convention" (qa-log) |
+| `changelog.d/` | ✅ (scaffold OK, only when the fragment convention is adopted) | Per-branch CHANGELOG fragments (`<date>-<branch-slug>.md`) that compile into `CHANGELOG.md` `[Unreleased]` at `/release` time — see `references/retention.md` §"Fragment convention" + `references/changelog.md` §"Per-PR discipline" |
 | `.claude/commands/` | ✅ (skeleton OK) | Team-shared project-scoped slash commands |
 | `.claude/handlers/` | ✅ (scaffold OK) | Deterministic pre-step handlers (auth, lint, secret guard, migration safety, tenant isolation) |
 | `.claude/hooks/inject-resume.sh` + `.claude/settings.json` `SessionStart:resume` block | ✅ (when `docs/RESUME.md` is used) | Auto-injects the current phase branch + head of `RESUME.md` on session resume, so the model re-grounds in the phase without being told to read RESUME. **Project-level, NOT skill frontmatter** — at session start the skill is not yet active, so a frontmatter hook would never fire. Installed from the template shipped at the skill's `hooks/inject-resume.sh.template`. See `references/harness-primitives.md` §2 |
-| `scripts/close-gate.sh` + `scripts/test-close-gate.sh` + `.claude/close-gate.json` + `make task-done`/`phase-done`/`test-gate` + **active** pre-push hook (`.githooks/pre-push` + `git config core.hooksPath .githooks`) | ✅ (scaffold + **hook ACTIVATED, not a stub**) | Deterministic "done" gate — exits non-zero on missing wrap-up artifacts (journal / tests-evidence / handoff / CHANGELOG / smoke / ROADMAP). `test_command` + `exempt_*` flags filled from detected stack. **The pre-push hook is the un-bypassable layer and MUST be activated** (`core.hooksPath` set) — scaffolding the scripts without activating the hook leaves only the weakest model-discipline layer, which is the exact gap that lets wrap-up (esp. tests) get skipped. `test-close-gate.sh` is the gate's own self-test (throwaway-worktree, asserts every check flips) — run `make test-gate PHASE=X.Y` after wiring. See `references/close-gate.md` |
+| `scripts/close-gate.sh` + `scripts/test-close-gate.sh` + `.claude/close-gate.json` + `make task-done`/`phase-done`/`test-gate` + **active** pre-push hook (`.githooks/pre-push` + `git config core.hooksPath .githooks`) | ✅ (scaffold + **hook ACTIVATED, not a stub**) | Deterministic "done" gate — exits non-zero on missing wrap-up artifacts (journal / journal FACT-entry fields / tests-evidence / CHANGELOG / smoke / ROADMAP). `test_command` + `exempt_*` flags filled from detected stack; optional `retention` block (hot caps / count caps / archive dir / coverage floor / journal dir / `qa_log_dir` / `changelog_dir`) mirrored from the CLAUDE.md `retention:` key per `references/retention.md` §"Policy keys". **The pre-push hook is the un-bypassable layer and MUST be activated** (`core.hooksPath` set) — scaffolding the scripts without activating the hook leaves only the weakest model-discipline layer, which is the exact gap that lets wrap-up (esp. tests) get skipped. `test-close-gate.sh` is the gate's own self-test (throwaway-worktree, asserts every check flips) — run `make test-gate PHASE=X.Y` after wiring. See `references/close-gate.md` |
+| `scripts/retention-drain.sh` | ✅ (scaffold OK, only when a `retention:` key or default drain is in use) | Deterministic no-LLM archival drain materialized from `references/retention.md`'s embedded spec (same ship-pattern as `close-gate.sh`) — the milestone-done "Archival drain run" step invokes it per doc. No hook wiring (it runs at milestone close, not on push). See `references/retention.md` §"Embedded portable script". |
 | `CHANGELOG.md` | ✅ (empty seed OK) | Keep a Changelog 1.1.0 format |
 | `.claude-plugin/{marketplace,plugin}.json` | Only if project is itself a Claude-plugin | Plugin manifest pair |
 | `.github/release.yml` | Only if Claude-plugin OR user opts in | PR-label release-notes config |
@@ -139,6 +142,10 @@ If 3+ matches → flag tz handling as project concern; add to "Don't do" list.
 
 `ls .github/workflows/*.yml` → list. Flag pre-existing workflows so generated `release.yml` doesn't conflict.
 
+## Phase 1b — Archaeology pass (between detection and generation)
+
+On brownfield repos (no plc artifacts + substantial existing code), an opt-in read-only archaeology pass runs between Phase 1 detection and Phase 2 generation — detection contract, entry surfaces, agent fan-out, artifact set, and provenance rules all in `references/archaeology.md`. Its drafts join Phase 2's normal generate/merge set.
+
 ## Merge strategy (when artifact already exists)
 
 `/init-harness` is **idempotent** — running it twice produces the same end-state. Existing files are MERGED, not overwritten. Rules:
@@ -147,7 +154,7 @@ If 3+ matches → flag tz handling as project concern; add to "Don't do" list.
 
 If exists:
 1. Parse existing sections by H2 heading.
-2. For each generator-produced section (Stack / Commands / Folder map / Skill policy keys), check whether a same-named section exists.
+2. For each generator-produced section (Stack / Commands / Folder map / Skill policy keys — incl. `retention`), check whether a same-named section exists.
 3. If yes → propose diff for that section only. User picks: keep existing / replace with generated / merge line-by-line.
 4. If no → append the section to the end.
 5. Never delete sections the user wrote.
@@ -300,7 +307,9 @@ With `--refresh`:
 - Diff against existing CLAUDE.md `folder-map`, handler set.
 - Surface drift; propose merges.
 - Write only what's approved.
+- Archaeology artifacts (ROADMAP / CONTEXT.md glossary / ADRs / adoption-snapshot) follow the same merge-vs-create rules; a re-run never overwrites human-edited content without explicit `OVERWRITE` confirm — full rules in `references/archaeology.md`.
 - **Repair the close-gate wiring (idempotent retrofit).** This is the path that fixes already-bootstrapped projects that predate the active-hook default: if `.githooks/pre-push` is missing, write it (script in `references/close-gate.md`); if `git config core.hooksPath` ≠ `.githooks`, set it. Then report `core.hooksPath` value + suggest `make test-gate PHASE=X.Y`. A project with the gate scripts but no active hook is the #1 reason wrap-up gets skipped — `--refresh` closes that gap without disturbing anything else.
+- **Verify + repair the context-floor arming (idempotent retrofit).** Check whether `context-floor.sh` is referenced in `~/.claude/settings.json` (or the project's `.claude/settings*.json`) under `PreToolUse`. Not wired → surface it ("context-floor hook not armed — an un-armed floor lets sessions run far past it unnoticed") and offer to MERGE the `PreToolUse: Edit|Write` entry into `~/.claude/settings.json` per `references/harness-primitives.md` §9 (append to existing `PreToolUse` arrays, never clobber; machine-local because frontmatter hooks would miss non-workflow sessions). User declines → respect it; the `phase-done` gate's warn-only row will keep surfacing the gap.
 
 ## Anti-patterns (mirror in commands/init-harness.md)
 
@@ -316,7 +325,7 @@ See `commands/init-harness.md` §Anti-patterns. Two worth restating here:
 - `references/builder-split.md` — `folder-map` schema this command generates.
 - `references/deterministic-handlers.md` — handler pattern + canonical examples this command scaffolds.
 - `references/changelog.md` — CHANGELOG format this command seeds.
-- `references/output-format.md` — policy keys (`html-policy`, `smoke-mode`, `domain-docs`, `comprehension`, `close-gate`) this command pre-fills.
+- `references/output-format.md` — policy keys (`html-policy`, `smoke-mode`, `domain-docs`, `comprehension`, `close-gate`, `retention`) this command pre-fills. `archaeology` is the exception: never pre-filled — written only when the CHECKPOINT 1 offer is answered (`done YYYY-MM-DD` after the pass runs / `skipped` on decline), per `references/archaeology.md`; pre-setting it would suppress the one-time offer.
 - `references/context-md.md` — CONTEXT.md format this command seeds.
 - `references/roadmap.md` — `docs/ROADMAP.md` whole-plan-map convention this command seeds.
 - `references/document-indexing.md` — TOC scheme for RESUME.md + iteration-journal.md placeholders.

@@ -24,7 +24,7 @@ Missing any of the above → release process doesn't apply; use the project's ow
 
 ## SemVer bump rules
 
-Bump is computed from `CHANGELOG.md` `[Unreleased]` content unless the human overrides.
+Bump is computed from `CHANGELOG.md` `[Unreleased]` content **AND any uncompiled `changelog.d/` fragments** (the effective release set), unless the human overrides. Under the fragment convention most releases have an empty inline `[Unreleased]` body with all content sitting in `changelog.d/*.md`, so the bump inference (and the "nothing to release" check) must read the union of both — reading the inline body alone mis-bumps (e.g. falls to PATCH when a fragment carries `### Added` = MINOR).
 
 | `[Unreleased]` contains | Bump | Example |
 |---|---|---|
@@ -38,20 +38,26 @@ Pre-1.0 caveat: while at `0.x.y`, breaking changes can theoretically ship in MIN
 
 ## Per-release artifact updates (atomic, in one commit)
 
-1. **`CHANGELOG.md`**:
-   - Rename `## [Unreleased]` → `## [X.Y.Z] — YYYY-MM-DD` (ISO 8601, UTC date).
+1. **Compile the changelog fragment dir's fragments into `CHANGELOG.md` `[Unreleased]`** — BEFORE the rename in step 2, same atomic commit:
+   - **Resolve the fragment dir from the manifest first**: `.claude/close-gate.json` `retention.changelog_dir` (default `changelog.d` when the manifest, or the key, is absent) — the same key `close-gate.sh`'s `phase-done` reads for its CHANGELOG-touched check. Hardcoding the literal path `changelog.d/` here would silently break for any project that overrides the key, since `phase-done` and `/release` would then be checking two different directories for the same content.
+   - Read every `*.md` fragment in that dir. Group their bullets by the 6 Keep-a-Changelog categories (Added / Changed / Deprecated / Removed / Fixed / Security, in that fixed order — omit categories with no bullets), merging same-named `### <Category>` sections from different fragments into one section per category under `[Unreleased]`. Within a category, keep fragments in filename (date) order.
+   - **Byte-verify** the compiled content actually landed in `CHANGELOG.md` — read the file back and confirm every fragment's bullets are present — BEFORE deleting anything. Mirrors the verify-then-delete discipline `references/retention.md`'s drain uses for its own archive writes: a failed or partial write leaves the fragments untouched and the release aborts.
+   - Only once verified, `git rm` the compiled fragments from that dir so they don't linger as stale duplicates.
+   - **Zero-fragments contingency:** if the dir doesn't exist or is empty, this step is a no-op — proceed straight to step 2, preserving whatever bullets are already inline under `[Unreleased]` (the documented fallback path for un-adopted projects, or a manual edit that landed directly).
+2. **`CHANGELOG.md`**:
+   - Rename `## [Unreleased]` → `## [X.Y.Z] — YYYY-MM-DD` (ISO 8601, UTC date), now containing both the compiled fragment bullets and any pre-existing inline bullets.
    - Insert fresh `## [Unreleased]` block above with placeholder body (e.g., `_Nothing yet — `git log vX.Y.Z..HEAD` for the in-flight set._`).
    - Update compare links at bottom:
      - `[Unreleased]: …compare/vX.Y.Z...HEAD`
      - Insert new line `[X.Y.Z]: …compare/v<PREV>...vX.Y.Z`
-2. **`.claude-plugin/plugin.json`** → `version` = `X.Y.Z`.
-3. **`.claude-plugin/marketplace.json`** → `plugins[0].version` = `X.Y.Z`.
-4. **`.qoder-plugin/plugin.json`** → `version` = `X.Y.Z`.
-5. **`.qoder-plugin/marketplace.json`** → `plugins[0].version` = `X.Y.Z`.
-6. **`.codebuddy-plugin/plugin.json`** → `version` = `X.Y.Z`.
-7. **`.codebuddy-plugin/marketplace.json`** → `plugins[0].version` = `X.Y.Z`.
+3. **`.claude-plugin/plugin.json`** → `version` = `X.Y.Z`.
+4. **`.claude-plugin/marketplace.json`** → `plugins[0].version` = `X.Y.Z`.
+5. **`.qoder-plugin/plugin.json`** → `version` = `X.Y.Z`.
+6. **`.qoder-plugin/marketplace.json`** → `plugins[0].version` = `X.Y.Z`.
+7. **`.codebuddy-plugin/plugin.json`** → `version` = `X.Y.Z`.
+8. **`.codebuddy-plugin/marketplace.json`** → `plugins[0].version` = `X.Y.Z`.
 
-Everything else in the same commit = wrong (mixes user-facing change with the release). The release commit is purely a version-bump + CHANGELOG-rename commit.
+Everything else in the same commit = wrong (mixes user-facing change with the release) — **except** the `changelog.d/` fragment compile + removal in step 1, which is intentionally part of this atomic commit: the fragments' content is what becomes the `[X.Y.Z]` section, so compiling and removing them alongside the rename is the release, not a separate change riding along with it. The release commit is purely a version-bump + CHANGELOG-compile-and-rename commit.
 
 ## Commit + tag conventions
 
@@ -75,7 +81,7 @@ Both tag forms are supported by `release.yml`:
 
 Use plain SemVer unless your tool produces the prefixed form.
 
-> **Strict main protection**: projects that adopt the strict main-branch ruleset (PR-required + empty bypass list, per `references/afk-loop.md` §main protection) can't push the release commit to `main` directly — the release commit goes through a PR too. `/release` prepares the release commit on a short-lived branch (e.g. `release/vX.Y.Z`), the human merges it, and the tag is then created on the merge commit. The direct-push flow above only works on repos without the strict ruleset.
+> **Strict main protection**: projects that adopt the strict main-branch ruleset (PR-required, empty bypass list — the same main-protection posture an unattended runtime demands) can't push the release commit to `main` directly — the release commit goes through a PR too. `/release` prepares the release commit on a short-lived branch (e.g. `release/vX.Y.Z`), the human merges it, and the tag is then created on the merge commit. The direct-push flow above only works on repos without the strict ruleset.
 
 ## What the workflow does on tag push
 

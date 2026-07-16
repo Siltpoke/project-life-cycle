@@ -238,7 +238,7 @@ Pattern:
        - **Do not attempt `gh gist create --public` as a workaround** — Claude Code auto-mode classifier (and any reasonable security policy) blocks uploading internal-repo screenshots to public GitHub Gist as data exfiltration. The block fires silently; budget burned for no result.
        - **`gh pr edit` / `gh pr comment --edit-last` cannot pass file attachments** to the GitHub upload endpoint that the web UI uses (it requires a session token and the multipart form the official API does not expose).
        - **Right path for AI**: prepare the PR comment with the link-to-blob form so reviewers can click through immediately, then **explicitly instruct the user (in chat + in the comment itself)** to drag-drop the PNGs via web UI if they want true inline rendering. State the 6-step recipe (open PR → find comment → Edit → drag PNG per line → GitHub auto-inserts inline markdown → Update comment). Open the screenshots directory in a file browser via `open <path>` (macOS) / `xdg-open` (Linux) / `explorer` (Windows) as a courtesy so the drag source is one click away.
-       - **`--edit-last` discipline**: once the user drag-drops, their inline `![](https://private-user-images.githubusercontent.com/...)` URLs land in the live comment. The corresponding `docs/pr-drafts/*.md` draft on disk still has link-to-blob URLs. Either (a) sync the draft to match the live (by editing in the inline URLs) so future `--edit-last` doesn't regress to link-to-blob, or (b) live with the divergence + document it in a note at the top of the draft. The skill prefers (a) for audit fidelity.
+       - **`--edit-last` discipline**: once the user drag-drops, their inline `![](https://private-user-images.githubusercontent.com/...)` URLs land in the live comment. The corresponding scratchpad draft still has link-to-blob URLs. Either (a) sync the draft to match the live (by editing in the inline URLs) so future `--edit-last` doesn't regress to link-to-blob, or (b) live with the divergence + document it in a note at the top of the draft. The skill prefers (a) for fidelity while the session lasts.
 6. **3-5 captures**, not 1. Cover: empty state / populated state / error state / interactive state.
 7. **Use deterministic fixture IDs** that match any project-specific regex guards (e.g., `f23000000ace` for a 12-hex `[a-f0-9]{12}` constraint). Cleanup in `afterAll`.
 
@@ -248,40 +248,40 @@ The screenshot spec is committed in the same PR + lives in the regression suite 
 
 Separate from the 9-layer audit narrative: when independent reviewer subagents reviewed this PR's work (always true in `close-gate: pr-boundary` mode), the PR carries the **bidirectional review record** as two additional comments — (A) the reviewer's report **verbatim** (the writer must not condense or re-synthesize it; scope header with SHA range + method + "not reviewed" list; dispatch-prompt provenance folded) and (B) the **builder response** (per-finding Agree/Disagree + why, re-graded severity, what changed with SHA, what was deliberately not changed, closing Net judgment). Layer 6 keeps the disposition *summary*; the record carries the *reasoning* — the merger audits whether each review-fix was premised on a correct reading of the finding. Full spec, dispatch constraints, fix-routing rules, and coverage-window check in `references/review-record.md`.
 
-## Draft-first workflow (write to disk, commit, then post)
+## Draft-first workflow (write to the session scratchpad, then post)
 
-**Write the PR body + comment as `.md` files in `docs/pr-drafts/` BEFORE invoking `gh pr create` / `gh pr comment`.**
+**Write the PR body + comment as `.md` files in the session scratchpad (outside the repo) BEFORE invoking `gh pr create` / `gh pr comment`.** The scratchpad draft dies with the session — it is a sandbox for composing, not a durable artifact; the PR itself (body + comments, once posted) is the durable record. Screenshots are the one exception (see below): they are committed to the repo because they're a load-bearing asset embedded via raw URL, not a cache of the drafting process.
 
-**PR-thread content passes the same hygiene gates as committed content — BEFORE the `gh` call.** Anything posted to a PR (body, comments, review records) is published, durable, and invisible to git-side gates (a pre-push hook cannot see a `gh api` call). If the project enforces a language policy (e.g. English-only durable artifacts) or a secrets/identifier leak gate on commits, run the same checks on every `docs/pr-drafts/*.md` file before posting it. The draft-first workflow exists precisely so there is a file to scan — a comment composed inline in the `gh` command has no gate at all.
+**PR-thread content passes the same hygiene gates as committed content — BEFORE the `gh` call.** Anything posted to a PR (body, comments, review records) is published, durable, and invisible to git-side gates (a pre-push hook cannot see a `gh api` call). If the project enforces a language policy (e.g. English-only durable artifacts) or a secrets/identifier leak gate on commits, run the same checks on every scratchpad draft file before posting it. The draft-first workflow exists precisely so there is a file to scan — a comment composed inline in the `gh` command has no gate at all.
 
 ```
-docs/pr-drafts/
+<session scratchpad>/                              ← outside the repo; ephemeral, dies with the session
 ├── YYYY-MM-DD-phase-X.Y-pr-body.md
 ├── YYYY-MM-DD-phase-X.Y-pr-comment.md
 ├── YYYY-MM-DD-phase-X.Y-review-verbatim.md      ← review record comment A (see review-record.md)
 ├── YYYY-MM-DD-phase-X.Y-builder-response.md     ← review record comment B
-├── YYYY-MM-DD-phase-X.Y-followup-decisions.md   ← if reviewer asks get answered post-open
-└── screenshots/
-    ├── 01-list-page.png
-    ├── 02-detail-page.png
-    └── 03-error-state.png
+└── YYYY-MM-DD-phase-X.Y-followup-decisions.md   ← if reviewer asks get answered post-open
+
+docs/pr-drafts/screenshots/                         ← IN the repo, committed — the one retained exception
+├── 01-list-page.png                                  (load-bearing asset embedded in live PR comments via
+├── 02-detail-page.png                                 raw.githubusercontent.com, not a cache — never delete)
+└── 03-error-state.png
 ```
 
 Then:
 
 ```bash
-gh pr create --title "..." --body-file docs/pr-drafts/YYYY-MM-DD-phase-X.Y-pr-body.md --label feature
-gh pr comment <PR#> --body-file docs/pr-drafts/YYYY-MM-DD-phase-X.Y-pr-comment.md
+gh pr create --title "..." --body-file <scratchpad>/YYYY-MM-DD-phase-X.Y-pr-body.md --label feature
+gh pr comment <PR#> --body-file <scratchpad>/YYYY-MM-DD-phase-X.Y-pr-comment.md
 ```
 
-Why disk-first:
+Why scratchpad-first:
 
-- **User can review the audit narrative BEFORE it goes public**. Drafts on disk = sandbox.
-- **Audit trail**: the drafts are committed; reviewers / auditors 6 months later can see what was claimed AT THE TIME (vs what the live PR comment may have been edited to since).
+- **User can review the audit narrative BEFORE it goes public**. A scratchpad draft = sandbox.
 - **Iteration is cheap**: `gh pr comment --edit-last --body-file <updated>` is one command vs re-typing in the web UI.
 - **Cross-references work**: PR body can reference paths inside the same commit; comments embed screenshot URLs at the same SHA.
 
-After merge, `docs/pr-drafts/<this-PR>/*` files are safe to delete in a later cleanup commit OR keep as audit artifacts (project preference).
+Why NOT commit the `.md` drafts (unlike the earlier `docs/pr-drafts/` convention): the PR itself — body + comments, once posted via `gh` — already is the durable, publicly-readable audit trail; a second, git-committed copy of the same prose was pure cache (the retention count-axis measurement that motivated retiring it found `docs/pr-drafts/` had grown to 143 files / 1.1 MB, invisible to every size-based retention check — see `references/retention.md` §"The count axis"). Screenshots don't have that problem: GitHub's raw-URL embed needs a real file at a real repo path, so `docs/pr-drafts/screenshots/` stays and is never cache.
 
 ## When to skip layers (and how to surface that)
 
@@ -311,18 +311,18 @@ The N/A skip with a one-line reason is acceptable; deleting the heading is not. 
 - **Single screenshot, full-page or otherwise** → not enough breadth. 3-5 captures covering different UI states.
 - **Inline `![](...)` raw URL pointing at the feature branch** → branch gets deleted on merge → image 404s for every future reviewer. Always anchor at the merge commit SHA or `main`. Branch-name URLs are time bombs.
 - **Inline `![](raw.githubusercontent.com/...)` on a private repo** → silently 404s for every reviewer (raw URLs need auth tokens GitHub PR comments cannot pass). Use the link-to-blob form (clickable, opens GitHub file browser w/ PNG preview pane) OR web-UI drag-drop upload (only true-inline option, manual step, must be re-uploaded on every `--edit-last`).
-- **PR body + comment typed directly into `gh pr create` / `gh pr comment` without disk drafts** → user can't preview; audit trail lost; iteration costly. Always draft to `docs/pr-drafts/` first.
-- **Editing the comment via web UI instead of `gh pr comment --edit-last --body-file <updated draft>`** → drift between disk draft and live comment; review confusion. Edit the draft + re-post.
-- **Reviewer ask answered in a follow-up comment but draft file not committed** → audit narrative scattered. Commit `<PR>-followup-decisions.md` so the answers are on disk too.
+- **PR body + comment typed directly into `gh pr create` / `gh pr comment` without a scratchpad draft** → user can't preview; iteration costly. Always draft to the session scratchpad first.
+- **Editing the comment via web UI instead of `gh pr comment --edit-last --body-file <updated draft>`** → drift between the scratchpad draft and the live comment; review confusion. Edit the draft + re-post.
+- **Reviewer ask answered in a follow-up comment that never actually posts** → audit narrative scattered — the durable copy is the POSTED PR comment, not the scratchpad draft. Write `<date>-phase-<X.Y>-followup-decisions.md` in the scratchpad, then `gh pr comment --body-file` it so the answer lands durably on the PR.
 
 ## Quick-reference (paste into chat when the gate is about to fire)
 
-> "Ready to open the PR. Drafts staged at `docs/pr-drafts/`:
+> "Ready to open the PR. Drafts staged in the session scratchpad:
 > - `<date>-phase-<X.Y>-pr-body.md` (3-section + Use cases + file-by-file)
 > - `<date>-phase-<X.Y>-pr-comment.md` (9 layers + folded raw evidence)
-> - `screenshots/{01,02,03}-*.png` (Playwright dedicated spec, committed)
+> - `docs/pr-drafts/screenshots/{01,02,03}-*.png` (Playwright dedicated spec, committed to the repo — the one retained exception)
 >
-> Once you approve I'll run `gh pr create --body-file ...` + `gh pr comment --body-file ...`. After post-open reviewer asks I'll write `<date>-phase-<X.Y>-followup-decisions.md` + `gh pr comment --body-file ...`. All drafts stay on disk for audit."
+> Once you approve I'll run `gh pr create --body-file ...` + `gh pr comment --body-file ...`. After post-open reviewer asks I'll write `<date>-phase-<X.Y>-followup-decisions.md` + `gh pr comment --body-file ...`. Once posted, the PR itself is the durable record — the scratchpad drafts die with the session."
 
 ## Cross-reference
 

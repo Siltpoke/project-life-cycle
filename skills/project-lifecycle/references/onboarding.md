@@ -24,8 +24,8 @@ In order, no skipping:
 1. `CLAUDE.md` at repo root — universal project rules + folder map + policy keys.
 2. `CONTEXT.md` (or `CONTEXT-MAP.md` + per-bounded-context `CONTEXT.md`) — domain glossary.
 3. `docs/RESUME.md` — current milestone state + last phase delivered.
-4. `docs/iteration-journal.md` (read the index/TOC + last 3 entries) — recent task history.
-5. `ls docs/superpowers/specs/` and `ls docs/handoff/` — what the active + recently-shipped phases are about.
+4. `docs/iteration-journal.md` (read the index/TOC + last 3 entries) — recent task history. On fragment-convention projects also `ls docs/journal.d/` for the undrained current-milestone entries (per `references/retention.md` §"Fragment convention").
+5. `ls docs/superpowers/specs/` — what the active + recently-shipped phases are about; recently-shipped phases' FACT entries (`docs/journal.d/*.md`, or the compiled journal archive for a drained milestone) are the retired handoff file's replacement (`references/journal-schema.md` §"The FACT entry") — read those, not a `docs/handoff/` directory, which no longer exists on a post-retirement project.
 6. `ls docs/adr/` — hard-to-reverse decisions to respect (skim titles; read bodies on demand).
 
 If any of these are missing, surface as a finding before proceeding (project hasn't adopted this skill fully yet).
@@ -52,7 +52,7 @@ The AI uses `git log`, `gh issue list`, file reads, grep — no indexing require
 ### Step 3: Run the project locally + smoke an existing phase (end of day 1)
 
 - Run the install / build / test commands from `CLAUDE.md`.
-- Pick the most recent handoff doc; follow its Track A manual smoke checklist.
+- Pick the most recent Track A smoke checklist (`docs/smoke/*checklist*`, per `references/smoke-tracks.md`) and follow it. (There is no handoff doc to pick it from any more — the file was retired; the checklist is its own artifact.)
 - Report back: what worked, what didn't, what was unclear in the docs.
 
 Output is a "Day 1 findings" comment / message to the team — surfaces stale instructions + tooling gaps the team has stopped noticing.
@@ -116,7 +116,7 @@ Read each one's frontmatter description. Don't run them yet — but know they ex
 
 ## When the project does NOT yet use this skill
 
-If you land in a project that doesn't have `CLAUDE.md` / `CONTEXT.md` / `RESUME.md` / `iteration-journal.md`, Day 1 becomes: Q&A about the codebase + propose adopting this skill. Don't force adoption — surface the gap with concrete pain ("we don't know which conventions the team follows, so my edits will drift") and let the team decide.
+If you land in a project that doesn't have `CLAUDE.md` / `CONTEXT.md` / `docs/RESUME.md` (or root `RESUME.md`) / `docs/iteration-journal.md` (or root — either location counts), Day 1 becomes: Q&A about the codebase + propose adopting this skill. Don't force adoption — surface the gap with concrete pain ("we don't know which conventions the team follows, so my edits will drift") and let the team decide. If the team decides to adopt: run `/init-harness` — on brownfield repos it detects the missing plc artifacts and offers the one-time archaeology pass (baseline ROADMAP / glossary / backfilled-ADR drafts, all AI-inferred and human-reviewed via `docs/adoption-snapshot.md`) at CHECKPOINT 1; full contract in `references/archaeology.md`.
 
 ## Anti-patterns
 

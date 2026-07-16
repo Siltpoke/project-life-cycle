@@ -44,6 +44,15 @@ wiring required.
 - `PreToolUse:Bash` → `hooks/guard.sh`: blocks `--no-verify` and direct
   `git push` to `main` while the skill is active (exit 2 = block). Belt-and-braces
   with the git pre-push hook; this one travels with the skill.
+- `PreToolUse:TaskCreate|TodoWrite` + `PreToolUse:Edit|Write|MultiEdit|NotebookEdit`
+  → `hooks/tasklist-first.sh` (`mark` / `check`): realizes Definition-of-Done forcing
+  function 1 as platform enforcement — the first file edit of each phase is blocked ONCE
+  (exit 2, actionable message) when no task list has been created yet; after that
+  single block it stays silent (block-once, never a wall). A close-gate run
+  (`make task-done`/`phase-done`, `close-gate.sh`) re-arms the guard so the NEXT phase
+  re-forces a fresh ≥`PLC_TASKLIST_MIN` list — PLC's "one task = one list = one gate"
+  boundary (`PLC_TASKLIST_REARM=1`, default on; set `0` for once-per-session).
+  `RESUME.md` writes exempt (context-floor deadlock guard); `PLC_TASKLIST_GUARD=0` disables.
 - `Stop` + `SubagentStop` → `hooks/close-gate-nudge.sh`: **conditional** — emits an
   `additionalContext` reminder ONLY when on a `feat/phase-*` branch with uncommitted
   changes or stale test-evidence. Silent otherwise (no per-turn noise).
@@ -102,9 +111,10 @@ from `workflow`, v2.1.160) or "ask Claude to create a workflow".
 **Node it strengthens.** The per-task cadence (`references/cadence.md`) and `/ship`
 are currently prose step-lists executed by model self-discipline — exactly the
 "model feels done, skips wrap-up" failure the skill fights. A Workflow script makes
-the fan-out (implementer → acceptance verifier → validator → code-quality → fixup →
-journal) **deterministic control flow**, and `schema` forces each step to return a
-validated object instead of free text.
+the fan-out (implementer → {acceptance verifier ∥ code-quality, independent}; validator
+joins once the verifier reports — not waiting on code-quality — then fixup → journal,
+per `cadence.md` §"Background-by-default") **deterministic control flow**, and
+`schema` forces each step to return a validated object instead of free text.
 
 **Status / how to adopt.**
 - **Documented option now.** When a cadence task or `/ship` slice is large and the
@@ -123,15 +133,22 @@ validated object instead of free text.
 waits on completion. Parallel sibling tool calls no longer cancel each other on one
 failure (v2.1.154).
 
-**Node it strengthens.** Cadence step 2 (Validator) and step 3 (Code-quality
-review) are **independent read-only passes over the same diff** — no data
-dependency. Today they run sequentially. Dispatch them in parallel (single message,
-two `Agent` calls, or background + `Monitor`) to cut wall-clock. Same for the
-acceptance verifier when it only reads `src/`.
+**Node it strengthens.** The cadence verification tail — acceptance verifier
+(step 1.5: reads only the story + Builder Summaries, never implementation source,
+writes only `tests/acceptance/*`) plus Validator (step 2) and Code-quality review
+(step 3), both read-only passes over the builder's diff. None of the three writes
+to source, so background concurrency is conflict-free. This is now
+**background-by-default**, not an optional optimization: verifier + CQ dispatch in
+background at implementer-return, the validator joins when the verifier report
+lands, and the controller blocks only at the fixup step. Canonical rule +
+dependency graph:
+`references/cadence.md` §"Background-by-default: the verification tail"
+(sequential one-at-a-time reviews add substantial pure waiting per phase).
 
-**Guard.** Keep the ordering dependency that IS real: implementer (step 1) →
-*then* the review trio. Only the trio parallelizes. The validator's lie-detection
-pass still consumes the Builder Summary, so it starts after the builder returns.
+**Guard.** Keep the ordering dependencies that ARE real: implementer (step 1) →
+the tail; and the validator's lie-detection consumes the Acceptance Verifier
+Report as well as the Builder Summary, so the validator starts after the verifier
+report lands (with implementer-return when step 1.5 is skipped/compressed).
 
 ---
 
@@ -246,6 +263,18 @@ exactly when long single-task sessions saturate. So this wires into the user's
 `~/.claude/settings.json` (fires every session), merged with the other live hooks —
 it does NOT go in the SKILL.md `hooks:` block.
 
+**Arming verification.** Machine-local wiring has a failure mode the hook
+itself cannot catch: it is simply never installed, and nothing notices — a session
+can run far past the floor while the hook sits unarmed, and nothing
+reports it. Three layers now close the gap: (1) the `phase-done` gate prints a
+**warn-only** row when no settings file references `context-floor.sh`
+(`references/close-gate.md` — warn, never fail: the floor is the user's global
+config); (2) `/init-harness --refresh` offers the idempotent repair (merge the
+`PreToolUse` entry, never clobber); (3) `close-gate-nudge.sh` reads the same floor
+env at task boundaries — clean tree + fresh test-evidence + occupancy ≥ floor →
+one throttled "/clear now" nudge, because the task boundary is the cheapest moment
+to checkpoint (late-session turns cost 2-3× early turns).
+
 **Wiring (machine-local `~/.claude/settings.json`, MERGE into existing `PreToolUse`):**
 
 ```json
@@ -281,7 +310,7 @@ floor re-arms only when occupancy climbs a further `PLC_CONTEXT_FLOOR_STEP`
 | Frontmatter hooks | close-gate / Definition of Done | **wired** (SKILL.md `hooks:` + `hooks/`) |
 | `SessionStart:resume` | RESUME contract | recommended project-settings block (init-harness) |
 | Workflows / `ultracode` | cadence + `/ship` | documented option; a full `/ship` port is a separate piece of work |
-| `run_in_background` / `Monitor` | cadence steps 2+3 | documented (parallel reviewers) |
+| `run_in_background` / `Monitor` | cadence steps 1.5-3 | **default** (background verification tail, `cadence.md` §Background-by-default) |
 | Worktree isolation | builder-split / issue-breakdown | documented (only when builders run concurrently) |
 | `AskUserQuestion` | opt-in checkpoints | documented (replaces freeform forks) |
 | Plan mode | `/ship` + Plan-step checkpoints | documented |

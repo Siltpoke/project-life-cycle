@@ -1,18 +1,13 @@
-# Phase Handoff Doc
+# Phase Handoff — field reference (retired as a standalone file)
 
-Every phase ends with a **single delivery document** that lets a reviewer (typically the product owner) understand and verify the work in 5 minutes without reading code or git log.
+Phases used to end with a **single delivery document** at `docs/handoff/YYYY-MM-DD-phase-X.Y-handoff.md`. **That file is retired — do not write it.** Measured on a long-running project that adopted this skill, 7 of its 8 sections were pure caches of information already available elsewhere (the file index is in git, the tests are in the test run, the PR-body appendix is on GitHub). No gate checks for the file (`references/close-gate.md`) and no cadence step instructs writing it (`SKILL.md` §"Per-Phase Workflow" step 7).
 
-## When to write
+This reference is **retained for two things only**:
 
-After all phase tasks are done + smoke artifacts ready, before opening the PR. Drop the file at:
+1. **§7 Findings field format** (below) — the one section that wasn't derivable. Findings now go straight into the journal fragment under the FACT schema (`references/journal-schema.md`); this doc still defines the F1/F2-style ID + Repro/Workaround/Fix-idea/Tier shape that a journal §7 entry follows.
+2. **PR description appendix** (below) — the mandatory PR-body template. The AI composes the PR body directly from spec/plan/journal + code diff at PR time; it does not read this content out of a previously-written handoff file, because no such file exists any more.
 
-```
-docs/handoff/YYYY-MM-DD-phase-X.Y-handoff.md
-```
-
-(Path convention: `YYYY-MM-DD` = handoff date, `X.Y` = phase number, all lowercase.)
-
-## 8 mandatory sections
+## 8-section field reference (historical structure — informs journal §7 + the PR appendix; not a file to produce)
 
 | # | Section | Content | Audience |
 |---|---|---|---|
@@ -49,7 +44,7 @@ Each finding gets a stable ID (`F1`, `F2`, ...) so it can be referenced across t
 
 ## PR description appendix
 
-The handoff doc's last section is a copy-paste PR body. **MANDATORY 3-section shape, in this order:**
+The mandatory PR body template. **MANDATORY 3-section shape, in this order:**
 
 ```markdown
 ## TL;DR
@@ -154,11 +149,11 @@ pure-infra / non-observable phases (no console/GUI surface a human watches).
 ```markdown
 ## Test plan
 - [x] `make phase-checks PHASE=X.Y` (BE N, FE M, E2E K/K — all pass)
-- [x] Manual: see handoff §4
+- [x] Manual: see the Track A smoke checklist (`references/smoke-tracks.md`)
 - [ ] Reviewer: <specific ask>
 
 ## Known issues / carry-forward
-<§7 short summary by tier; pre-existing failures NOT from this PR; action items deferred>
+<short summary by tier from this phase's journal §7 findings (FACT schema); pre-existing failures NOT from this PR; action items deferred>
 
 ## Deploy note
 <if migrations / env / secret changes — call out explicitly>
@@ -166,7 +161,7 @@ pure-infra / non-observable phases (no console/GUI surface a human watches).
 ## Refs
 - Spec: `docs/superpowers/specs/<phase-design>.md`
 - Plan: `docs/superpowers/plans/<phase-plan>.md`
-- Handoff: `docs/handoff/<handoff>.md`
+- Journal: `docs/journal.d/<phase-fragment>.md`
 ```
 
 **Why 3 mandatory sections:** mirrors the Task Close Report template
@@ -193,14 +188,14 @@ states that limit in plain words, not as a buried caveat.
 
 ## Anti-patterns
 
-- Writing the handoff doc AFTER the PR was opened — you lost the chance for it to drive PR review.
-- Putting raw commit messages into §1 — those are for §3, not §1.
-- Listing every changed file in §3 without grouping (new / modified / migrations / api / commits).
-- Skipping §7 because "everything works" — say "none open" explicitly so reviewers know findings were considered.
-- Writing §2 as a smoke checklist — §2 is daily use ("how do I actually use this feature"), §4 is verification ("how do I prove it works").
+- Composing the PR-body appendix AFTER the PR was opened — you lose the chance for it to drive PR review; write it before opening.
+- Putting raw commit messages into the PR body's §1 (What was done) — those belong in §1's Files list, not the prose summary.
+- Listing every changed file without grouping (new / modified / migrations / api / commits).
+- Skipping journal §7 findings because "everything works" — say "none open" explicitly so reviewers know findings were considered.
+- Writing PR-body §1 as a smoke checklist — §1 is daily use ("how do I actually use this feature"); verification lives in the Track A/B smoke artifacts, not restated there.
 
-## Why this exists
+## Why this exists (historical — the delivery document itself is retired)
 
-Product owners shouldn't need to read code to merge a PR. The handoff doc is the boundary contract: AI says "this is shippable, here's what changed, here's how to confirm." Owner reads 5 minutes, decides merge or not, and is the one who runs the manual smoke for surfaces that browser-only verification can catch (visual polish, real-feel UX, edge cases not in the test matrix).
+Product owners shouldn't need to read code to merge a PR. The (now-retired) handoff doc was the boundary contract: AI says "this is shippable, here's what changed, here's how to confirm." The same job is now split across artifacts that already exist rather than a dedicated cache file: the journal (§7 findings, FACT schema), the PR body (§1-3 built from this doc's appendix template), and the Track A/B smoke artifacts (verification) — the owner still reads all of that in ~5 minutes, it just isn't compiled into one intermediate file first.
 
-Without this doc, every phase requires the owner to re-derive the same understanding from git log + code, which doesn't scale across many phases.
+The reason a single-file compile isn't worth it: measured on a long-running project that adopted this skill, 7 of the 8 sections were pure caches of information already sitting elsewhere (file index in git, tests in the test run, PR-body appendix on GitHub), at the cost of an extra artifact to keep in sync and to retention-manage.
