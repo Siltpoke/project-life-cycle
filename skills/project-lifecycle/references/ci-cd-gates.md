@@ -243,8 +243,8 @@ Use `gh pr comment <PR#> --body "..."` (or equivalent). Comment must include:
 Copilot's 1st pass usually completes (the review job already started); subsequent `@copilot review` triggers fail silently with the same billing error. When this happens:
 
 - **Address every 1st-pass finding** per the standard `copilot-review-loop.md` protocol (inline reply per finding, fixup commit with Fx labels).
-- **Dispatch an independent general-purpose reviewer** (briefed per `references/reviewer-brief.md`) as the 2nd-pass stand-in. Brief it with: "Copilot's 2nd pass is blocked by external infra; you are the independent 2nd reviewer. Verify the fixup commit addresses each 1st-round finding correctly + spot-check for regressions the fixup might have introduced."
-- **Apply that subagent's findings** before merging, same standard as Copilot's findings would have been.
+- **Dispatch an independent general-purpose reviewer** (briefed per `references/reviewer-brief.md`) as the review gate — Copilot is advisory, so this is the actual reviewer, not a substitute for one. Brief it with: "Copilot's pass is advisory and blocked by external infra; you are the review gate. Verify the fixup commit addresses each 1st-round finding correctly + spot-check for regressions the fixup might have introduced."
+- **Apply that subagent's findings** before merging — its computed verdict (per `references/review-record.md` §"Termination contract") is the merge gate; Copilot's findings were only ever advisory.
 - **In the PR body**, note: "Copilot 2nd pass blocked by Actions billing; an independent general-purpose reviewer acted as the 2nd reviewer (see `<short summary of findings>` resolved in `<sha>`)."
 
 ### When to revert Pattern E

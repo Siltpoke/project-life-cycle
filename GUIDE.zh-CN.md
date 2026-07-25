@@ -28,6 +28,15 @@ flowchart LR
 - **`/ship <feature>`** —— 端到端交付一个用户可观察的 feature。链路：researcher → story → spec → BE-builder → FE-builder → acceptance verifier → validator → fix 循环 → PR。一个 milestone 内运行 N 次。
 - **`/release`** —— 切一个 SemVer release。从 `CHANGELOG.md` `[Unreleased]` 推断 bump、重命名 section、bump 三对 SemVer plugin 清单（Claude · Qoder · CodeBuddy，共六个文件；Codex 用自己的方案、Antigravity 无版本号，都不在同步集里）、validate、commit、tag、push、验证 GitHub Release 落地。当 `[Unreleased]` 积累了足够的用户可见内容时运行。
 - **`/builder-profile`**（opt-in，辅助 —— 不属于核心流水线）—— 读你本机的 Claude Code transcript，把"你实际怎么用 AI coding agent"写成一份 markdown 快照到 `~/.claude/builder-profile.md`。全程本机（不上传）。Gated pipeline：deterministic stats → evidence gate → cold-read → adversarial verify → independent verification。默认描述性 —— 一面镜子（operating modes、signature moves，并诚实标注哪些测不了），不是评分卡；1-10 打分只在 `--scores` 后启用。独立于 `/init-harness → /ship → /release`。
+- **`/research <question>`**（辅助 —— 不属于核心流水线）—— 不开 brainstorm 就给**一个**问题一份带引用的答案。包装 PLC 自己的 research 协议（`references/brainstorm-research-protocol.md`）：并行派 Tier-1/Tier-2 调研 agent、综合出带引用的推荐，默认再跑一轮盲 2nd-agent 验证，写报告到 `docs/research/`。`--quick` 跳过 2nd-agent（信心封顶 🟡）；`--tier1` 用于非 UX 问题。产出的是 research **工件** —— 不锁决策、不写 qa-log（那是 brainstorm 的事）。够到外部 deep-research 工具的 PLC 原生替代。
+- **`/handoff`**（辅助 —— 不属于核心流水线）—— 把一份 schema 约束、MOMENT 时态的会话中续接快照写进 `RESUME.md`（SessionStart:resume hook 读的那份）+ 一条*有条件的* journal FACT，让下个会话零重推地接上。捕获 git 恢复不了的隐形状态 —— 当前 task+phase、下一个具体动作、staleness 锚（HEAD SHA + branch + 时间戳）、以及（非空时）decisions / what-NOT-to-retry / blockers / gotchas。核心字段缺失就拒写；绝不编造 rationale（`references/handoff-snapshot.md`）。与 `/research` + `/review` 凑成"给 PLC 内脏装按钮"三件套。
+- **`/review`**（辅助 —— 不属于核心流水线）—— 对当前 branch diff（或给定 path/range）跑一次 PLC 原生 code review。派一个 general-purpose agent，用 `references/reviewer-brief.md` 简报：file:line 证据、先证伪、verdict 放最后。不自算 approve/block —— 人从未决 severity 计数里推断。与 `/research` 对称；不加新 review 逻辑。
+- **`/reconcile`**（辅助 —— 不属于核心流水线）—— 会话收尾的 drift 网：把会话里定的（或 PR 里已发的）roadmap/status 决策，自上次 checkpoint 起对齐到 `docs/ROADMAP.md` + read-first 状态文档，提**分步、逐条可批**的编辑 + 一份 drift-latency 报告。绝不 auto-commit。
+- **`/recall`**（辅助 —— 不属于核心流水线）—— 从本 repo 最新的自动会话 digest（`save_session` Stop hook 无需敲字写下的）给当前会话做简报。只读 —— surface 在飞的 task / 碰过的文件 / 用过的工具，然后停。取名 `/recall`（非 `/resume`）以避开内置的会话选择器。
+- **`/catchup`**（辅助 —— 不属于核心流水线）—— 回到 repo（`/clear` 之后）的暖场"welcome back"卡片：你在哪、shipped 了啥、在做啥、save 是否新鲜 —— 由实时 git + `RESUME.md` + 会话 digest 合成。只读；没数据的行省掉。与 `/recall`（机械 digest）+ `/handoff`（写锚）互补。
+- **`/capture`**（辅助 —— 不属于核心流水线）—— 把一个陈述出来的项目意图（"为什么"）钉进冷 cognition log。至多问两个问题，追加一条经校验的条目到 `docs/cognition-log.d/`，并对同主题的既有意图做 supersede 确认。
+- **`/cognition-distill`**（辅助 —— 不属于核心流水线）—— 从冷 intent-log 重生热 cognition 文档（`docs/cognition.md`）（regenerate-from-source）：把未被 supersede 的意图归成四个 section + 跑确定性 guard。milestone 收尾或按需运行，在 close-gate 之外。
+- **`/tasklist`**（辅助 —— 不属于核心流水线）—— 在终端渲染当前 phase 的进度（读 `.claude/tasklist.md`，tasklist 契约）：默认折叠的 done/total 行，`--tree` 展开全 glyph 概览。纯可移植 bash，只读。
 
 命令之间：每个 PR 都要更新 `[Unreleased]` + 带恰好一个 category label + 用 Conventional Commits 标题（详见 [`CONTRIBUTING.md`](CONTRIBUTING.md)）。Validator（cadence step 2，只读）抓 builder 说谎；Acceptance Verifier（cadence step 1.5）每条 AC 写一个测试；deterministic handlers（`.claude/handlers/`）在 LLM 介入之前注入 auth / secrets / pre-flight lint / migration safety。
 
@@ -247,7 +256,16 @@ commands/                                  ← skill 自带的斜杠命令（由
 ├── init-harness.md                        /init-harness —— bootstrap 项目接入 skill（检测技术栈 + 生成 CLAUDE.md / folder-map / policy keys / .claude/commands/ / .claude/handlers/；幂等合并；4 个 checkpoint）
 ├── ship.md                                /ship —— vertical-slice orchestrator（researcher → story → spec → BE → FE → verifier → validator → fix → PR；3 个 checkpoint）
 ├── release.md                             /release —— 自动化切版（从 CHANGELOG [Unreleased] 推断 SemVer bump、重命名 section、bump 所有 plugin manifest、validate、commit、tag、push、验证 GitHub Release；1 个 checkpoint）
-└── builder-profile.md                     /builder-profile —— opt-in 本机 AI-coding 使用快照（读 ~/.claude/projects transcript → ~/.claude/builder-profile.md；确定性统计 + 冷读 + 独立验证；全程本机；辅助,不属核心流水线）
+├── builder-profile.md                     /builder-profile —— opt-in 本机 AI-coding 使用快照（读 ~/.claude/projects transcript → ~/.claude/builder-profile.md；确定性统计 + 冷读 + 独立验证；全程本机；辅助,不属核心流水线）
+├── research.md                            /research —— 不开 brainstorm 给单个问题一份带引用的答案（并行 Tier-1/Tier-2 agent + 盲 2nd-agent 验证 → docs/research/；只出工件、不锁决策；辅助）
+├── review.md                              /review —— 对 branch diff / 某 path 跑 PLC 原生 code review（派 reviewer-brief.md；file:line + 先证伪 + verdict 最后；verdict 由人从 severity 计数推；辅助）
+├── handoff.md                             /handoff —— MOMENT-时态会话中续接快照 → RESUME.md（+ 有条件 journal FACT）；核心字段缺失拒写、绝不编造 rationale；辅助）
+├── reconcile.md                           /reconcile —— 会话收尾 chat-decision-drift 扫描（roadmap/status 决策 + 已合 PR 对齐 ROADMAP.md + 状态文档 → 分步可批编辑 + drift-latency 报告；绝不 auto-commit；辅助）
+├── recall.md                              /recall —— 从本 repo 最新自动会话 digest 做简报（save_session Stop hook；只读；取名 /recall 非 /resume 以避开内置选择器；辅助）
+├── catchup.md                             /catchup —— /clear 后的暖场 welcome-back 卡片（实时 git + RESUME.md + digest → 你在哪/shipped/在做/save-state；只读；辅助）
+├── capture.md                             /capture —— 把一个陈述出来的意图（"为什么"）钉进冷 cognition log（≤2 问 → docs/cognition-log.d/；同主题 supersede 确认；辅助）
+├── cognition-distill.md                   /cognition-distill —— 从冷 intent-log 重生热 docs/cognition.md（四 section + 确定性 guard；在 close-gate 之外运行；辅助）
+└── tasklist.md                            /tasklist —— 在终端渲染当前 phase 进度（读 .claude/tasklist.md，tasklist 契约；折叠行，--tree 展开全 glyph 概览；可移植 bash，只读；辅助）
 
 CHANGELOG.md                              Keep a Changelog 1.1.0 —— 按版本记录交付内容。[Unreleased] 在最上。
 CONTRIBUTING.md                           Commit / PR / CHANGELOG / label 纪律，在 repo 边界落地。

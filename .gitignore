@@ -14,5 +14,30 @@ __pycache__/
 
 docs/
 
+# the tasklist-first guard's portable satisfier — per-phase working state, not a
+# deliverable, and it carries a nonce that is meaningless outside its session
+/.claude/tasklist.md
+# machine-local hook state. The fixed hooks write these to ~/.claude/plc-state/<repo>/
+# instead, so on a current plugin build these paths are never created — but a session running an
+# OLDER cached build still writes them here, and an unignored file dirties the tree, which is one
+# of close-gate-nudge.sh's own trigger conditions. Observed live minutes after the fix commit:
+# both stamps reappeared as `??` and the hook then warned about "uncommitted changes" that were
+# its own two writes. Kept as a permanent floor rather than removed once everyone upgrades — two
+# lines, against a failure that is silent.
+/.claude/.close-gate-nudge-last
+/.claude/.clear-nudge-last
+/.claude/.gate-runs/
+
 # session-local resume artifact (never publish)
-RESUME.md
+# NB: anchor to root so only the top-level RESUME.md is ignored — an unanchored
+# `RESUME.md` matches any nested path of that name on case-insensitive filesystems
+# (macOS APFS) and could wrongly ignore a shipped file. (Historically this collided
+# with the old `commands/resume.md`, since renamed to `commands/recall.md`.)
+/RESUME.md
+# cold sibling written by /handoff (archive-before-overwrite) — holds verbatim
+# outgoing snapshots incl. cross-project identifiers; never publish.
+/RESUME-archive.md
+
+# local embedding-model cache (ONNX weights etc.) pulled by dev tooling — a large
+# binary blob, never part of the skill deliverable; keep it out of history.
+/local_cache/

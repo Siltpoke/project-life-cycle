@@ -20,7 +20,7 @@ claude plugin marketplace add Victoriakaey/project-life-cycle
 claude plugin install project-lifecycle@project-life-cycle
 ```
 
-Restart Claude Code. Skill becomes available as `project-lifecycle`; auto-triggers when you start a new project, plan a milestone, or run per-phase work. Four slash commands become available — listed under the plugin namespace as `/project-lifecycle:init-harness` (bootstrap a project), `/project-lifecycle:ship` (vertical-slice feature), `/project-lifecycle:release` (cut a release), and the opt-in `/project-lifecycle:builder-profile` (a local snapshot of how you actually use an AI coding agent). The bare forms (`/init-harness`, `/ship`, …) used throughout this README also work, as long as no other installed command claims the same name.
+Restart Claude Code. Skill becomes available as `project-lifecycle`; auto-triggers when you start a new project, plan a milestone, or run per-phase work. The three headline commands — `/project-lifecycle:init-harness` (bootstrap a project), `/project-lifecycle:ship` (vertical-slice feature), `/project-lifecycle:release` (cut a release) — drive the core arc, alongside the opt-in `/project-lifecycle:builder-profile` (a local snapshot of how you actually use an AI coding agent). A set of auxiliary commands rounds out the workflow — `/catchup`, `/handoff`, `/reconcile`, `/review`, `/research`, `/capture`, `/recall`, `/cognition-distill`, `/tasklist` — see the [Guide](GUIDE.md) for what each does. The bare forms (`/init-harness`, `/ship`, …) used throughout this README also work, as long as no other installed command claims the same name.
 
 Update later:
 

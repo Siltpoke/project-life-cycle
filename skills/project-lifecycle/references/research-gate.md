@@ -36,10 +36,12 @@ When research happens, capture in the spec or ADR:
 
 Two to five sources is usually right. Single-source is a weak signal.
 
-## Revision pass after each major decision
+## Risk-naming after each major decision (cross-check agent A)
 
-Append to the decision record:
+Append to the decision record, for each major decision:
 
-> **Revision pass.** Given the choice made, name at least two failure modes we may be missing. For each: when would it bite? How would we detect it? What's the rollback?
+> Given the choice made, name at least two things that could go wrong that we may be missing. For each: when would it bite? How would we detect it? What's the rollback?
+
+This is produced by the **cross-check agent A** (SKILL.md step 3, `references/reviewer-brief.md` §"Cross-check lens" output C) — an independent read-only agent at brainstorm close, **not** the spec's writer self-grading. Its output fills the qa-log entry's `Risks (what could go wrong with this choice)` field, tagged `cross-check agent A` to keep it distinguishable from the lines the blind 2nd agent produced.
 
 This forces explicit consideration of downside before locking in.

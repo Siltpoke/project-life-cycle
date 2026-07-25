@@ -21,7 +21,13 @@ Wait for user choice. Default if user does not pick: ask again — never assume.
 Both modes use the same 7-step per-question protocol below. They differ only in **delivery cadence**:
 
 - **Mode A**: surface step 7 to user immediately after each Q completes; wait for user lock before starting next Q.
-- **Mode B**: surface all Qs at once after every Q has run through steps 1-6; write everything to the doc first, then ping user with a single "ready for review" message pointing to the doc.
+- **Mode B**: surface all Qs at once after every Q has run through steps 1-6; write everything to the fragment first, then hand the batch back in a single "ready for review" message that **carries the sheet itself** — the completed entries, not a path to them. Name the fragment's path too, so the reader knows where the canonical artifact lives, but the path is a pointer alongside the content, never the delivery. A reader who has to go open a file before they can start deciding has been handed homework instead of a review.
+
+**Both modes write the same entry** (see "Documenting the Q&A" below) — a two-state record that starts at `Status: PROPOSED` and is edited **in place** to `Status: LOCKED` once the user answers. Mode A transits both states inside one turn; Mode B leaves every Q sitting at PROPOSED until the review pass. One schema, one file, one entry per question — never a separate "review sheet" document that is merged back later.
+
+**Hard rule — no complete sheet, no ping.** Mode B's "ready for review" message is **blocked** until the doc exists and *every* question in the batch carries *every* field marked required for PROPOSED in the authoritative table under §"Documenting the Q&A" → "The two states". A batch surfaced against a missing, partial, or stubbed sheet is a **malformed message** — same register as "no citation, no send" (§Step 7): not a message you forgot to finish, a message you must not send. A missing field means steps 1-6 are not finished — go back and finish them. Handing over a sheet you did not actually finish writing is the specific failure this rule exists to prevent; surfacing the content rather than a path makes a stubbed entry visible on arrival instead of at the moment the reader opens the file, but it does not lower the bar — the gate is the same, and it is checked before the message is sent, not after.
+
+**This does not license batching *questions* into one message.** The "one question per message" hard rule (§Step 7) is about **interactive surfacing** — never make the user answer 4 questions out of one wall of text. Mode B's ping delivers the batch as a **sheet** — each question in its own self-contained entry, read at the reader's own pace and in whatever order they choose — not as N questions stacked into a conversational turn demanding N answers back. Any follow-up asked back in conversation is still one at a time. Mode B changes *how* the batch is read, not whether the user is made to juggle N questions in a chat turn.
 
 ## Recording is mandatory regardless of mode
 
@@ -32,7 +38,9 @@ Every brainstorm session writes to the current branch's `docs/qa-log.d/<date>-<b
 - **All research citations** — every URL from every dispatched agent, deduplicated, ordered by Tier (1 then 2).
 - **1st-agent reasoning** — verbatim or near-verbatim, not summarized.
 - **2nd-agent reasoning** — verbatim, including disagreement details if any.
-- **User decision text** — verbatim, including any nuance or constraint they added.
+- **User decision text** — verbatim, the quote and nothing else. Do not fold anything into it.
+- **The constraint or caveat attached while deciding** — recorded separately, in `Decision note`. A
+  nuance folded into the quote is unfindable, which is the whole reason it has its own field.
 
 **Fallback (un-adopted projects):** if the repo hasn't wired up `docs/qa-log.d/`, write directly to the project-wide `docs/brainstorming-qa-log.md` monolith instead — this remains a fully supported path, just not the default for projects that have adopted the fragment convention.
 
@@ -165,24 +173,38 @@ Run Tier 1 + Tier 2 in parallel (single message, multiple `Agent` calls). Wait f
 
 You (the controller) read both research outputs and produce a recommendation with citations baked in.
 
-Required shape:
+Required shape — **criteria, then evidence, then the pick, in that order.**
 
 ```
-**Recommendation:** <option name>
+**Engine:** <what is producing this synthesis — e.g. `claude-opus-4-8` (controller)>
 
-**Why this wins on <audience priority from CLAUDE.md>:**
+**Criteria — what would make one option win here:**
+- <axis 1, from the audience priority in CLAUDE.md>
+- <axis 2>
+
+**Evidence:**
 - Tier 1 evidence: ProductA does X (URL), ProductB does X (URL), ProductC does X (URL) → industry pattern
 - Tier 2 evidence: ProductD does X (URL), ProductE does X (URL) → confirms novice-friendly
 - Trade-offs ruled out: option B because <reason>, option C because <reason>
 
 **Citations:** [list of 4-6 URLs]
+
+**Recommendation:** <option name> [🟢 / 🟡 / 🔴]
 ```
+
+These map onto the entry's `1st-agent engine` / `1st-agent criteria` / `1st-agent reasoning (verbatim)` / `Citations` / `1st-agent independent pick` — same order, same names.
 
 If the research surfaces patterns the original question didn't anticipate (e.g. you asked "PDF vs Excel" and discover ≥3 products ship both as separate buttons in one row), surface that as an option even though it wasn't in the original frame.
 
 ## Step 4 — Dispatch blind 2nd-agent
 
-Fresh `Agent` instance. Show the agent:
+**Discoverability offer (first step-4 only, key-absence gated).** Before resolving the key: if this is the **first** step-4 in the project AND `second-agent-family` is **absent** from CLAUDE.md (project + user-global) AND a foreign CLI is detected present+authed (reuse `scripts/cross-family-review.sh`'s availability probe), make the **one-time** offer to arm cross-family review per `references/cross-family-review.md` §"Discoverability". Decline → write `second-agent-family: off` (never re-ask); accept → write `foreign:codex` (the D4 consent still fires separately at first spawn — the offer does not grant it). If no foreign CLI is installed OR the key is already set to anything, skip the offer silently (byte-identical). Then resolve the key:
+
+**Engine resolution (armed-optional cross-family — `second-agent-family` key, default `auto`).** Resolve the key per `references/cross-family-review.md`:
+- `auto` / `same-family` / unset → a fresh **same-family `Agent` instance** (everything below, unchanged — byte-identical to a repo without this key).
+- `foreign:codex` (or another armed family) → build a **synthesized decision packet** (the same inputs shown below — question + options + step-2 research, and NOTHING the same-family agent is forbidden to see), take arm-time consent if not yet given, and invoke `scripts/cross-family-review.sh --family codex --packet <packet> --out <result>`. On `status:succeeded` use the foreign pick; on `status:fallback(<reason>)` fall back to the same-family `Agent` instance below. **Either way stamp the qa-log `2nd-agent engine:` + `2nd-agent status:` fields** (`same-family` / `foreign:codex` + `succeeded|fallback(<reason>)`) so the record never claims a cross-family review that silently didn't happen. A foreign reviewer NEVER blocks or overrides — it is a dissent source; disagreement surfaces to the human exactly as the same-family path (step 5).
+
+Fresh `Agent` instance (the same-family path, and the fallback target for every foreign gate failure). Show the agent:
 - The question
 - All candidate options (including your synthesized option)
 - The research outputs from step 2 verbatim
@@ -208,14 +230,37 @@ Options:
 
 Research findings: <verbatim from step 2>
 
-Required output:
-1. Your independent recommendation + 2-3 sentence rationale
-2. The strongest hole in each option you didn't pick
-3. Anything missing from the options list (a 4th option you'd consider)
-4. Any failure mode you'd worry about
+Required output, in this order:
+1. The criteria you are judging on — the axes that would make one option win.
+   State these BEFORE naming a winner; committing to the axes first is what stops
+   the criteria from being reverse-engineered out of a pick you already liked.
+2. The strongest hole in each option, including the one you end up picking.
+3. Your independent recommendation + 2-3 sentence rationale
+4. Anything missing from the options list (a 4th option you'd consider)
+5. Any risk you'd worry about with your pick
 ```
 
+**The output order is load-bearing, not a formatting preference.** Outputs 1 and 2 are recorded whole and **above** the pick; output 3 is the one that splits — its rationale is appended to `2nd-agent reasoning (verbatim)`, and only its option name goes to `2nd-agent independent pick`. Asking for the pick before outputs 1 and 2 would have the agent name a winner and only then produce the criteria and the case against each option, leaving the entry to be assembled evidence-first by transcription — which is the shape of a rationalization, not of reasoning.
+
+Output 2 deliberately covers **every** option including the one the agent goes on to pick: a reviewer that only finds fault with what it rejected has not reviewed its own choice. Keep it distinct from output 5 — output 2 is the case against the option *as an option*, weighed before choosing; output 5 is what could go wrong *after* this pick is adopted, which is why it lands in `Risks` alongside cross-check agent A's lines rather than in the reasoning.
+
 The agent's job is to disagree if disagreement is warranted. If it always agrees with the controller's instinct, the protocol is broken (controller leaked their preference). Fix the prompt, re-run.
+
+**Every numbered output above has a named home in the entry template** — record them there, do not let them live only in the prose summary. *(Brainstorm caller only. The `/research` caller runs this step but does **not** write a qa-log entry — it carries these outputs into its `docs/research/` report instead.)*
+
+| Prompt output | Entry field |
+|---|---|
+| 1 — criteria judged on | `**2nd-agent criteria:**` — recorded above its pick, in that order, so a reader can see two different picks as two different standards rather than as a bare contradiction |
+| 2 — strongest hole in each option | `**2nd-agent reasoning (verbatim):**` |
+| 3 — independent recommendation | `**2nd-agent independent pick:**` (the option name) + `**2nd-agent reasoning (verbatim):**` (the rationale, appended after output 2) |
+| 4 — anything missing / a 4th option | `**2nd-agent's own suggestion:**` — write `none` explicitly when the agent offers nothing; an empty field is indistinguishable from a skipped step |
+| 5 — risks | `**Risks (what could go wrong with this choice):**`, each line tagged with its producer — tag these `2nd agent`, so they stay distinguishable from the ones cross-check agent A adds later |
+
+Outputs 1-3 are emitted in the same order they are recorded, so the entry is transcribed straight down rather than reassembled — the reordering is the point, and an entry built by shuffling a verdict-first response back into an evidence-first shape defeats it.
+
+Also stamp `**2nd-agent engine:**` with what actually produced the verdict (`same-family` or `foreign:<name>`, e.g. `foreign:codex`), `**Same family:**` with `yes` / `no` by comparing it against `**1st-agent engine:**`, and — when a foreign family was armed — `**2nd-agent status:**` with `succeeded` or `fallback(<reason>)` (reason ∈ not-installed / not-authed / spawn-failed / unparseable / timed-out / declined-install / unsupported-family). Before this feature, the answer was always `Same family: yes` — a same-family subagent; the `second-agent-family` key (`references/cross-family-review.md`) makes `no` achievable by running the 2nd agent on a different CLI family. The status field is what keeps the record honest: a silent fallback to the same-family subagent must read `foreign:codex` + `fallback(<reason>)`, never a bare `Same family: no` that claims a cross-family review which did not actually run. `Same family` (and `2nd-agent status` when armed) is never omitted, and never left blank because it looked obvious.
+
+A dispatched 2nd agent whose pick never reaches the entry is **work paid for and thrown away** — the independent choice is the entire deliverable of this step.
 
 ## Step 5 — Compare conclusions
 
@@ -242,7 +287,7 @@ Apply 🟢 / 🟡 / 🔴 to the locked recommendation:
 
 | Tag | When | User review priority |
 |---|---|---|
-| 🟢 **Industry pattern** | ≥3 refs (across both tiers) do the same thing AND 2nd-agent agreed AND no major failure mode | Skim |
+| 🟢 **Industry pattern** | ≥3 refs (across both tiers) do the same thing AND 2nd-agent agreed AND no major entry under `Risks` | Skim |
 | 🟡 **Mixed industry** | Refs split, or 1st & 2nd agent split, or audience trade-off explicit | Read rationale |
 | 🔴 **AI inference** | <3 refs, or 2nd-agent disagreed AND user picked controller's option, or no good ref product exists for this decision | **Must review carefully** |
 
@@ -286,6 +331,8 @@ If a structured choice UI is available, present 2-4 options with the recommendat
 - **Tier 1 only** for UX decisions — too-professional design, fails novice audience.
 - **Tier 2 only** for compliance-touching decisions — friendly but non-compliant ships legal risk.
 - **Asking the user a Q that codebase exploration could answer** — dispatch `Explore` subagent first. If exploration resolves the Q, drop it; if it narrows the Q, present grounded options. Asking what `grep` answers wastes user time.
+- **Pinging "ready for review" against a sheet that isn't complete** — the Mode B failure. Handing over a half-filled sheet as if it were reviewable (stubbed entries, or half the Qs missing fields the PROPOSED column requires) is worse than saying "still working": it spends the user's attention and returns nothing, and it reads in the transcript as if the batch was delivered. The ping carries the sheet's content, so an incomplete batch is visible on arrival rather than on file-open — that makes the failure louder, not more acceptable. Finish steps 1-6 for every Q, then ping.
+- **Recording the 2nd agent's prose but not its pick** — the dispatched agent chose an option; if that choice never reaches `**2nd-agent independent pick:**`, the blind-review step was paid for and thrown away. Same for its suggested 4th option: write it, or write `none`.
 - **Skipping Step 0 language-first pass** — asking design Qs over fuzzy vocabulary produces fuzzy answers + drift between code names ↔ spec names. CONTEXT.md sweep is non-negotiable for domain-touching Qs.
 
 ## Documenting the Q&A
@@ -302,12 +349,17 @@ Each brainstorm session lands in the current branch's `docs/qa-log.d/<date>-<bra
 **Trigger (verbatim user message):**
 > <copy the user's literal request that started the brainstorm>
 
-**Controller framing (verbatim, the message I sent back to user):**
+**Controller framing (verbatim, the message I sent back to user):**        ← per-phase, not per-Q; written when the framing is actually surfaced (Mode A: as each Q goes out. Mode B: at the review ping)
 > <copy the exact framing message — what surfaced as the Q to user>
 
 ### Q<N>: <question> — <YYYY-MM-DD HH:MM>
 
-**Locked:** <option> [🟢 / 🟡 / 🔴]
+**Status:** PROPOSED | LOCKED
+
+**Options:**        ← one row per option; three options must be comparable down a column, never parsed out of one sentence
+- **A** — <name> — <one-line consequence of choosing it>
+- **B** — <name> — <one-line consequence>
+- **C** — <name> — <one-line consequence>
 
 **Research dispatched:**
 - Tier 1 (Advanced/Professional): <agent prompt summary>
@@ -321,23 +373,100 @@ Each brainstorm session lands in the current branch's `docs/qa-log.d/<date>-<bra
   - <URL 3> — <product/source> says Z
   - <URL 4> — <product/source> says W
 
+**1st-agent engine:** <what produced this synthesis — e.g. `claude-opus-4-8` (controller)>
+
+**1st-agent criteria:** <the axes it judged on — what would make one option win, stated before the winner>
+
 **1st-agent reasoning (verbatim):**
 > <do not paraphrase; copy the synthesis>
+
+**1st-agent independent pick:** <option> [🟢 / 🟡 / 🔴] — <one sentence: why this one>
+
+**2nd-agent engine:** <what produced the verdict — e.g. `claude-sonnet-5` (same-family subagent) / `n/a — compressed (<criterion>)`>
+
+**2nd-agent criteria:** <the axes IT judged on, chosen before it saw any recommendation>
 
 **2nd-agent reasoning (verbatim):**
 > <copy what 2nd agent independently concluded; include the disagreement text if any>
 
-**Agreement:** agree / disagree (resolved by <user / evidence-strength tiebreak>)
+**2nd-agent independent pick:** <option name — what IT chose, before seeing the recommendation>
 
-**Failure modes (revision pass):**
-1. <when it bites / how detected / rollback>
-2. <when it bites / how detected / rollback>
+**2nd-agent's own suggestion:** <its proposed 4th option / revision — or `none`>
 
-**User decision (verbatim):**
-> <copy what user typed, including any nuance/constraint they added>
+**Same family:** yes | no | n/a — compressed (<criterion>)        ← always written, never conditional; `yes` = the "independent" review came from the same model family as the 1st agent, which the reader must not have to infer. Compressed decisions take the third value, never `no` — there was no second agent, so `no` would be a clean bill for a check that never ran
 
-**Resolution date:** <YYYY-MM-DD>
+**Agreement:** agree / disagree        ← whether the two agents converged is known BEFORE the user answers
+
+**Tiebreak:** <resolved by user / evidence-strength>        ← LOCKED only; omit entirely when Agreement: agree
+
+**Risks (what could go wrong with this choice):** <producer per line — `2nd agent` (step 4 output 5) or `cross-check agent A` (SKILL.md step 3)>
+1. `<producer>` — <when it bites / how detected / rollback>
+2. `<producer>` — <when it bites / how detected / rollback>
+
+**Locked:** <option> [🟢 / 🟡 / 🔴]        ← LOCKED only
+
+**User decision (verbatim):**        ← LOCKED only
+> <copy what user typed — the quote only; constraints go in the next field, not folded in here>
+
+**Decision note:** <the constraint / caveat / scope limit the user attached while deciding — or `none`>        ← LOCKED only
+
+**Resolution date:** <YYYY-MM-DD>        ← LOCKED only
 ```
+
+### The two states
+
+**This table is the single authoritative required-field list.** Anywhere else in this doc or in `SKILL.md` that needs to talk about completeness points *here* rather than re-listing the fields — a second enumeration is a second source of truth, and it drifts.
+
+Scope: these are the fields of the **`### Q<N>` entry**. The three per-phase header fields above it (`Mode chosen` / `Trigger` / `Controller framing`) are written once per brainstorm, not per question.
+
+**The row order below IS the entry order.** Field order is reasoning order,
+so nothing that functions as an answer may sit above the material
+justifying it: each agent's `criteria` and `reasoning` precede its `pick`, and both agents precede
+the human's `Locked` / `User decision`. Re-ordering a row here silently re-orders the reasoning.
+
+| # | Field (per-Q) | PROPOSED | LOCKED |
+|---|---|---|---|
+| 1 | `Status` | ✅ `PROPOSED` | ✅ `LOCKED` |
+| 2 | `Options` — one row per option | ✅ | ✅ |
+| 3 | `Research dispatched` | ✅ | ✅ |
+| 4 | `Citations` | ✅ | ✅ |
+| 5 | `1st-agent engine` | ✅ | ✅ |
+| 6 | `1st-agent criteria` | ✅ | ✅ |
+| 7 | `1st-agent reasoning (verbatim)` | ✅ | ✅ |
+| 8 | `1st-agent independent pick` | ✅ | ✅ |
+| 9 | `2nd-agent engine` | ✅ | ✅ |
+| 10 | `2nd-agent criteria` | ✅ | ✅ |
+| 11 | `2nd-agent reasoning (verbatim)` | ✅ | ✅ |
+| 12 | `2nd-agent independent pick` | ✅ | ✅ |
+| 13 | `2nd-agent's own suggestion` | ✅ (`none` is a valid value) | ✅ |
+| 14 | `Same family` | ✅ `yes` / `no` / `n/a — compressed (<criterion>)` — never omitted | ✅ |
+| 15 | `Agreement` | ✅ | ✅ |
+| 16 | `Tiebreak` | — | ✅ when `Agreement: disagree`; omitted when `agree` |
+| 17 | `Risks (what could go wrong with this choice)` | ✅ | ✅ |
+| 18 | `Locked` | — | ✅ |
+| 19 | `User decision (verbatim)` | — | ✅ |
+| 20 | `Decision note` | — | ✅ (`none` is a valid value) |
+| 21 | `Resolution date` | — | ✅ |
+
+Three of these are **never droppable**, because the empty answer is itself information:
+`2nd-agent's own suggestion` and `Decision note` take a required `none`, and `Same family` a
+required `n/a — compressed (<criterion>)`. An omitted field cannot be told apart from one that was
+checked and came back clean, and and that ambiguity is expensive;
+writing the empty answer out is the whole point.
+
+**Meaning:** PROPOSED = researched, reviewed, waiting on the human. LOCKED = the human answered; the decision is final. PROPOSED is written by steps 1-6; the LOCKED-only fields are written from the user's answer at step 7.
+
+**PROPOSED → LOCKED is an in-place edit of the same entry.** Flip `Status:`, fill the LOCKED-only fields, leave everything else exactly as written — **while the question is being locked, never open a second entry or a second file for it.** (Post-lock is different: if the user later reverses a *locked* decision, the `Q<N>-revisited` rule below applies — that is an append, and it is required, not a violation of this rule.) The entry is the audit trail: it must show what was known *before* the human chose, next to what they chose.
+
+**Mode A** transits both states within one turn — it still writes the PROPOSED fields first, because those are what the surfaced message is built from. **Mode B** leaves every Q at PROPOSED until the review pass, which is exactly what makes the batch reviewable.
+
+**A PROPOSED entry missing any required field is not a draft — it is the bug this schema exists to fix.** See the "no complete sheet, no ping" hard rule under Mode selection.
+
+**Compressed decisions** (§"When to compress" — skips step 4 only, never research) have no 2nd agent, so **seven** fields have no producer. Write `n/a — compressed (<criterion>)` in **each** of them, named explicitly rather than counted: `2nd-agent engine`, `2nd-agent criteria`, `2nd-agent reasoning (verbatim)`, `2nd-agent independent pick`, `2nd-agent's own suggestion`, `Same family`, and `Agreement`.
+
+`Same family` is the one to get right: it is `n/a — compressed`, **never `no`**. There was no second agent, so "not same family" would be a clean bill of health for a check that never ran — the exact never-checked-vs-checked-and-clean confusion the standing field exists to remove. The 1st-agent fields (`engine`, `criteria`, `reasoning`, `independent pick`) are unaffected: compression removes the reviewer, not the recommendation.
+
+`Risks (what could go wrong with this choice)` still applies — cross-check agent A produces them even when step 4 is skipped. The criterion is named, per that section's existing rule.
 
 A locked Q is NEVER deleted from the log. If the user later changes their mind, append a new entry "Q<N>-revisited: <reason>" — keep the original as audit trail.
 

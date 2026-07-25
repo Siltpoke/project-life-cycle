@@ -61,6 +61,8 @@ GitHub auto-generates the release-notes body from PR labels via `.github/release
 
 PR with no category label → lands in `Other Changes` catch-all → fix before cutting the release. The validator + PR template should remind authors.
 
+**All labels above must exist in the repo** (`gh label list`) and match `.github/release.yml`'s groups — a documented-but-absent label silently routes PRs into `Other Changes`. Verify by listing all three (taxonomy ∪ release.yml ⊆ `gh label list`), not by reading one; create any missing label with `gh label create <name> --color <hex>`. Two GitHub **default** labels are aliases of canonical taxonomy names and are NOT used for release-note grouping: `documentation` ≈ `docs`, `enhancement` ≈ `feature`. Prefer the canonical name (`docs` / `feature`) on PRs so the label matches the release.yml group exactly.
+
 ## Per-PR discipline (mandatory)
 
 Every PR that ships a user-visible change MUST:

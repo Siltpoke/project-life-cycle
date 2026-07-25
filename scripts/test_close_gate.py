@@ -119,7 +119,10 @@ def _make_otherwise_passing_phase_fixture(tmp_path: Path, spec_count: int) -> Pa
     files = _docs(spec_count, "specs")
     repo = make_fixture_repo(tmp_path, manifest, files)
     (repo / "CHANGELOG.md").write_text("## [Unreleased]\n- x\n", encoding="utf-8")
-    (repo / "docs/ROADMAP.md").write_text("- x\n", encoding="utf-8")
+    (repo / "docs/ROADMAP.md").write_text(
+        # must NAME the phase: the ROADMAP row is content-checked, not touch-checked
+        "- [x] phase 1.0 — fixture row\n", encoding="utf-8"
+    )
     (repo / "docs/journal.d").mkdir(parents=True, exist_ok=True)
     (repo / "docs/journal.d/2026-01-01-x.md").write_text(
         "## t\n**Plan deviations:** none\n" + _FACT_BLOCK, encoding="utf-8"
@@ -331,23 +334,6 @@ def test_defect_b_absent_journal_key_detects_a_real_touch_without_grep_crash(
     )
 
 
-def _commit_probe(repo: Path) -> int:
-    """A feat commit whose .git/HEAD mtime is returned in NANOSECONDS, so Defect-C fixtures can
-    place the test-evidence file's mtime within the SAME integer second as the commit, on either
-    side, at exact sub-second offsets.
-
-    Nanoseconds, not float seconds: `os.utime(path, (t, t))` round-trips a float through the
-    kernel's timespec and can land a few ns off the value asked for — enough to turn an intended
-    EXACT tie into "1 ns newer", which silently un-tests the fail-closed tie case. `st_mtime_ns` /
-    `os.utime(..., ns=)` are exact."""
-    (repo / "a.txt").write_text("x\n", encoding="utf-8")
-    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
-    subprocess.run(
-        ["git", "commit", "-q", "-m", "feat: probe"], cwd=repo, check=True, capture_output=True
-    )
-    return (repo / ".git/HEAD").stat().st_mtime_ns
-
-
 _NS_PER_SEC = 1_000_000_000
 
 
@@ -359,79 +345,309 @@ def _write_evidence_at_ns(repo: Path, mtime_ns: int) -> Path:
     return ev
 
 
-def test_defect_c_subsecond_fresh_evidence_is_not_falsely_marked_stale(
-    tmp_path: Path, gate_script: str
-) -> None:
-    """bash 3.2's `[ a -nt b ]` truncates to whole-second granularity. Evidence
-    written <1s AFTER the feat commit — genuinely fresh — can land in the same integer second
-    as `.git/HEAD` and compare as NOT newer, wrongly failing the freshness check. Verified
-    empirically on the system's /bin/bash: two files placed in the same integer second, in
-    EITHER order, both compare `-nt` FALSE."""
+# The evidence-freshness check compares evidence against HEAD's committer-date, a whole-second
+# stamp — so its granularity is ≤1s by construction. These three cases pin that documented
+# contract and REPLACE the earlier `.git/HEAD`-mtime fixtures: X7 proved `.git/HEAD`'s mtime does
+# not track HEAD (`git commit` leaves it at checkout time), so those fixtures anchored the freshness
+# comparison to the wrong file. `find -newer`'s own sub-second ordering (the original Defect-C
+# property) is unchanged in `fresh()`; the evidence row simply no longer feeds it a sub-second
+# reference, because a git commit's time is whole-second to begin with.
+
+
+def test_evidence_after_head_commit_is_fresh(tmp_path: Path, gate_script: str) -> None:
+    """Evidence written a clear second AFTER the HEAD commit is genuinely fresh → ✓."""
     manifest = {"test_command": "true", "test_evidence": ".claude/.last-test-run"}
     repo = make_fixture_repo(tmp_path, manifest, {"README.md": "hi\n"})
-    head_ns = _commit_probe(repo)
-    # 1 ns before the next whole second: same integer second as HEAD, strictly newer than it
-    newer_ns = (head_ns // _NS_PER_SEC) * _NS_PER_SEC + (_NS_PER_SEC - 1)
-    ev = _write_evidence_at_ns(repo, newer_ns)
-    ev_ns = ev.stat().st_mtime_ns
-    assert ev_ns // _NS_PER_SEC == head_ns // _NS_PER_SEC, "fixture must land in the same integer second"
-    assert ev_ns > head_ns, "fixture must be truly (sub-second) newer"
-
+    _commit_at(repo, "feat: work", epoch=1_000_000)
+    _write_evidence_at_ns(repo, 1_000_002 * _NS_PER_SEC)  # 2s after the commit
     result = run_gate(repo, gate_script, "task")
-    evidence_lines = [line for line in result.stdout.splitlines() if "test-evidence" in line]
-    assert evidence_lines, f"expected a test-evidence row:\n{result.stdout}"
-    assert evidence_lines[0].startswith("✓"), (
-        f"evidence is genuinely newer (sub-second) than the commit — expected fresh, got: {evidence_lines}"
+    rows = [ln for ln in result.stdout.splitlines() if "test-evidence" in ln]
+    assert rows and rows[0].startswith("✓"), f"evidence postdates the commit — expected fresh: {rows}"
+
+
+def test_evidence_a_second_before_head_commit_is_stale(tmp_path: Path, gate_script: str) -> None:
+    """Evidence written a clear second BEFORE the HEAD commit predates the code it claims to cover → ✗."""
+    manifest = {"test_command": "true", "test_evidence": ".claude/.last-test-run"}
+    repo = make_fixture_repo(tmp_path, manifest, {"README.md": "hi\n"})
+    _commit_at(repo, "feat: work", epoch=1_000_000)
+    _write_evidence_at_ns(repo, 999_998 * _NS_PER_SEC)  # 2s before the commit
+    result = run_gate(repo, gate_script, "task")
+    rows = [ln for ln in result.stdout.splitlines() if "test-evidence" in ln]
+    assert rows and rows[0].startswith("✗"), f"evidence predates the commit — expected stale: {rows}"
+
+
+def test_evidence_same_second_as_commit_reads_fresh_documented_1s_residual(
+    tmp_path: Path, gate_script: str
+) -> None:
+    """X5/X7 residual, pinned so it is not silently "fixed": the committer-date stamp is whole-second
+    (`touch -t`), so evidence in the SAME wall-clock second as the commit reads FRESH — a ≤1s fail-OPEN
+    window, and the correct side in the realistic run-tests-then-commit order. This also preserves the
+    original Defect-C intent (genuinely-fresh evidence written <1s after the commit must not read
+    stale). If a future change makes this fail-closed, that is a deliberate decision this test forces
+    into the open rather than letting it ride in as an accident."""
+    manifest = {"test_command": "true", "test_evidence": ".claude/.last-test-run"}
+    repo = make_fixture_repo(tmp_path, manifest, {"README.md": "hi\n"})
+    _commit_at(repo, "feat: work", epoch=1_000_000)
+    _write_evidence_at_ns(repo, 1_000_000 * _NS_PER_SEC + 500_000_000)  # same second, +0.5s
+    result = run_gate(repo, gate_script, "task")
+    rows = [ln for ln in result.stdout.splitlines() if "test-evidence" in ln]
+    assert rows and rows[0].startswith("✓"), f"same-second evidence reads fresh (≤1s residual): {rows}"
+
+
+# --- X7: legacy evidence freshness anchors to HEAD's committer-date, not .git/HEAD's mtime ---
+# `git commit` does NOT advance .git/HEAD's file mtime (verified: it stays at init/checkout time),
+# so `fresh "$EV" .git/HEAD` compares evidence against WHEN THE BRANCH WAS CHECKED OUT, not against
+# the commit it claims to cover. Evidence written between an early checkout and a later commit then
+# false-PASSES as fresh though it predates HEAD. The fix anchors freshness to HEAD's committer-date
+# (the semantic commit time), accepting X5's documented ≤1s whole-second truncation as the residual.
+
+
+def _commit_at(repo: Path, msg: str, epoch: int) -> None:
+    """Add a commit whose author+committer date is exactly `epoch` (seconds). Lets a test fix the
+    commit time without sleeping, so evidence/`.git/HEAD` mtimes can be placed on either side of it."""
+    (repo / f"f{epoch}.txt").write_text("x\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    env = {**os.environ, "GIT_AUTHOR_DATE": f"@{epoch} +0000", "GIT_COMMITTER_DATE": f"@{epoch} +0000"}
+    subprocess.run(
+        ["git", "commit", "-q", "-m", msg], cwd=repo, check=True, capture_output=True, env=env
     )
 
 
-def test_defect_c_subsecond_stale_evidence_wrong_order_is_detected_as_stale(
+def test_x7_evidence_predating_head_commit_is_stale_despite_git_head_mtime(
     tmp_path: Path, gate_script: str
 ) -> None:
-    """Companion case named explicitly in the brief: evidence written BEFORE the feat commit
-    (genuinely stale/pre-dating the code) but landing in the same integer second must still
-    be caught as stale — the sub-second fix must not start passing ties or genuinely-older
-    evidence just because it now resolves sub-second ordering."""
+    """The X7 defect, reproduced: `.git/HEAD` mtime is stuck at checkout time (`git commit` does
+    not touch it), so evidence written AFTER checkout but BEFORE the current HEAD commit is newer
+    than `.git/HEAD` yet older than the commit — genuinely stale, but the legacy `fresh $EV
+    .git/HEAD` check reads it as fresh. Anchoring to HEAD's committer-date catches it."""
     manifest = {"test_command": "true", "test_evidence": ".claude/.last-test-run"}
     repo = make_fixture_repo(tmp_path, manifest, {"README.md": "hi\n"})
-    head_ns = _commit_probe(repo)
-    # exactly on the second boundary: same integer second as HEAD, strictly older than it.
-    # (If HEAD itself landed exactly on the boundary — vanishingly rare on APFS, whose mtimes
-    # carry real ns — the same-second variant would be a TIE, not "older"; that tie is already
-    # covered by the fail-closed test below, so skip rather than silently test the wrong thing.)
-    older_ns = (head_ns // _NS_PER_SEC) * _NS_PER_SEC
-    if older_ns == head_ns:
-        pytest.skip("HEAD mtime landed exactly on a second boundary — tie, not the case under test")
-    ev = _write_evidence_at_ns(repo, older_ns)
-    ev_ns = ev.stat().st_mtime_ns
-    assert ev_ns // _NS_PER_SEC == head_ns // _NS_PER_SEC, "fixture must land in the same integer second"
-    assert ev_ns < head_ns, "fixture must be truly (sub-second) older"
+    # HEAD advances to a commit dated well after the evidence; .git/HEAD mtime does not follow it.
+    _commit_at(repo, "feat: later work", epoch=1_000_010)
+    head_mtime, ev_mtime = 1_000_000, 1_000_005  # both < the 1_000_010 commit; ev newer than .git/HEAD
+    os.utime(repo / ".git/HEAD", ns=(head_mtime * _NS_PER_SEC, head_mtime * _NS_PER_SEC))
+    ev = _write_evidence_at_ns(repo, ev_mtime * _NS_PER_SEC)
+    # Sanity: the fixture is the exact false-PASS shape — ev newer than .git/HEAD, older than HEAD.
+    assert ev.stat().st_mtime_ns > (repo / ".git/HEAD").stat().st_mtime_ns
+    head_commit_epoch = int(
+        subprocess.run(
+            ["git", "show", "-s", "--format=%ct", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+        ).stdout.strip()
+    )
+    assert ev.stat().st_mtime_ns // _NS_PER_SEC < head_commit_epoch
 
     result = run_gate(repo, gate_script, "task")
     evidence_lines = [line for line in result.stdout.splitlines() if "test-evidence" in line]
     assert evidence_lines, f"expected a test-evidence row:\n{result.stdout}"
     assert evidence_lines[0].startswith("✗"), (
-        f"evidence pre-dates the commit it claims to cover — expected stale, got: {evidence_lines}"
+        f"evidence predates the HEAD commit it claims to cover — expected stale, got: {evidence_lines}"
     )
 
 
-def test_defect_c_equal_timestamps_fail_closed(tmp_path: Path, gate_script: str) -> None:
-    """Equal timestamps are not proof of freshness — an mtime identical to the NANOSECOND
-    between the evidence file and `.git/HEAD` must read as NOT fresh (fail-closed), never fresh.
+# --- X9: task-mode check #1 is path-based (product_paths) with a verb fallback ---
+# Ports X8's local product-tree check into the canonical gate. The old `feat|fix` commit-verb
+# test was a proxy for "the task shipped a product change"; a legit refactor-only commit under the
+# product tree had to be mislabeled `feat` to pass. BACKWARD-COMPATIBLE: an absent product_paths
+# key falls back to the legacy verb check, so no existing adopter manifest changes behavior.
 
-    Set with `os.utime(..., ns=)`: a float round-trip lands a few ns off the value asked for,
-    which turns the intended exact tie into "1 ns newer" and silently stops testing the tie."""
+_X9_MANIFEST = {"product_paths": ["src/"], "test_command": "true", "test_evidence": ".claude/.last-test-run"}
+
+
+def test_task_product_tree_touch_passes_on_a_refactor_commit(tmp_path: Path, gate_script: str) -> None:
+    """A `refactor:` commit (NOT feat/fix) that touches a product_paths dir passes check #1 —
+    the exact case the verb check wrongly failed."""
+    repo = make_fixture_repo(tmp_path, _X9_MANIFEST, {"README.md": "hi\n"})
+    (repo / "src").mkdir()
+    (repo / "src/app.py").write_text("x = 1\n", encoding="utf-8")
+    _commit(repo, "refactor: tidy app")
+    result = run_gate(repo, gate_script, "task")
+    rows = [ln for ln in result.stdout.splitlines() if "product tree" in ln]
+    assert rows and rows[0].startswith("✓"), (
+        f"a refactor commit touching src/ must pass the product-tree check:\n{result.stdout}"
+    )
+
+
+def test_task_meta_only_change_fails_the_product_tree_check(tmp_path: Path, gate_script: str) -> None:
+    """A commit that touches NO product_paths path fails check #1, even titled `docs:` — a
+    meta-only change is not a task, and a widened verb list could never catch this."""
+    repo = make_fixture_repo(tmp_path, _X9_MANIFEST, {"README.md": "hi\n"})
+    (repo / "README.md").write_text("hi\nmore\n", encoding="utf-8")
+    _commit(repo, "docs: readme typo")
+    result = run_gate(repo, gate_script, "task")
+    rows = [ln for ln in result.stdout.splitlines() if "product-tree path" in ln]
+    assert rows and rows[0].startswith("✗"), (
+        f"a meta-only change (no product path) must fail the product-tree check:\n{result.stdout}"
+    )
+
+
+def test_task_absent_product_paths_falls_back_to_the_verb_check(tmp_path: Path, gate_script: str) -> None:
+    """No product_paths key at all → the legacy `feat|fix` commit-verb check runs unchanged, so
+    a manifest predating the key keeps its behavior (backward compatibility)."""
     manifest = {"test_command": "true", "test_evidence": ".claude/.last-test-run"}
     repo = make_fixture_repo(tmp_path, manifest, {"README.md": "hi\n"})
-    head_ns = _commit_probe(repo)
-    ev = _write_evidence_at_ns(repo, head_ns)
-    assert ev.stat().st_mtime_ns == head_ns, "fixture must be an EXACT nanosecond tie"
-
+    (repo / "README.md").write_text("hi\nx\n", encoding="utf-8")
+    _commit(repo, "chore: not a feat")
     result = run_gate(repo, gate_script, "task")
-    evidence_lines = [line for line in result.stdout.splitlines() if "test-evidence" in line]
-    assert evidence_lines, f"expected a test-evidence row:\n{result.stdout}"
-    assert evidence_lines[0].startswith("✗"), (
-        f"equal timestamps must fail closed (not fresh), got: {evidence_lines}"
+    rows = [ln for ln in result.stdout.splitlines() if "feat/fix commit" in ln]
+    assert rows and rows[0].startswith("✗"), (
+        f"absent product_paths must fall back to the verb check (a chore: commit fails it):\n{result.stdout}"
+    )
+
+
+def test_task_malformed_product_paths_fails_closed(tmp_path: Path, gate_script: str) -> None:
+    """product_paths present but not a non-empty array (here an object) fails closed — even a
+    `feat:` commit must not rescue a malformed key, mirroring the local gate's type guard."""
+    manifest = {"product_paths": {"a": "src/"}, "test_command": "true", "test_evidence": ".claude/.last-test-run"}
+    repo = make_fixture_repo(tmp_path, manifest, {"README.md": "hi\n"})
+    (repo / "src").mkdir()
+    (repo / "src/app.py").write_text("x = 1\n", encoding="utf-8")
+    _commit(repo, "feat: add app")
+    result = run_gate(repo, gate_script, "task")
+    rows = [ln for ln in result.stdout.splitlines() if "product_paths present" in ln]
+    assert rows and rows[0].startswith("✗"), (
+        f"a malformed product_paths (object) must fail closed:\n{result.stdout}"
+    )
+
+
+def test_task_root_commit_touching_product_tree_passes(tmp_path: Path, gate_script: str) -> None:
+    """Regression for the --root flag: when HEAD IS the repo's root commit (no parent — an adopter's
+    very first commit, e.g. init-harness scaffold + first product code in one commit), the diff must
+    still list HEAD's files. Without `git diff-tree … --root` the root commit diffs against a
+    nonexistent parent and prints nothing → a false ✗ on a legitimate product change."""
+    # make_fixture_repo's single "init" commit IS the root; put product code in it and add no second
+    # commit, so HEAD has no parent — the exact case a plain `diff-tree HEAD` mis-handles.
+    repo = make_fixture_repo(tmp_path, _X9_MANIFEST, {"src/app.py": "x = 1\n"})
+    result = run_gate(repo, gate_script, "task")
+    rows = [ln for ln in result.stdout.splitlines() if "product tree" in ln]
+    assert rows and rows[0].startswith("✓"), (
+        f"a ROOT commit touching src/ must pass the product-tree check (needs --root):\n{result.stdout}"
+    )
+
+
+def test_task_empty_product_paths_array_fails_closed(tmp_path: Path, gate_script: str) -> None:
+    """An empty array is malformed too: it declares the key but names no tree, so the path check has
+    nothing to match. It must fail closed, NOT fall back to the verb check and NOT pass vacuously —
+    even for a `feat:` commit that touches the product tree."""
+    manifest = {"product_paths": [], "test_command": "true", "test_evidence": ".claude/.last-test-run"}
+    repo = make_fixture_repo(tmp_path, manifest, {"README.md": "hi\n"})
+    (repo / "src").mkdir()
+    (repo / "src/app.py").write_text("x = 1\n", encoding="utf-8")
+    _commit(repo, "feat: add app")
+    result = run_gate(repo, gate_script, "task")
+    rows = [ln for ln in result.stdout.splitlines() if "product_paths present" in ln]
+    assert rows and rows[0].startswith("✗"), (
+        f"an empty-array product_paths must fail closed, not fall through:\n{result.stdout}"
+    )
+
+
+# --- X6: task-mode test-evidence is a content fingerprint when test_evidence_inputs is declared ---
+# Ports the local gate's fingerprint check into the canonical gate. Opt-in: declaring
+# test_evidence_inputs switches the row from the legacy mtime check to a content digest of the
+# declared inputs. Absent key → legacy mtime unchanged (backward-compatible).
+
+_X6_MANIFEST = {
+    "test_command": "true",
+    "test_evidence": ".claude/.last-test-run",
+    "test_evidence_inputs": ["src/**"],
+}
+
+
+def _headed_evidence(repo: Path, gate_script: str, body: str = "ok\n") -> None:
+    """Write the evidence file with a REAL fingerprint header, produced by the gate's own
+    `evidence-header` subcommand — the same path an adopter's runner uses."""
+    header = run_gate(repo, gate_script, "evidence-header").stdout
+    (repo / ".claude").mkdir(exist_ok=True)
+    (repo / ".claude/.last-test-run").write_text(header + body, encoding="utf-8")
+
+
+def test_evidence_header_subcommand_emits_a_hex_digest(tmp_path: Path, gate_script: str) -> None:
+    repo = make_fixture_repo(tmp_path, _X6_MANIFEST, {"src/app.py": "x = 1\n"})
+    out = run_gate(repo, gate_script, "evidence-header").stdout
+    assert out.startswith("# plc-gate-evidence inputs="), f"header shape wrong: {out!r}"
+    digest = out.split("inputs=", 1)[1].strip()
+    assert len(digest) >= 40 and all(c in "0123456789abcdef" for c in digest), f"not a hex digest: {digest!r}"
+
+
+def test_task_fingerprint_matches_passes(tmp_path: Path, gate_script: str) -> None:
+    repo = make_fixture_repo(tmp_path, _X6_MANIFEST, {"src/app.py": "x = 1\n"})
+    _headed_evidence(repo, gate_script)
+    result = run_gate(repo, gate_script, "task")
+    rows = [ln for ln in result.stdout.splitlines() if "test-evidence" in ln]
+    assert rows and rows[0].startswith("✓"), f"a matching fingerprint must pass:\n{result.stdout}"
+
+
+def test_task_fingerprint_stale_when_a_declared_input_changes(tmp_path: Path, gate_script: str) -> None:
+    repo = make_fixture_repo(tmp_path, _X6_MANIFEST, {"src/app.py": "x = 1\n"})
+    _headed_evidence(repo, gate_script)
+    # change a declared input AFTER the header was generated → digest no longer matches
+    (repo / "src/app.py").write_text("x = 999\n", encoding="utf-8")
+    result = run_gate(repo, gate_script, "task")
+    rows = [ln for ln in result.stdout.splitlines() if "test-evidence" in ln]
+    assert rows and rows[0].startswith("✗") and "stale" in rows[0], (
+        f"a changed input must read stale:\n{result.stdout}"
+    )
+
+
+def test_task_fingerprint_missing_header_hard_fails(tmp_path: Path, gate_script: str) -> None:
+    repo = make_fixture_repo(tmp_path, _X6_MANIFEST, {"src/app.py": "x = 1\n"})
+    # evidence with content but NO fingerprint header (an adopter who declared the key but did not
+    # update their runner) — must hard fail, never silently fall back to mtime
+    (repo / ".claude").mkdir(exist_ok=True)
+    (repo / ".claude/.last-test-run").write_text("ok\n", encoding="utf-8")
+    result = run_gate(repo, gate_script, "task")
+    rows = [ln for ln in result.stdout.splitlines() if "test-evidence" in ln]
+    assert rows and rows[0].startswith("✗") and "first line" in rows[0], (
+        f"a declared-inputs manifest with an unheaded evidence file must hard fail:\n{result.stdout}"
+    )
+
+
+def test_task_fingerprint_inputs_match_nothing_fails_closed(tmp_path: Path, gate_script: str) -> None:
+    manifest = {**_X6_MANIFEST, "test_evidence_inputs": ["does-not-exist/**"]}
+    repo = make_fixture_repo(tmp_path, manifest, {"src/app.py": "x = 1\n"})
+    _headed_evidence(repo, gate_script)  # header will carry the EMPTY sentinel
+    result = run_gate(repo, gate_script, "task")
+    rows = [ln for ln in result.stdout.splitlines() if "matched no tracked files" in ln]
+    assert rows and rows[0].startswith("✗"), (
+        f"inputs matching nothing must fail closed, not pass vacuously:\n{result.stdout}"
+    )
+
+
+def test_task_malformed_test_evidence_inputs_fails_closed(tmp_path: Path, gate_script: str) -> None:
+    manifest = {**_X6_MANIFEST, "test_evidence_inputs": "src/"}  # string, not array
+    repo = make_fixture_repo(tmp_path, manifest, {"src/app.py": "x = 1\n"})
+    _headed_evidence(repo, gate_script)
+    result = run_gate(repo, gate_script, "task")
+    rows = [ln for ln in result.stdout.splitlines() if "test_evidence_inputs present" in ln]
+    assert rows and rows[0].startswith("✗"), (
+        f"a non-array test_evidence_inputs must fail closed:\n{result.stdout}"
+    )
+
+
+def test_task_absent_inputs_uses_legacy_mtime(tmp_path: Path, gate_script: str) -> None:
+    """No test_evidence_inputs key → the legacy mtime check runs unchanged; a fresh evidence file
+    (written after the commit) passes without any fingerprint header."""
+    manifest = {"test_command": "true", "test_evidence": ".claude/.last-test-run"}
+    repo = make_fixture_repo(tmp_path, manifest, {"README.md": "hi\n"})
+    time.sleep(1.1)  # cross a whole-second boundary — bash 3.2 -nt is whole-second
+    (repo / ".claude").mkdir(exist_ok=True)
+    (repo / ".claude/.last-test-run").write_text("ok\n", encoding="utf-8")  # no header, legacy is fine
+    result = run_gate(repo, gate_script, "task")
+    rows = [ln for ln in result.stdout.splitlines() if "test-evidence" in ln]
+    assert rows and rows[0].startswith("✓"), (
+        f"absent test_evidence_inputs must use legacy mtime and pass a fresh unheaded file:\n{result.stdout}"
+    )
+
+
+def test_task_absent_test_evidence_key_hard_fails(tmp_path: Path, gate_script: str) -> None:
+    """A manifest with a test_command but NO test_evidence path is a misconfiguration — it must
+    HARD FAIL (byte-identical to the pre-X6 blocks), never warn-and-skip. Guards against the
+    vacuous-pass-on-absent-key defect the refactor's shared entry point could have reintroduced."""
+    manifest = {"test_command": "true"}  # test_evidence deliberately absent
+    repo = make_fixture_repo(tmp_path, manifest, {"README.md": "hi\n"})
+    result = run_gate(repo, gate_script, "task")
+    rows = [ln for ln in result.stdout.splitlines() if "test-evidence" in ln]
+    assert rows and rows[0].startswith("✗") and "stale/missing" in rows[0], (
+        f"absent test_evidence must hard fail, not skip:\n{result.stdout}"
     )
 
 
@@ -687,7 +903,10 @@ def _make_init_harness_fixture(tmp_path: Path, phase: str = "1.0") -> Path:
     }
     repo = make_fixture_repo(tmp_path, manifest, files)
     (repo / "CHANGELOG.md").write_text("## [Unreleased]\n- x\n", encoding="utf-8")
-    (repo / "docs/ROADMAP.md").write_text("- x\n", encoding="utf-8")
+    (repo / "docs/ROADMAP.md").write_text(
+        # must NAME the phase: the ROADMAP row is content-checked, not touch-checked
+        "- [x] phase 1.0 — fixture row\n", encoding="utf-8"
+    )
     (repo / "docs/journal.d").mkdir(parents=True, exist_ok=True)
     (repo / "docs/journal.d/2026-01-01-x.md").write_text(
         "## t\n**Plan deviations:** none\n\n### Findings\nnone\n" + _FACT_BLOCK, encoding="utf-8"
@@ -781,7 +1000,10 @@ def _make_fact_fixture(tmp_path: Path, journal_body: str) -> Path:
     repo = make_fixture_repo(tmp_path, manifest, {})
     (repo / "docs/journal.d").mkdir(parents=True, exist_ok=True)
     (repo / "CHANGELOG.md").write_text("## [Unreleased]\n- x\n", encoding="utf-8")
-    (repo / "docs/ROADMAP.md").write_text("- x\n", encoding="utf-8")
+    (repo / "docs/ROADMAP.md").write_text(
+        # must NAME the phase: the ROADMAP row is content-checked, not touch-checked
+        "- [x] phase 1.0 — fixture row\n", encoding="utf-8"
+    )
     (repo / "docs/journal.d/2026-01-01-x.md").write_text(journal_body, encoding="utf-8")
     _commit(repo, "docs: wrap-up artifacts for FACT fixture")
     time.sleep(1.1)  # bash 3.2's -nt is whole-second; see _make_otherwise_passing_phase_fixture
@@ -849,7 +1071,10 @@ def test_fact_entry_absent_journal_fails_phase_mode(tmp_path: Path, gate_script:
     repo = make_fixture_repo(tmp_path, manifest, {})
     (repo / "docs").mkdir(parents=True, exist_ok=True)
     (repo / "CHANGELOG.md").write_text("## [Unreleased]\n- x\n", encoding="utf-8")
-    (repo / "docs/ROADMAP.md").write_text("- x\n", encoding="utf-8")
+    (repo / "docs/ROADMAP.md").write_text(
+        # must NAME the phase: the ROADMAP row is content-checked, not touch-checked
+        "- [x] phase 1.0 — fixture row\n", encoding="utf-8"
+    )
     _commit(repo, "docs: wrap-up artifacts, no journal fragment")
     time.sleep(1.1)
     (repo / ".claude/.last-test-run").write_text("ok\n", encoding="utf-8")
@@ -859,3 +1084,56 @@ def test_fact_entry_absent_journal_fails_phase_mode(tmp_path: Path, gate_script:
     assert fact_lines and fact_lines[0].startswith("✗"), f"expected a hard-fail FACT row:\n{result.stdout}"
     for field in ("Date", "Decision", "Why", "Backing", "Rejected", "Source"):
         assert field in fact_lines[0], fact_lines[0]
+
+
+# --- X4: a ROADMAP touch is not the ceremony (canonical gate) ---
+
+
+def test_roadmap_touched_but_not_naming_the_phase_fails(
+    tmp_path: Path, gate_script: str
+) -> None:
+    """The sibling of a defect in the gitignored-docs gate, which checked
+    mtime and printed "✓ ROADMAP.md updated this phase" while the phase appeared nowhere
+    in the file. Here the proxy is a git-range touch rather than an mtime, but it fails the
+    same way: a whitespace-only edit satisfies "touched" without the roadmap ever reflecting
+    the phase. The row must read the file, not infer from the diff."""
+    repo = _make_fact_fixture(tmp_path, _COMPLETE_FACT)
+    # ROADMAP.md IS in origin/main..HEAD (the fixture committed it) — only its content
+    # stops naming the phase.
+    (repo / "docs/ROADMAP.md").write_text("- [x] some unrelated phase\n", encoding="utf-8")
+
+    result = run_gate(repo, gate_script, "phase", "1.0")
+
+    assert result.returncode == 1, (
+        "gate passed a ROADMAP that never mentions the phase:\n" + result.stdout
+    )
+    assert "never mentions phase 1.0" in result.stdout, result.stdout
+
+
+def test_roadmap_not_touched_at_all_still_fails_on_the_touch_check(
+    tmp_path: Path, gate_script: str
+) -> None:
+    """The content check must not swallow the older touch check: a phase that never edited
+    the roadmap should still be told THAT, not told the file lacks the phase id."""
+    manifest = {
+        "test_command": "true",
+        "test_evidence": ".claude/.last-test-run",
+        "retention": {"journal_dir": "docs/journal.d", "archive_dir": "docs/archive"},
+    }
+    # ROADMAP lands in the FIRST commit (origin/main == HEAD there), so it is absent from
+    # origin/main..HEAD however green its contents are. Deleting it later would not express
+    # this: a deletion is itself a change in the range.
+    repo = make_fixture_repo(
+        tmp_path, manifest, {"docs/ROADMAP.md": "- [x] phase 1.0 — committed before the branch\n"}
+    )
+    (repo / "docs/journal.d").mkdir(parents=True, exist_ok=True)
+    (repo / "CHANGELOG.md").write_text("## [Unreleased]\n- x\n", encoding="utf-8")
+    (repo / "docs/journal.d/2026-01-01-x.md").write_text(_COMPLETE_FACT, encoding="utf-8")
+    _commit(repo, "docs: everything except the roadmap")
+    time.sleep(1.1)
+    (repo / ".claude/.last-test-run").write_text("ok\n", encoding="utf-8")
+
+    result = run_gate(repo, gate_script, "phase", "1.0")
+
+    assert result.returncode == 1
+    assert "not updated in" in result.stdout, result.stdout

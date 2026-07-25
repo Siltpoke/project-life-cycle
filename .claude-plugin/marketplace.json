@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "project-life-cycle",
-  "description": "End-to-end coordinator skill for traceable, multi-phase software project execution. Spec \u2192 plan \u2192 execute \u2192 smoke \u2192 handoff \u2192 PR discipline with built-in cost-aware behaviors.",
+  "description": "End-to-end coordinator skill for traceable, multi-phase software project execution. Spec → plan → execute → smoke → handoff → PR discipline with built-in cost-aware behaviors.",
   "owner": {
     "name": "Jiaqi Duan",
     "url": "https://github.com/Victoriakaey"
@@ -12,7 +12,7 @@
       "description": "Skill that enforces a doc-first per-phase workflow: brainstorm with research gate, planned execution with per-task cadence, dual-track smoke (manual + Playwright), phase delivery handoff, and milestone-done gate. Designed to be the same workflow across all your projects.",
       "source": "./",
       "category": "workflow",
-      "version": "3.0.0"
+      "version": "3.7.0"
     }
   ]
 }

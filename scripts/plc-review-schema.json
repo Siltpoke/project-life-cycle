@@ -1,0 +1,37 @@
+{
+  "type": "object",
+  "required": ["perAc", "findings"],
+  "additionalProperties": false,
+  "properties": {
+    "perAc": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "verdict", "evidence"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "verdict": { "enum": ["met", "unmet"] },
+          "evidence": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "pattern": "^(file|test|hunk)://" }
+          }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["severity", "summary", "evidence"],
+        "additionalProperties": false,
+        "properties": {
+          "severity": { "type": "string" },
+          "summary": { "type": "string" },
+          "evidence": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
+  }
+}

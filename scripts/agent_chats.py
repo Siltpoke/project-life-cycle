@@ -16,12 +16,20 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
-import subprocess
 import sys
 from dataclasses import asdict, dataclass, field, replace
-from datetime import datetime, timezone
 from pathlib import Path
+
+# Shared multi-family transcript + git primitives (a prior extraction). Aliased to
+# the historical private names so the rest of this module is unchanged.
+from transcript_util import (
+    iter_events as _iter_events,
+    now_stamp as _now,
+    resolve_git_fields,
+    truncate as _truncate,
+    turn_role as _turn_role,
+    turn_text as _turn_text,
+)
 
 REPO = Path(__file__).resolve().parent.parent
 REGISTRY = REPO / "docs" / "agent-chats-index.md"
@@ -159,31 +167,6 @@ def upsert_record(records: list[ChatRecord], new: ChatRecord) -> list[ChatRecord
     return out
 
 
-def _git(args: list[str], cwd: str) -> str | None:
-    try:
-        out = subprocess.run(
-            ["git", *args], cwd=cwd, capture_output=True, text=True, timeout=5
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return out.stdout.strip() if out.returncode == 0 else None
-
-
-def resolve_git_fields(cwd: str | None) -> dict:
-    cwd = str(cwd or os.getcwd())
-    toplevel = _git(["rev-parse", "--show-toplevel"], cwd)
-    worktree = toplevel or str(Path(cwd).resolve())
-    repo = Path(toplevel).name if toplevel else Path(cwd).resolve().name
-    status = _git(["status", "--porcelain"], cwd)
-    return {
-        "repo": repo,
-        "branch": _git(["rev-parse", "--abbrev-ref", "HEAD"], cwd) or "",
-        "worktree": worktree,
-        "head_sha": _git(["rev-parse", "--short", "HEAD"], cwd) or "",
-        "dirty": bool(status) if status is not None else False,
-    }
-
-
 def upsert(record: ChatRecord, registry: Path = REGISTRY) -> None:
     registry = Path(registry)
     existing = registry.read_text(encoding="utf-8") if registry.exists() else ""
@@ -197,10 +180,6 @@ def upsert(record: ChatRecord, registry: Path = REGISTRY) -> None:
     except OSError:
         tmp.unlink(missing_ok=True)
         raise
-
-
-def _now() -> str:
-    return datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M")
 
 
 def _cmd_upsert(args: argparse.Namespace) -> int:
@@ -268,55 +247,6 @@ def main(argv: list[str] | None = None) -> int:
     return 1
 
 
-def _iter_events(text: str):
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(obj, dict):
-            yield obj
-
-
-def _turn_role(obj: dict) -> str:
-    typ = obj.get("type")
-    if typ in ("user", "assistant"):
-        return typ
-    if typ == "event_msg":  # Codex envelope
-        payload = obj.get("payload")
-        if isinstance(payload, dict):
-            kind = payload.get("type")
-            if kind == "user_message":
-                return "user"
-            if kind == "agent_message":
-                return "assistant"
-    msg = obj.get("message")
-    if isinstance(msg, dict) and msg.get("role") in ("user", "assistant"):
-        return msg["role"]
-    return ""
-
-
-def _turn_text(obj: dict) -> str:
-    if obj.get("type") == "event_msg":  # Codex
-        payload = obj.get("payload")
-        if isinstance(payload, dict) and isinstance(payload.get("message"), str):
-            return payload["message"]
-    msg = obj.get("message", obj)
-    content = msg.get("content") if isinstance(msg, dict) else None
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        for part in content:
-            if isinstance(part, dict) and part.get("type") == "text":
-                return part.get("text", "")
-            if isinstance(part, str):
-                return part
-    return ""
-
-
 def count_turns(text: str) -> int:
     return sum(1 for o in _iter_events(text) if _turn_role(o) in ("user", "assistant"))
 
@@ -325,24 +255,8 @@ def passes_substance(text: str, min_msgs: int = 4) -> bool:
     return count_turns(text) >= min_msgs
 
 
-def _truncate(s: str, n: int) -> str:
-    s = " ".join(s.split())
-    return s if len(s) <= n else s[: n - 1].rstrip() + "…"
-
-
 def extract_topic(text: str, max_len: int = 80) -> str:
-    m = re.search(r"<!-- ECC:SUMMARY:START -->(.*?)<!-- ECC:SUMMARY:END -->", text, re.S)
-    if m:
-        for line in m.group(1).splitlines():
-            stripped = line.strip()
-            if not stripped:
-                continue
-            # Skip heading-only lines (lines that start with #)
-            if stripped.startswith("#"):
-                continue
-            cleaned = stripped.lstrip("#-*").strip()
-            if cleaned:
-                return _truncate(cleaned, max_len)
+    # Topic = the first substantive user message in the transcript.
     for obj in _iter_events(text):
         if _turn_role(obj) == "user":
             t = _turn_text(obj)

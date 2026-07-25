@@ -1,0 +1,8 @@
+{
+  "_note": "Story-exists variant of the verify-tail self-test — storyPath points at verify-tail-story.md so the verifier lane RUNS and the validator joins on its report (.then() dynamic join). Complements verify-tail-smoke.json (the skipped-1.5 variant). builderSummary makes no code-change claim → clean lie-detection.",
+  "builderCommitSHA": "HEAD",
+  "prevTaskTip": "HEAD~1",
+  "builderSummary": "Synthetic self-test input (story-exists variant) — exercises the verifier ∥ cq fan-out plus the validator .then()-join on the verifier report. Makes no code-change success claim.",
+  "storyPath": ".claude/workflows/fixtures/verify-tail-story.md",
+  "folderMapSide": null
+}

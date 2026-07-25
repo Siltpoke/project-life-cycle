@@ -35,14 +35,17 @@ committed vs written-local.
    unfillable), fabrication-guard (mark-absent, never invent), progressive-prune (drop empties, no
    "None"), staleness-stamp (`git rev-parse HEAD` + branch + timestamp; `no-git` fallback). See
    `handoff-snapshot.md` §"Generation-time self-validation".
-3. **Write RESUME.md.** Overwrite (not append) the root `RESUME.md` with the MOMENT-tense snapshot.
-   See `handoff-snapshot.md` §"The snapshot schema" (rendered shape).
+3. **Archive, then write RESUME.md.** First, if `RESUME.md` exists and is non-empty, prepend its outgoing
+   snapshot verbatim (newest-first, `---`-separated) to the cold sibling `RESUME-archive.md` — never loaded
+   by the SessionStart hook, so history accrues at zero context cost. THEN overwrite (not append) the root
+   `RESUME.md` with the MOMENT-tense snapshot. See `handoff-snapshot.md` §"Archive-before-overwrite" and
+   §"The snapshot schema" (rendered shape).
 4. **Conditional journal FACT.** Append a FACT to `docs/journal.d/<date>-<branch-slug>.md` ONLY if the
    session produced a non-derivable decision/gotcha; else skip silently. See `handoff-snapshot.md`
    §"The conditional journal FACT".
-5. **Commit or report local.** Commit RESUME + FACT where tracked; where gitignored, write local files
-   and report the local-only reality — never a phantom "committed" claim. See `handoff-snapshot.md`
-   §"Commit behavior".
+5. **Commit or report local.** Commit RESUME + RESUME-archive + FACT where tracked; where gitignored, write
+   local files and report the local-only reality — never a phantom "committed" claim. See
+   `handoff-snapshot.md` §"Commit behavior".
 
 ## Hard rules (inherited from the brief)
 

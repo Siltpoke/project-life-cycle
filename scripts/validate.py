@@ -16,7 +16,8 @@ Checks:
    exists on disk and has frontmatter with at least a ``description``.
 8. Every command file under ``commands/`` is listed in the manifest (and
    vice versa) — no orphans, no missing files.
-9. All ``.md`` files are valid UTF-8.
+9. Every **tracked** ``.md`` file is valid UTF-8 (``git ls-files``, not a filesystem
+   walk — see ``md_files_to_check``; outside a git work tree it walks and says so).
 
 Pure stdlib. Run locally or in CI:
 
@@ -27,12 +28,47 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 
 ERRORS: list[str] = []
+
+
+def md_files_to_check(repo: Path) -> tuple[list[Path], str]:
+    """The ``.md`` files this repo is responsible for, plus HOW they were found.
+
+    Deliberately ``git ls-files``, not ``rglob``. A filesystem walk of this repo
+    reaches orders of magnitude more ``.md`` files than are tracked; the rest are a co-located
+    tool's cache directory, a gitignored ``docs/`` tree this project keeps out of version control,
+    and other dot-directories. Walking them made the validator's verdict depend on
+    unrelated local state, and — the load-bearing reason — left
+    ``close-gate.sh``'s test-evidence freshness row unanswerable: freshness is
+    "did a relevant path change since the recorded SHA", git can only see tracked
+    paths, so a validator with nearly all of its inputs invisible to git has no checkable
+    freshness at all. Narrowing here is what lets that row claim exactly what it
+    verified.
+
+    Returns ``(files, "tracked")`` normally. Outside a git work tree (a tarball, a
+    vendored copy) it returns ``(files, "walk")`` — the caller REPORTS that mode
+    rather than swapping surfaces silently, because an unannounced fallback is
+    the same defect class this narrowing exists to remove.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(repo), "ls-files", "-z", "--", "*.md"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return ([p for p in repo.rglob("*.md") if ".git" not in p.parts], "walk")
+    # git ls-files still names a tracked file after it's deleted in the working tree
+    # but not yet staged; skip those so a mid-refactor `rm` cannot crash check_utf8
+    # (a FileNotFoundError there would also land a traceback in the evidence file).
+    return ([f for rel in out.split("\0") if rel and (f := repo / rel).exists()], "tracked")
 
 
 def error(msg: str) -> None:
@@ -223,10 +259,11 @@ def main() -> int:
     # 4. Commands ↔ manifest reconciliation
     check_commands(REPO / "commands", REPO / "scripts" / "commands-manifest.txt")
 
-    # 5. UTF-8 on every .md
-    for md in REPO.rglob("*.md"):
-        if ".git" in md.parts:
-            continue
+    # 5. UTF-8 on every .md this repo ships (tracked files — see md_files_to_check)
+    md_files, how = md_files_to_check(REPO)
+    if how == "walk":
+        print("note: not a git work tree — UTF-8 check fell back to a filesystem walk")
+    for md in md_files:
         check_utf8(md)
 
     if ERRORS:

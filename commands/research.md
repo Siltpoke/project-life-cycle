@@ -60,8 +60,8 @@ Follow `references/brainstorm-research-protocol.md`:
    what reference products/sources do + cite URLs; NO recommendation). Tier-1 + Tier-2 in parallel
    (single message, multiple `Agent` calls) unless `--tier1`/auto-single. Tier target lists come
    from the project's `CLAUDE.md` when present.
-3. **Synthesize** a cited recommendation (§Step 3) in the required shape:
-   Recommendation / Why (per-tier evidence with URLs) / trade-offs ruled out / citations.
+3. **Synthesize** a cited recommendation **in the shape §Step 3 defines** — read it there rather
+   than from here; it is evidence-before-verdict and restating it is how the two drift apart.
 4. **Blind 2nd-agent** (§Step 4) — SKIP if `--quick`. Fresh agent sees the options + the verbatim
    research, NOT your recommendation. **Compare** (§Step 5): on disagreement, surface both sides in
    the report — never silently pick.
@@ -79,7 +79,7 @@ Follow `references/brainstorm-research-protocol.md`:
 
 ## Hard rules (inherited from the protocol)
 
-- **No citation, no send.** A synthesis whose "Why" block carries zero citation URLs is a malformed
+- **No citation, no send.** A synthesis whose `**Citations:**` block carries zero URLs is a malformed
   report — do not write it. If the research agents returned no citable sources (ISP block, no
   reference products for the topic), surface *"research returned no citable sources for <question>;
   here is what was attempted"* instead of emitting a confident citation-free report. (§Step 7,

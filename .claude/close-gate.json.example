@@ -8,10 +8,12 @@
   "acceptance_glob": "tests/acceptance/**/*phase-{PHASE}*",
   "test_evidence": ".claude/.last-test-run",
   "test_command": "REPLACE_ME e.g. 'bun test' or '.venv/bin/python -m pytest -q'",
+  "test_evidence_inputs": ["src/**", "tests/**"],
   "test_runs_required": 1,
   "user_visible": true,
   "exempt_user_story": false,
   "exempt_changelog": false,
+  "product_paths": ["src/"],
   "retention": {
     "hot_caps": { "resume": [200, 25], "status": [300, 30], "journal_hot": [0, 100], "qa_log_hot": [0, 50], "changelog_hot": [0, 50] },
     "count_caps": { "specs": 10, "plans": 10, "docs_total": 150 },

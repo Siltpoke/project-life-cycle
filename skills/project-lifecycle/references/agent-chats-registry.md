@@ -72,7 +72,7 @@ The harness passes `{ "session_id", "transcript_path", "cwd", ... }` on stdin.
 An upstream hook may also stamp `agent_family: "<family>"` (e.g. `"codex"`) — the
 command honors that as the family hint, else it sniffs the transcript shape. It
 then skips trivial sessions (< 4 user+assistant messages), detects family,
-extracts model + a deterministic topic (ECC:SUMMARY → first user message →
+extracts model + a deterministic topic (first user message, else
 "untitled session"), counts turns into `msg_count`, and upserts
 `docs/agent-chats-index.md`.
 

@@ -148,6 +148,33 @@ Acceptance verifier commits as `test(acceptance): phase X.Y AC1-N coverage` — 
 
 ## Background-by-default: the verification tail (steps 1.5 → 2 ∥ 3)
 
+> **Canonical executor: `.claude/workflows/verify-tail.mjs`.**
+> For the full-cadence tail the controller does NOT hand-dispatch three reviewer subagents — it
+> **invokes the script**, which owns both the control flow (verifier ∥ code-quality at
+> implementer-return, validator joining on the verifier report, the skipped-1.5 branch, the
+> missing-report = hole degradation) AND the full review-record dispatch contracts (the script's
+> inline prompts carry them — see the prose below, which is now the human-readable spec of what
+> those prompts encode, kept in sync with the script in the SAME commit).
+>
+> **How to run it** (at implementer-return, on a claimed-complete status):
+> ```
+> Workflow({ scriptPath: '.claude/workflows/verify-tail.mjs', args: {
+>   builderCommitSHA, prevTaskTip,        // → cq/validator diff range (prevTaskTip..SHA)
+>   builderSummary,                        // the Builder Summary (builder-split.md schema)
+>   storyPath,                             // null → skipped-1.5 branch (no verifier lane)
+>   specPath, planPath,                    // validator inputs; null → validate vs story+diff
+>   folderMapSide                          // routing hint (reserved)
+> }})
+> ```
+> It returns `{ verifier, cq, validator, holes }` — the controller consumes that for the fixup
+> step (step 4); a non-empty `holes` = a missing/failed report → re-dispatch once then surface,
+> never proceed with a verification hole.
+>
+> **Scope:** the script is canonical for the **full-cadence** tail only. Cadence **compression**
+> (6→4, §below — a single merged validator+CQ pass the script does not implement), **step 1**
+> (implementer), and **step 4** (fixup) stay prose-authoritative and hand-dispatched. Invoke by
+> `scriptPath` — this harness does not auto-register `.claude/workflows/*.mjs` by name.
+
 **The rule:** the post-implementation verification tail dispatches as
 `run_in_background` agents the moment the implementer returns **with a
 claimed-complete status (DONE / DONE_WITH_CONCERNS)** — a SPLIT_PROPOSED return is

@@ -1,0 +1,8 @@
+{
+  "_note": "Synthetic verify-tail self-test fixture. builderCommitSHA/prevTaskTip are symbolic refs (HEAD/HEAD~1) that re-resolve each run BY DESIGN — this exercises 'the last commit', it is NOT a pinned regression baseline. builderSummary deliberately makes NO code-change success claim, so lie-detection has nothing to (fail to) trace and the run reads clean. (An earlier run used a fabricated 'add(a,b)' summary and the validator correctly returned Critical untraceable-claim — that proved lie-detection fires; this honest summary is the canonical fixture.) The workflow ignores the _note key (it destructures only the four real fields).",
+  "builderCommitSHA": "HEAD",
+  "prevTaskTip": "HEAD~1",
+  "builderSummary": "Synthetic self-test input — exercises the tail orchestration only (lane decision, verifier-skip on a null story, validator join, merge, schema-forcing). Makes no code-change success claim.",
+  "storyPath": null,
+  "folderMapSide": null
+}

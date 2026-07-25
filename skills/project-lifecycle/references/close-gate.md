@@ -6,7 +6,7 @@ The fix is structural, per the skill's own rule (*structure > rules*): a **pure-
 
 Two layers, used together:
 
-1. **Visible state** — the AI materializes the step list as a `TaskCreate` task list at invocation — one `TaskCreate` call per step, wrap-up steps included; enumerate each step, never announce a count (see SKILL.md "Definition of Done"). Unchecked wrap-up tasks glare at done-time.
+1. **Visible state** — the AI materializes the step list at invocation — **the portable contract is `.claude/tasklist.md`, one `- [ ]` line per step**, wrap-up steps included; a host task tool (`TaskCreate` / `update_plan` / equivalent) is the upgrade where present, never the required mechanism — a `PreToolUse` hook cannot enumerate the session's tools and no two CLIs agree on the primitive's name (see SKILL.md "Two ways to satisfy it" + "Definition of Done"). Enumerate each step, never announce a count. Unchecked wrap-up tasks glare at done-time.
 2. **Hard gate** — `task-done` / `phase-done` exits 1 on any missing required artifact. The AI MUST run it and paste the output before claiming the task/phase is complete. A pre-push hook makes it un-bypassable.
 
 State #1 makes skips *obvious*; gate #2 makes them *impossible to hide*.
@@ -16,9 +16,9 @@ State #1 makes skips *obvious*; gate #2 makes them *impossible to hide*.
 ## What the gate checks
 
 ### `task-done` (one cadence task)
-- [ ] a `feat(...)`/`fix(...)` commit exists for this task (not just staged/working-tree)
+- [ ] the task's commit **touched the product tree** — the files changed in HEAD include a path under manifest `.product_paths[]` (e.g. `src/`, or `backend/`+`frontend/` for a split app, `skills/` for a skill repo). Path-based is the honest check: a legit `refactor:`/`docs(skill):` that changes the product passes, a meta-only change fails — the old commit-verb proxy couldn't tell them apart. **Backward-compatible:** when `product_paths` is not declared, this falls back to the legacy check that HEAD is a `feat(...)`/`fix(...)` commit
 - [ ] a `docs:` journal commit exists in the branch range (`origin/main..HEAD`), and the journal entry contains the literal header `## Plan deviations` (present even if body = "none") — the journal checked is the **most-recently-modified** `*.md` fragment under `retention.journal_dir` (default `docs/journal.d/`) when one exists (mtime order, deliberately not filename order: same-day fragments like `…-note10.md` vs `…-note5.md` sort wrong lexicographically, and multiple undrained fragments coexisting within a milestone is the expected state), else the manifest `journal` monolith
-- [ ] a fresh, **non-empty** test-evidence file exists (mtime newer than the feat commit; `-s` not just `-f` — an empty-but-fresh file is a false pass, e.g. an interrupted `tee`) — written by the project's test runner, not by hand; if `test_runs_required` > 1 the file must also contain a `RUNS=N` line with N ≥ required. **Scope note:** after a fixup, task-level evidence may be scoped to the suites the fixup diff touched (per `cadence.md` §"Selective re-verification after fixup") — the scoping is task-level ONLY; `phase-done` below always demands full-suite evidence, and that full run is the safety net for anything task-level scoping skipped
+- [ ] a fresh, **non-empty** test-evidence file exists — by **content fingerprint** when the manifest declares `test_evidence_inputs` (the evidence file's `# plc-gate-evidence inputs=<digest>` header must match the current-tree digest of the declared inputs), else by the legacy **mtime** check (newer than the feat commit). `-s` not just `-f` — an empty-but-fresh file is a false pass, e.g. an interrupted `tee`. Written by the project's test runner, not by hand; if `test_runs_required` > 1 the file must also contain a `RUNS=N` line with N ≥ required. **Scope note:** after a fixup, task-level evidence may be scoped to the suites the fixup diff touched (per `cadence.md` §"Selective re-verification after fixup") — the scoping is task-level ONLY; `phase-done` below always demands full-suite evidence, and that full run is the safety net for anything task-level scoping skipped
 - [ ] no orphan `[DEBUG-` logs remain in the diff
 - [ ] **(Sweeper only)** if a commit in range carries an `Archetype: sweep` trailer, the code diff (`docs/**` + `CHANGELOG.md` excluded) is net-negative LOC **or** a `SWEEP-PERF: <evidence>` line is logged — see §"Sweeper diff-direction"
 - [ ] if any artifact is absent, a `SKIP:` line with a reason exists in the journal "Plan deviations" section
@@ -31,8 +31,8 @@ State #1 makes skips *obvious*; gate #2 makes them *impossible to hide*.
 - [ ] `CHANGELOG.md` `[Unreleased]` was touched in this phase's commit range — a change under manifest `retention.changelog_dir` (default `changelog.d/`) **or** `CHANGELOG.md` itself satisfies this (unless `exempt_changelog`)
 - [ ] smoke artifacts exist — Track A checklist + Track B spec — when `user_visible` true
 - [ ] acceptance tests exist for the phase (glob `acceptance_glob`), unless `exempt_user_story` true (cadence step 1.5)
-- [ ] `docs/ROADMAP.md` touched in the phase's commit range
-- [ ] **fresh, non-empty test-evidence file exists** (`test_evidence`, `-s` + mtime newer than HEAD — the runner emitted it this phase, proving the tests actually ran before the phase ships; an empty-but-fresh file, e.g. an interrupted `bun test | tee`, is rejected). If `test_runs_required` > 1 the file must also contain `RUNS=N` with N ≥ required. Skipped only when the manifest has no `test_command`. **This is the check that makes the pre-push hook force tests** — without it, `phase-done` passed with tests never run, and the test pile silently slipped (the original gap). The PR-comment evidence block is the human-facing companion; this file check is the machine gate.
+- [ ] `docs/ROADMAP.md` touched in the phase's commit range **and the phase identifier actually appears in it**. Both, because "touched" is a proxy: a whitespace edit satisfies it, and the mtime variant used by the gitignored-docs gate is weaker still — that one printed `✓ ROADMAP.md updated this phase` while `grep -c <phase> docs/ROADMAP.md` returned 0. A row must not report a ceremony it only inferred; where the artifact's content is readable, read it
+- [ ] **fresh, non-empty test-evidence file exists** (`test_evidence`, `-s` — the runner emitted it this phase, proving the tests actually ran before the phase ships; an empty-but-fresh file, e.g. an interrupted `bun test | tee`, is rejected). Freshness is a **content fingerprint** of `test_evidence_inputs` when declared, else mtime newer than HEAD. If `test_runs_required` > 1 the file must also contain `RUNS=N` with N ≥ required. Skipped only when the manifest has no `test_command`. **This is the check that makes the pre-push hook force tests** — without it, `phase-done` passed with tests never run, and the test pile silently slipped (the original gap). The PR-comment evidence block is the human-facing companion; this file check is the machine gate.
 - [ ] every absent-but-claimed-skipped item has a `SKIP: <reason>` line
 - [ ] **(warn-only, never fails the gate)** the context-floor hook (`context-floor.sh`) is wired in `~/.claude/settings.json` or the project's `.claude/settings*.json`. The floor is a machine-local user-settings hook (`references/harness-primitives.md` §9) — a project gate must not fail on a user's global config — but an un-armed floor is exactly how a session runs far past it unnoticed. Missing → the gate prints a `⚠` row pointing at `/init-harness --refresh`
 - [ ] **(warn-only, never fails the gate)** hot-doc retention caps: each configured hot doc (defaults: RESUME 200L/25K, status doc 300L/30K, `docs/journal.d/` total 100K, qa-log 50K, `changelog.d/` total 50K; overrides via manifest `retention.hot_caps`) is measured `wc -l` + `wc -c`; over either limit → `⚠` row. Same doc over-cap at two consecutive closes (tracked in `.claude/retention-state.json`) → wording escalates to "SECOND consecutive over-cap close". See `references/retention.md` §"Hot-doc caps".
@@ -85,10 +85,12 @@ The gate is stack-agnostic; per-project specifics live in a small manifest the g
   "acceptance_glob": "tests/acceptance/**/*phase-{PHASE}*",
   "test_evidence": ".claude/.last-test-run",
   "test_command": "REPLACE_ME e.g. 'bun test' or '.venv/bin/python -m pytest -q'",
+  "test_evidence_inputs": ["src/**", "tests/**"],
   "test_runs_required": 1,
   "user_visible": true,
   "exempt_user_story": false,
   "exempt_changelog": false,
+  "product_paths": ["src/"],
   "retention": {
     "hot_caps": { "resume": [200, 25], "status": [300, 30], "journal_hot": [0, 100], "qa_log_hot": [0, 50], "changelog_hot": [0, 50] },
     "count_caps": { "specs": 10, "plans": 10, "docs_total": 150 },
@@ -106,6 +108,10 @@ The gate is stack-agnostic; per-project specifics live in a small manifest the g
 `count_caps` values are **file counts** of `*.md` (never PNGs — `*/screenshots/*` is excluded by construction, since those are load-bearing assets embedded in live PR comments via raw URLs, not documents; `docs_total` additionally excludes `retention.archive_dir` — the gate's own prescribed remedy for an over-cap close is to archive, so the count that gate rechecks must be capable of going back down). `0` = unlimited, `"none"` = exempt. Absent block, or an absent individual key inside it → **specs 10, plans 10, docs_total 150** — the gate's `cc()` helper defaults every key exactly the way `cap_val()` defaults `hot_caps`, so an unconfigured count axis is never silently unlimited.
 
 `status_doc` (optional, default `docs/STATUS.md`) names the read-first status doc measured by the hot-cap row; `RESUME.md` and `docs/brainstorming-qa-log.md` are conventional paths and stay hardcoded in the gate. `retention.qa_log_dir` (default `docs/qa-log.d`) and `retention.changelog_dir` (default `changelog.d`) are manifest-driven, mirroring `journal_dir`.
+
+`product_paths` (optional array, **task mode**) names the code/product tree; a task's commit satisfies check #1 by touching a path under it (`git diff-tree … HEAD`). This asks the honest question — *did the task change the product* — that the legacy `feat|fix` commit-verb check only proxied: a legitimate `refactor:` or `docs(skill):` that changes the product now passes, while a meta-only change fails, which no widened verb list could tell apart. Set it to your product tree — `["src/"]`, `["backend/","frontend/"]`, `["skills/"]` for a skill repo. **Backward-compatible:** an *absent* key falls back to the legacy `feat|fix` check, so a manifest predating this key is unaffected and no adopter's gate flips on upgrade — the path check is opt-in by declaring the key. A malformed value (present but not a non-empty array — an object, string, or empty array) fails closed.
+
+`test_evidence_inputs` (optional array) switches the **test-evidence freshness** check from mtime to a **content fingerprint**. mtime is not evidence that the tests ran against the *current* code — git does not preserve mtime across a checkout, and a fresh clone / CI checkout / synced folder shuffles mtimes, so a mtime-only row false-PASSES by construction there. Declare the inputs whose change means "the tests must be re-run" (globs, e.g. `["src/**","tests/**"]`); the gate then requires the evidence file's first line to be a `# plc-gate-evidence inputs=<digest>` header that matches the current-tree digest of those inputs. **The runner must produce that header** — prepend it with the `evidence-header` subcommand: `{ close-gate.sh evidence-header; <test_command>; } | tee <test_evidence>`. **Two-part opt-in, so no adopter breaks:** an *absent* key keeps the legacy mtime check byte-identical (existing manifests are untouched), and even a declared key does nothing until the runner writes the header — a declared-but-unheaded evidence file **hard-fails** (never silently falls back to mtime) with the exact regenerate command. Inputs that match no tracked file, or a malformed value, fail closed. The digest is over git-**tracked** working-tree content (an uncommitted edit to a tracked input *is* caught; a brand-new *unstaged* file is not — stage before generating evidence), the same git-tracked convention `product_paths` uses. `/init-harness` wiring (generate the key + the header-prefixed runner for new adopters) is not wired: an adopter opts in by declaring the key and prefixing the runner.
 
 When `test_runs_required` > 1, the project's `make test-evidence` (or test runner) **MUST emit a `RUNS=N` line** into the evidence file (e.g. `echo "RUNS=$n" >> .claude/.last-test-run`). The gate reads that line; if absent it treats the run-count as 0 and fails.
 
@@ -125,6 +131,62 @@ set -euo pipefail
 MODE="${1:?task|phase|milestone}"; PHASE="${2:-}"
 M=".claude/close-gate.json"; [ -f "$M" ] || { echo "✗ missing $M"; exit 1; }
 g() { jq -r ".$1 // empty" "$M" | sed "s/{PHASE}/$PHASE/g"; }
+
+# --- test-evidence content fingerprint -------------------------------------------------
+# The freshness check below has two modes. The DEFAULT (no `test_evidence_inputs` in the manifest)
+# is the legacy mtime check, byte-identical to before — no adopter's gate flips on upgrade. The
+# OPT-IN mode (declare `test_evidence_inputs`) fingerprints CONTENT instead: mtime is not evidence
+# that the tests ran against the CURRENT tree — git does not preserve mtime across a checkout, and a
+# fresh clone / CI checkout / synced folder shuffles mtimes, so a mtime-only row false-PASSES by
+# construction on those. A content fingerprint answers the real question: does this evidence file
+# describe the current bytes of the inputs the adopter declared as "changing these means re-run".
+#
+# evidence_digest: a stable fingerprint of the manifest-declared inputs, from WORKING-TREE content
+# (so an uncommitted edit is caught). `git hash-object` is content-addressed — same bytes, same
+# hash, on any machine — and keeps the envelope inside git (no sha256sum dep). Per-file hashes are
+# sorted so ordering never perturbs the digest, then hashed as one blob. The inputs come from the
+# manifest (the canonical gate serves ANY tree — unlike a project-local variant of this gate, it cannot hardcode
+# a validator's inputs).
+evidence_digest() {
+  # Disable globbing while splitting the pattern list: a pattern like 'src/**' must reach
+  # `git ls-files` as a (recursive) PATHSPEC, not be expanded by the shell against the cwd first.
+  # `set -- $LIST` under `set -f` passes them verbatim.
+  _inputs="$(jq -r '.test_evidence_inputs[]?' "$M" 2>/dev/null)"
+  # No inputs declared → emit the sentinel, do NOT proceed to `git ls-files` with an empty pathspec:
+  # an empty pathspec list means "no restriction" (matches the WHOLE tracked tree), not "match
+  # nothing", so `evidence-header` run on a manifest without test_evidence_inputs would silently hash
+  # the entire repo. check_evidence never reaches here on that path (it gates on a non-empty array),
+  # but the `evidence-header` subcommand is adopter-reachable directly.
+  [ -n "$_inputs" ] || { printf 'EMPTY-no-test-evidence-inputs-declared\n'; return 0; }
+  set -f
+  # shellcheck disable=SC2086
+  set -- $_inputs
+  set +f
+  # Zero matches must NOT fall through to `git hash-object --stdin` on empty input: that returns the
+  # FIXED empty-blob SHA e69de29b…, a constant that passes the header regex, so the row would compare
+  # constant-to-constant and PASS vacuously — an adopter whose globs match nothing would silently
+  # green, the exact silent-degrade this mode removes. Emit a non-hex sentinel; check_evidence rejects
+  # it loudly.
+  if [ -z "$(git ls-files -z -- "$@" 2>/dev/null | tr -d '\0')" ]; then
+    printf 'EMPTY-no-test-evidence-inputs-matched\n'; return 0
+  fi
+  git ls-files -z -- "$@" 2>/dev/null \
+    | while IFS= read -r -d '' _f; do
+        printf '%s %s\n' "$(git hash-object "$_f" 2>/dev/null || echo MISSING)" "$_f"
+      done \
+    | LC_ALL=C sort \
+    | git hash-object --stdin
+}
+# The header the runner must write as the evidence file's FIRST line. ONE definition, emitted by the
+# `evidence-header` subcommand and re-derived by check_evidence — runner and gate call the same
+# function, so they can never drift on how the fingerprint is computed.
+evidence_header() { printf '# plc-gate-evidence inputs=%s\n' "$(evidence_digest)"; }
+# Subcommand: print just the header so the runner can prepend it —
+#   { close-gate.sh evidence-header; <test_command>; } | tee <test_evidence>
+# Exits before the phase/PHASE-arg requirements. (Unlike a project-local variant, this
+# one DOES read the manifest — the declared inputs live there — so it needs `$M`, already resolved.)
+if [ "$MODE" = evidence-header ]; then evidence_header; exit 0; fi
+
 fail=0
 ok()  { echo "✓ $1"; }
 bad() { echo "✗ $1"; fail=1; }
@@ -150,6 +212,67 @@ req_glob() { # $1=pattern (already {PHASE}-substituted, may be empty) $2=ok-labe
 # empirically, prints nothing for byte-identical timestamps, i.e. it fails CLOSED on an exact
 # tie (equal timestamps = NOT fresh) with no separate fallback needed.
 fresh() { [ -e "$1" ] && [ -e "$2" ] && [ -n "$(find "$1" -newer "$2" -print 2>/dev/null)" ]; }
+# Defect: `.git/HEAD`'s FILE mtime does not track HEAD — `git commit` leaves it at the time the
+# branch was checked out (verified: two commits apart, `.git/HEAD` mtime is unchanged). So a legacy
+# `fresh $EV .git/HEAD` compared the evidence against WHEN THE BRANCH WAS CHECKED OUT, not the commit
+# it claims to cover: evidence written after checkout but before the current HEAD commit is newer than
+# `.git/HEAD` yet older than HEAD, and false-PASSES as fresh. Anchor freshness to HEAD's committer-date
+# (the semantic commit time) instead. `touch -t` is whole-second, so this carries a documented ≤1s
+# fail-OPEN residual (evidence in the same second as the commit reads fresh — the correct side in the
+# realistic run-tests-then-commit order); identical to a project-local variant's `stamp_ref`.
+stamp_head_date() { touch -t "$(git show -s --format=%cd --date=format-local:%Y%m%d%H%M.%S HEAD)" "$1" 2>/dev/null; }
+# The RUNS=N tail shared by both evidence modes: when test_runs_required>1 the evidence must carry a
+# RUNS=N line with N>=required (the runner emits it). $1=evidence-file $2=required $3=ok-detail.
+evidence_runs_ok() {
+  if [ "$2" -gt 1 ]; then
+    n=$(grep -oE 'RUNS=[0-9]+' "$1" | head -1 | cut -d= -f2 || true); n=${n:-0}
+    if [ "$n" -ge "$2" ]; then ok "fresh test-evidence, RUNS=$n (>=$2)"
+    else bad "test-evidence RUNS=$n < required $2 — run tests ${2}× (runner must emit 'RUNS=N')"; fi
+  else ok "fresh test-evidence ($3)"; fi
+}
+# check_evidence: the one evidence check, called from both task and phase mode (they were byte-identical
+# duplicates). TWO modes, selected by whether the manifest declares `test_evidence_inputs`:
+#   • declared (non-empty array) → CONTENT FINGERPRINT (opt-in). The evidence file's first line
+#     must be the `# plc-gate-evidence inputs=<digest>` header the runner prepended; the gate recomputes
+#     the digest of the declared inputs from the working tree and compares. A missing header, the EMPTY
+#     sentinel (globs matched nothing), or a mismatch are ALL hard fails — never a silent fall-back to
+#     mtime (that silent-degrade is the whole point of moving off mtime).
+#   • absent → LEGACY mtime check, byte-identical to before (no adopter's gate flips on upgrade). The
+#     path check is opt-in by declaring the inputs, exactly like product_paths is.
+#   • malformed (present but not a non-empty array) → fail closed, same type-guard as product_paths.
+check_evidence() {
+  EV="$(g test_evidence)"; REQ="$(jq -r '.test_runs_required // 1' "$M")"
+  # Absent/empty test_evidence is a HARD FAIL, not a warn-skip — byte-identical to the pre-existing
+  # inline blocks (an absent key gave EV="", `[ -s "" ]` false, then bad). Do NOT downgrade this to
+  # a skip: a manifest with a test_command but no evidence path is a misconfiguration the gate must
+  # surface, and a silent pass here is the vacuous-pass-on-absent-key defect this file guards against.
+  [ -s "$EV" ] || { bad "stale/missing test-evidence — run: $(g test_command)"; return 0; }
+  TEI_TYPE="$(jq -r '.test_evidence_inputs | type' "$M" 2>/dev/null || echo null)"
+  REGEN="{ close-gate.sh evidence-header; $(g test_command); } | tee $EV"
+  if [ "$TEI_TYPE" = array ] && [ "$(jq -r '.test_evidence_inputs | length' "$M" 2>/dev/null || echo 0)" -gt 0 ]; then
+    EVDIG="$(sed -n '1s/^# plc-gate-evidence inputs=\([0-9a-f]\{40,64\}\)[[:space:]]*$/\1/p' "$EV" 2>/dev/null)"
+    NOWDIG="$(evidence_digest)"
+    if [ "${NOWDIG#EMPTY-}" != "$NOWDIG" ]; then
+      bad "test_evidence_inputs matched no tracked files — the fingerprint checks nothing; fix the globs in the manifest"
+    elif [ -z "$EVDIG" ]; then
+      bad "test-evidence $EV has no '# plc-gate-evidence inputs=<digest>' first line — regenerate it: $REGEN"
+    elif [ "$EVDIG" != "$NOWDIG" ]; then
+      bad "test-evidence $EV is stale — a declared test_evidence_input changed since it was generated — re-run: $REGEN"
+    else
+      evidence_runs_ok "$EV" "$REQ" "fingerprint matches the current tree"
+    fi
+  elif [ "$TEI_TYPE" = null ]; then
+    HREF="$(mktemp)"; stamp_head_date "$HREF" || true  # HEAD committer-date, not .git/HEAD mtime.
+    # `|| true`: on a stamp failure (bad/empty date → touch -t non-zero) set -e must NOT abort before the
+    # rm below, or the temp file leaks. HREF then keeps its recent mktemp mtime, so evidence reads older
+    # → fail-CLOSED (never a false fresh); the failure just cannot leak a /tmp file.
+    if fresh "$EV" "$HREF"; then evidence_runs_ok "$EV" "$REQ" "$EV"
+    else bad "stale/missing test-evidence — run: $(g test_command)"; fi
+    rm -f "$HREF"
+  else
+    bad "test_evidence_inputs present in manifest but not a non-empty JSON array — fix the manifest"
+  fi
+}
 # escape-hatch: an exempt_* flag is only legitimate if a 'SKIP: <reason>' line is written in the journal
 skip_logged() { grep -qE '^[[:space:]]*SKIP:' "$(g journal)" 2>/dev/null; }
 # --- retention: COUNT axis helpers (size caps are blind to many-small-files growth) ---
@@ -186,7 +309,33 @@ count_row() { # $1=label $2=count $3=cap — silent when at/under cap, "none", o
 }
 
 if [ "$MODE" = task ]; then
-  git log -1 --format=%s | grep -qE '^(feat|fix)(\(|:)' && ok "feat/fix commit" || bad "no feat/fix commit on HEAD"
+  # Product-tree check: did THIS task's commit touch the product tree? A path check asks the real question
+  # ("the phase shipped a product change") that the old `feat|fix` commit-VERB test only proxied —
+  # a legit refactor-only commit under the product tree had to be mislabeled `feat` to pass. Paths
+  # come from the manifest `.product_paths[]`. BACKWARD-COMPATIBLE: an ABSENT key falls back to the
+  # legacy verb check, so a manifest predating this key keeps its behavior and no adopter's gate
+  # flips on upgrade — the path check is opt-in by declaring product_paths. `git diff-tree … --root
+  # HEAD` names the files in HEAD's own commit; `--root` is REQUIRED for parent-safety — without it
+  # a root commit (an adopter's very first commit, e.g. an init-harness scaffold + first product
+  # code in one commit) diffs against a nonexistent parent and prints nothing → false ✗ on a real
+  # change; with it a root commit lists all its files and a parented commit is unaffected. Gate on
+  # the JSON *type*: `.product_paths[]?` also iterates an object's values, so a `{"a":"src/"}` typo
+  # would silently run on those — only a non-empty ARRAY takes the path branch; null (absent) →
+  # verb fallback; anything else (object / string / empty array) → fail closed.
+  PP_TYPE="$(jq -r '.product_paths | type' "$M" 2>/dev/null || echo null)"
+  if [ "$PP_TYPE" = array ] && PP_LIST="$(jq -r '.product_paths[]' "$M" 2>/dev/null)" && [ -n "$PP_LIST" ]; then
+    # strip trailing slash, escape EVERY ERE metachar (so an adopter path like `c++/` or `app(v2)/`
+    # can't reach grep -E raw and false-FAIL), join with `|`. grep -c … -gt 0 (not grep -q) for the
+    # same pipefail/SIGPIPE reason the docs:/[DEBUG- checks below use.
+    PP_ALT="$(printf '%s\n' "$PP_LIST" | sed -e 's#/*$##' -e 's#[][(){}.^$*+?|\\]#\\&#g' | paste -sd'|' -)"
+    if [ "$(git diff-tree --no-commit-id --name-only -r --root HEAD 2>/dev/null | grep -cE "^(${PP_ALT})/" || true)" -gt 0 ]; then
+      ok "task commit touches the product tree (${PP_ALT})"
+    else bad "task commit changed no product-tree path (${PP_ALT}) — a task must ship a product change (or fix product_paths)"; fi
+  elif [ "$PP_TYPE" = null ]; then
+    git log -1 --format=%s | grep -qE '^(feat|fix)(\(|:)' && ok "feat/fix commit" || bad "no feat/fix commit on HEAD"
+  else
+    bad "product_paths present in manifest but not a non-empty JSON array — fix the manifest"
+  fi
   # capture-then-herestring, NOT `git log … | grep -q`: a multi-commit range means grep -q can match
   # a docs: subject early and SIGPIPE the still-writing git log → pipefail non-zero → false-negative.
   DOCS_SUBJ="$(git log origin/main..HEAD --format=%s 2>/dev/null || true)"
@@ -201,13 +350,7 @@ if [ "$MODE" = task ]; then
   [ -n "$J" ] || J="$(g journal)"
   # match the journal-schema canonical bold form (**Plan deviations** / **Plan deviations:**) AND an H2/H3 header form
   if grep -qE '\*\*Plan deviations:?\*\*|^#{1,4}[[:space:]]*Plan deviations' "$J" 2>/dev/null; then ok "journal Plan-deviations header"; else bad "journal missing 'Plan deviations' header"; fi
-  EV="$(g test_evidence)"; REQ="$(jq -r '.test_runs_required // 1' "$M")"
-  if [ -s "$EV" ] && fresh "$EV" .git/HEAD; then
-    if [ "$REQ" -gt 1 ]; then
-      n=$(grep -oE 'RUNS=[0-9]+' "$EV" | head -1 | cut -d= -f2 || true); n=${n:-0}
-      if [ "$n" -ge "$REQ" ]; then ok "fresh test-evidence, RUNS=$n (>=$REQ)"; else bad "test-evidence RUNS=$n < required $REQ — run tests ${REQ}× (runner must emit 'RUNS=N')"; fi
-    else ok "fresh test-evidence ($EV)"; fi
-  else bad "stale/missing test-evidence — run: $(g test_command)"; fi
+  check_evidence   # content fingerprint when test_evidence_inputs is declared, else legacy mtime
   # only ADDED lines (^+), and exclude the gate tooling itself (these scripts legitimately contain "[DEBUG-")
   # capture-then-herestring, NOT `git diff … | grep -q`: under pipefail a grep -q early-exit on the
   # first match SIGPIPEs the still-writing git diff (141), pipefail surfaces 141 over grep's 0, the
@@ -260,7 +403,22 @@ elif [ "$MODE" = phase ]; then
   # capture-then-herestring, NOT `git diff … | grep -q`: many changed files means grep -q can match
   # ROADMAP early and SIGPIPE the still-writing git diff → pipefail non-zero → false-POSITIVE failure.
   ROADMAP_DIFF="$(git diff --name-only $RANGE 2>/dev/null || true)"
-  grep -q 'docs/ROADMAP.md' <<<"$ROADMAP_DIFF" && ok "ROADMAP touched" || bad "ROADMAP.md not updated in $RANGE"
+  # TWO independent facts, both required. "Touched in range" proves this phase changed the
+  # file; it does NOT prove the phase is IN it — a whitespace edit satisfies a touch check.
+  # The row's claim is "the roadmap reflects this phase", and that is only observable in the
+  # text, so grep the phase identifier too. A sibling gate that checked only
+  # recency printed "✓ ROADMAP.md updated this phase" while the phase appeared nowhere in the
+  # file. Touch and mtime are both proxies; the content is the thing.
+  # The id match is ANCHORED. `grep -F` disables regex; it does NOT make the match whole-token,
+  # so a bare `-F "$PHASE"` lets phase `1.2` be satisfied by a row that only says `1.20`, and
+  # `X4` by `X40`. Require a non-identifier character (or a line edge) on both sides; the id
+  # itself is regex-escaped — the class covers BOTH the BRE and the ERE metacharacters,
+  # so `.` in `1.2` cannot match any character and `|` in an id cannot become an alternation.
+  PHASE_RE="$(printf '%s' "$PHASE" | sed 's/[][\.*^$/&+?(){}|]/\\&/g')"
+  if ! grep -q 'docs/ROADMAP.md' <<<"$ROADMAP_DIFF"; then bad "ROADMAP.md not updated in $RANGE"
+  elif ! grep -qE "(^|[^0-9A-Za-z._-])${PHASE_RE}([^0-9A-Za-z._-]|$)" docs/ROADMAP.md 2>/dev/null; then
+    bad "docs/ROADMAP.md was touched in $RANGE but never mentions phase $PHASE — a touch is not the ceremony"
+  else ok "ROADMAP names phase $PHASE"; fi
   # journal-touched: accept a change under retention.journal_dir (fragment pilot) OR the
   # manifest 'journal' monolith path (back-compat) — capture-then-grep, no pipe into grep -q.
   # BSD grep errors ('empty (sub)expression', exit 2) on an alternation with an
@@ -309,17 +467,12 @@ elif [ "$MODE" = phase ]; then
   else
     ok "journal FACT entry has all required fields"
   fi
-  # test-evidence at phase close — the pre-push hook runs phase mode, so THIS is what
-  # forces tests to actually run before a phase ships. Skipped only when the project has
-  # no test_command. (Was missing here originally — tests fell through every hooked gate.)
+  # test-evidence at phase close. check_evidence runs in BOTH task and phase mode, and the
+  # pre-push hook runs task mode on every push, so tests are forced on every pushed task,
+  # not only at phase close. Skipped only when the project has no test_command. (Was missing
+  # here originally — tests fell through every hooked gate.)
   if [ -n "$(g test_command)" ]; then
-    EV="$(g test_evidence)"; REQ="$(jq -r '.test_runs_required // 1' "$M")"
-    if [ -s "$EV" ] && fresh "$EV" .git/HEAD; then
-      if [ "$REQ" -gt 1 ]; then
-        n=$(grep -oE 'RUNS=[0-9]+' "$EV" | head -1 | cut -d= -f2 || true); n=${n:-0}
-        if [ "$n" -ge "$REQ" ]; then ok "fresh test-evidence, RUNS=$n (>=$REQ)"; else bad "test-evidence RUNS=$n < required $REQ — run tests ${REQ}× (runner must emit 'RUNS=N')"; fi
-      else ok "fresh test-evidence ($EV)"; fi
-    else bad "stale/missing test-evidence — run: $(g test_command)"; fi
+    check_evidence   # content fingerprint when test_evidence_inputs is declared, else legacy mtime
   fi
   # context-floor arming check — WARN-ONLY (never flips $fail): the floor is a
   # machine-local user-settings hook, so a project gate must not fail on it; but
@@ -857,7 +1010,11 @@ git add .close-gate-probe.py && git -c user.email=t@t -c user.name=t commit --qu
 neg "orphan [DEBUG- in diff (large-diff SIGPIPE guard)"  'orphan \[DEBUG- logs'  task
 git reset --quiet --hard HEAD~1; restore
 git -c user.email=t@t -c user.name=t commit --quiet --allow-empty -m "chore: not a cadence task"
-neg "non-feat/fix HEAD"  'no feat/fix commit'  task
+# check #1 is path-based when the manifest declares product_paths (an empty commit touches no
+# product path → 'no product-tree path') and the legacy verb check otherwise ('no feat/fix commit').
+# An empty chore commit fails BOTH branches, so accept either message — the NEG stays correct whether
+# the manifest under test predates product_paths or ships it (the manifest example now does).
+neg "non-product / non-feat-fix HEAD"  'no feat/fix commit|no product-tree path'  task
 git reset --quiet --hard HEAD~1; restore
 # Sweeper diff-direction teeth: a sweep-tagged commit that ADDS code must fail; a SWEEP-PERF line rescues it.
 # ALSO the regression guard for the sweep-DETECTION SIGPIPE (production close-gate.sh sweep check): the
@@ -900,29 +1057,34 @@ Note: the orphan-`[DEBUG-` check in `close-gate.sh` excludes both `scripts/close
 
 The gate only forces anything if something *runs* it. The three layers are defense-in-depth, not a menu — **layer 1 is the default and must be active; 2 and 3 are additional cover.** Shipping only layer 3 is the trap that produces the exact symptom this gate exists to kill: the model is *supposed* to run `make phase-done`, finishes the code, feels done, and never runs it. A gate that depends on the model remembering to invoke it is the unreliable layer the skill warns about — make the un-bypassable layer carry the weight.
 
-1. **git pre-push hook — DEFAULT, un-bypassable, installed at bootstrap.** Rejects the push of an incomplete `feat/phase-*` branch *physically*, regardless of model behaviour. This is the layer that actually works. Script below. Never `--no-verify`.
-2. **CI job (additional).** A `close-gate` job in PR-time CI that runs `phase-done`. Catches it at the PR even if the local hook was somehow bypassed or absent (e.g. a fresh clone before hooks are wired). Slower loop (push-then-fail) but covers shared repos.
-3. **Model-run discipline (additional, always).** The AI MUST run `make task-done` after each cadence task and `make phase-done` before opening the PR, and **paste the gate output**. "I ran it, it passed" without pasted output is an unverified claim — treat as not-run. This layer gives a *fast* local signal; it does NOT replace the hook.
+1. **git pre-push hook — DEFAULT, un-bypassable, installed at bootstrap.** On a `feat/phase-*` branch it runs the **`task`** gate: a phase's first completed task is pushable the moment it exists (product-tree change + this task's journal FACT + fresh evidence), reconciling push-immediate with a gate that used to demand phase-close artifacts on commit one. It rejects an incomplete *task* push physically, regardless of model behaviour. This is the layer that actually works for per-task discipline. Script below. Never `--no-verify`. **Enforcement-shift note:** the heavier `phase` gate is no longer run by pre-push, so phase-close completeness (CHANGELOG / spec / plan / ROADMAP) is enforced at the **merge boundary** by layers 2 + 3 below — un-bypassable on repos with a required-status CI check (layer 2), and model-discipline + the human merge gate on CI-less repos. This is a deliberate trade: intermediate pushes become possible (they were structurally impossible before) at the cost of moving phase-done off the per-push hard block.
+2. **CI job (the un-bypassable `phase-done` for shared repos).** A `close-gate` job in PR-time CI that runs `phase-done`. With branch protection requiring it, this is the hard, un-bypassable phase-close gate for shared repos — it is where phase-done's teeth moved. Also catches a task push whose phase was never completed. Slower loop (push-then-fail) but covers shared repos.
+3. **Model-run discipline (additional, always).** The AI MUST run `make task-done` after each cadence task and `make phase-done` before opening the PR, and **paste the gate output**. "I ran it, it passed" without pasted output is an unverified claim — treat as not-run. On a CI-less repo this plus the human merge gate is what enforces phase-done, so it is not optional there.
 
 ### The pre-push hook — `.githooks/pre-push` (version-controlled, activated via `core.hooksPath`)
 
-Committed to the repo (so teammates + fresh clones get it) and activated with one idempotent config line. On a `feat/phase-*` branch it runs `phase-done`; any other branch pushes freely (phase-push granularity — WIP branches aren't gated).
+Committed to the repo (so teammates + fresh clones get it) and activated with one idempotent config line. On a `feat/phase-*` branch it runs the **`task`** gate, so intermediate pushes are allowed while each pushed task still carries its journal + evidence; any other branch pushes freely (WIP branches aren't gated). Phase-close completeness is the CI job's / merge boundary's responsibility (layers 2 + 3 above).
 
 ```bash
 #!/usr/bin/env bash
 # close-gate pre-push hook — installed by /init-harness (idempotent).
-# Rejects pushing a feat/phase-* branch whose close-gate (phase mode) fails.
-# Bypass is NOT allowed — fix the missing wrap-up artifact. Never --no-verify.
+# Rejects pushing a feat/phase-* branch whose TASK close-gate fails: each pushed task must
+# carry its product-tree change + journal FACT + fresh evidence. Phase-close artifacts (CHANGELOG /
+# spec / plan / ROADMAP) are enforced by `phase` mode at the merge boundary (CI + human), not here.
+# Bypass is NOT allowed — fix the missing artifact. Never --no-verify.
 set -uo pipefail
 branch="$(git symbolic-ref --short HEAD 2>/dev/null || true)"
 case "$branch" in
   feat/phase-*)
-    phase="$(printf '%s' "$branch" | sed -E 's#^feat/phase-([0-9]+(\.[0-9]+)*).*#\1#')"
+    # Phase token = the segment after 'feat/phase-' up to the next '-'; `[^-]+` captures any
+    # shape (1.2, X9.1a, X2-X10 → X2). An earlier dotted-numeric regex truncated letter suffixes.
+    phase="$(printf '%s' "$branch" | sed -E 's#^feat/phase-([^-]+)-.*#\1#')"
     [ -f scripts/close-gate.sh ] || { echo "pre-push: scripts/close-gate.sh missing — run /init-harness --refresh"; exit 1; }
-    echo "pre-push: running close-gate phase $phase …"
-    if ! bash scripts/close-gate.sh phase "$phase"; then
-      echo "── push REJECTED: phase $phase wrap-up incomplete (close-gate FAIL above)."
-      echo "   Fix each ✗ (or log a 'SKIP: <reason>' in the journal Plan-deviations), then push again. Never --no-verify."
+    echo "pre-push: running close-gate task $phase …"
+    if ! bash scripts/close-gate.sh task "$phase"; then
+      echo "── push REJECTED: task wrap-up incomplete (close-gate FAIL above)."
+      echo "   Fix each ✗ (or log a 'SKIP: <reason>' in the journal Plan-deviations), then push again."
+      echo "   Phase-close artifacts are checked by 'phase' mode before merge, not here. Never --no-verify."
       exit 1
     fi
     ;;

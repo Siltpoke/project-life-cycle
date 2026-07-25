@@ -19,7 +19,7 @@ ROADMAP is **append-and-amend**, updated at three moments:
 
 ## Canonical location
 
-`docs/ROADMAP.md` (MD is the source of truth). An optional `docs/ROADMAP.html` companion may be generated under the normal `html-policy` opt-in (it is one of the HTML-companion-eligible artifacts — same ask-once rule as the spec/design and milestone-summary nodes).
+`docs/ROADMAP.md` (MD is the source of truth). An optional `docs/ROADMAP.html` companion may be generated on request under the normal `html-policy` key. It is **ad-hoc, not one of the counted artifacts** — there is no point in the workflow that offers it, so nothing asks; you ask for it. See `references/output-format.md` §"What the count deliberately excludes".
 
 ## Required structure
 
@@ -43,12 +43,22 @@ e.g. "build the substrate → plug tools in → synthesize". State the load-bear
 invariant the whole plan rests on, if there is one.>
 
 ## Milestones
+
+**Active + upcoming** (keep this table short — fold done rows into the history block below;
+a flat single table with no fold is also conforming — see "Anti-bloat conventions" after this template):
 | # | Milestone | What gets built | Depends on | Status |
 |---|---|---|---|---|
-| M1 | ... | ... | — | ✅ done |
 | M2 | ... | ... | M1 | ▶ current |
 | M3 | ... | ... | M2 | ☐ planned |
 <status legend: ✅ done · ▶ current · ☐ planned · ⏸ paused · ✗ dropped>
+
+<details><summary><b>Done history (N milestones)</b></summary>
+
+| # | Milestone | What gets built | Depends on | Status |
+|---|---|---|---|---|
+| M1 | ... | ... | — | ✅ done |
+
+</details>
 
 ## How a milestone runs (the repeating loop)
 <the per-phase cadence, so a reader knows the rhythm — usually a fixed block,
@@ -62,6 +72,58 @@ build → smoke → handoff → PR → /clear>
 <dated, append-only log of scope changes. "2026-06-10 — split M5 into M5a/M5b
 because the deep-dive was too big for one phase." Drift is signal; record it.>
 ```
+
+### Anti-bloat conventions (recommended)
+
+A ROADMAP that lists every completed milestone inline grows into a wall no one re-reads — the map
+stops being a map. These conventions keep it scannable. They are **recommended, not required**: a flat
+single-table ROADMAP is still conforming, and `/catchup`'s parser reads both shapes (it scans table
+rows by structure, **including rows folded inside `<details>`**, so folding is safe and never hides a
+milestone from the card).
+
+- **Fold done milestones into a `<details>` "Done history" block** once the active table gets long
+  (~10+ rows). Move the rows **verbatim** — never delete them; the whole point of the ROADMAP is
+  traceability, and the close-gate greps the file for the phase id, which still matches inside the fold.
+  Keep the active table to **active + upcoming** (`▶` / `☐` / `⏸`).
+- **Point, don't dump.** A milestone that spawns many sub-items (follow-ups, a backlog cluster) gets
+  ONE row that points at where they live (`docs/BACKLOG.md`), not an inline dump of each — the dump
+  belongs in the backlog, and inlining it re-bloats the table the next reader has to skim.
+- **One concern per row.** When a grouped/bundled row's members diverge, split them; a row that means
+  three different things can't carry an honest single status glyph.
+- **The `<details>` summary carries a count** (`Done history (N milestones)`) so the fold advertises how
+  much history it holds without being opened.
+
+### Alternative layout — emoji fisheye (for a rich `/catchup` card)
+
+The flat Milestones table above is fully conforming and is the default. A project that wants the
+**richer `/catchup` card** — a mainline/backlog split with per-item weight + eta, instead of a plain
+list — may instead shape `docs/ROADMAP.md` as an **emoji-fisheye** layout. Both are conforming
+(**union**); `scripts/session_card.py` reads the fisheye layout on its primary path and falls back to
+the flat table when the fisheye sections are absent, so neither breaks the other.
+
+The card consumes six elements, matched by **structure / emoji position, never by header words** (the
+parser is language-agnostic — CJK labels are fine):
+
+| Element  | Where the parser reads it                                              | Renders on the card as       |
+|----------|-----------------------------------------------------------------------|------------------------------|
+| vision   | 1st `**bold**` line at column 0, before the first `## ` header         | breadcrumb top line          |
+| current  | 2nd such `**bold**` line                                               | "you are here"               |
+| done      | body of `## ✅ …`, a `·`-separated category line (truncated at `---`/`***`) | collapsed count + categories |
+| doing    | `**bold**` lines inside `## 🔄 …`                                      | focal row (▶)                |
+| mainline | first 4-col table in `## 🛣 …` — `name \| what \| weight \| eta`        | Future table                 |
+| backlog  | first 4-col table in `## 🗂 …` — same four columns                     | Backlog table                |
+
+Rules for this layout:
+- The two `**vision**` / `**current**` lines MUST sit before the first `## ` header (an `## Index`
+  placed above them would end the head scan early and hide them), and each MUST carry its **label and
+  value on one line** (`**vision** <the value>`, one space between) — the parser reads the value inline after the bold
+  label, so a label alone on its line with the value on the next line mis-parses.
+- `## 🛣` and `## 🗂` are markdown tables with exactly four columns; weight uses a compact glyph
+  (🟢 light · 🟡 medium · 🔴 heavy) and eta a short phrase (`~1 session` / `several sessions`).
+- Keep each row's milestone id in the name cell — the close-gate greps the file for the phase id.
+- Done-history rows still fold **verbatim** into a `<details>` (anti-bloat), placed AFTER a `---`
+  rule inside `## ✅` (the `·`-list parser truncates at the rule, so the table never pollutes the
+  category line) or under a separate non-scanned `## ` header.
 
 ## Status legend (use exactly these)
 

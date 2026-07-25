@@ -77,9 +77,12 @@ I am <task>, in <phase>.                             ← core 1
 - <blocker or gotcha>
 ```
 
-The snapshot **overwrites** the prior one in `RESUME.md` — it does not append. (RESUME is the current
-moment; history lives in the journal.) If `RESUME.md` does not yet exist (first `/handoff` in a project),
-**create it** with the snapshot.
+The snapshot **replaces** the prior one in `RESUME.md` — it does not append, so the hot file the
+SessionStart hook loads stays a single small moment. (RESUME is the current moment; history lives in the
+journal.) But the outgoing snapshot is **not discarded**: immediately before the overwrite it is
+**archived in full** to the cold sibling `RESUME-archive.md` — see §"Archive-before-overwrite" below — so
+the full session-by-session prose narrative accumulates where it costs no context. If `RESUME.md` does not
+yet exist (first `/handoff` in a project), **create it** with the snapshot; there is nothing to archive.
 
 ## Generation-time self-validation
 
@@ -97,6 +100,31 @@ confidence. Run these four checks **before writing**:
 4. **Staleness stamp** — compute the anchor: `git rev-parse HEAD`, `git rev-parse --abbrev-ref HEAD`,
    and a timestamp. If not in a git repo / no HEAD resolvable → record `no-git` and still write core
    fields 1-2.
+
+## Archive-before-overwrite
+
+Runs **after** the four self-validation checks pass and **immediately before** the `RESUME.md` overwrite —
+this is the one step that keeps the overwrite from destroying history. It preserves the *outgoing*
+snapshot in full, in a cold file the SessionStart hook never loads, so the hot `RESUME.md` stays a single
+small moment while the full prose narrative accrues at zero context cost.
+
+1. **Skip on first run.** If `RESUME.md` does not exist or is empty, there is nothing to archive — skip
+   silently (no warning) and proceed to the overwrite.
+2. **Read the outgoing snapshot** — the *current, pre-overwrite* full body of `RESUME.md` (its staleness
+   stamp intact — that stamp is what makes each archived entry a legible "this was current at HEAD <sha> ·
+   <ts>" timeline marker).
+3. **Prepend it to `RESUME-archive.md`** (sibling of `RESUME.md`, wherever the project keeps `RESUME.md`;
+   repo root in PLC's own layout) — **newest-first**, each archived snapshot separated from the next by a
+   `---` horizontal rule. Create `RESUME-archive.md` if it does not yet exist.
+4. **Verbatim — no distillation, no reformatting.** Archive the outgoing snapshot body as-is. It is
+   already a compact schema snapshot (not long free prose), so entries are small and accrue slowly; there
+   is no hot-cap on this file and no retention drain — it is cold, human-scroll-back storage the hook is
+   blind to by design.
+5. **THEN overwrite `RESUME.md`** with the new snapshot (per §"The snapshot schema").
+
+**Commit / gitignored handling mirrors `RESUME.md` exactly** (see §"Commit behavior"): commit
+`RESUME-archive.md` where tracked; where gitignored,
+write it locally and **report the local-only reality — never a phantom "committed" claim.**
 
 ## The conditional journal FACT
 

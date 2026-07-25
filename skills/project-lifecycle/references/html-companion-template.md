@@ -1,6 +1,6 @@
 # HTML Companion Template — Brainstorm / Spec / Design Exploration
 
-> Reusable structural pattern for the HTML opt-in nodes defined in `output-format.md` (spec/design exploration, spec finalization, milestone summary).
+> Reusable structural pattern for every HTML opt-in artifact `output-format.md` defines. That file is the single list of which artifacts exist and when each is offered — this one never restates that list as a count or a registry. The preset table below is keyed by artifact only to recommend a skin; it is not the registry, and it carries ad-hoc artifacts that the count deliberately excludes.
 >
 > **MD remains canonical** in every case. HTML is a generated companion view — same content, richer presentation.
 
@@ -55,7 +55,7 @@ Number with the §N notation. The skeleton at `html-companion-skeleton.html` shi
 
 ## Optional frontmatter (design-system tagging)
 
-When the companion is checked into a project that has multiple HTML opt-in nodes (spec/design + milestone summary + stakeholder deck), tag each artifact with YAML frontmatter so future generators can match the right preset and skin:
+When a project has generated more than one HTML companion, tag each artifact with YAML frontmatter so future generators can match the right preset and skin:
 
 ```yaml
 ---
@@ -104,15 +104,16 @@ font-family:
   "Inter", system-ui, sans-serif;
 ```
 
-## Style preset recommendations (per node)
+## Style preset recommendations (per artifact)
 
 `default-cool` works for most artifacts. Switch presets when audience or read-length warrants. All presets share the same CSS token names — only the values change, so swapping is a one-block edit.
 
-| Node | Recommended preset | Why |
+| Artifact | Recommended preset | Why |
 |---|---|---|
 | spec/design exploration (§0–§M+8) | `default-cool` | Neutral indigo accents; long structured technical read |
 | Spec finalization stakeholder view | `swiss-grid` | Tight grid + single saturated accent; signals "approved & formal" to leadership |
 | Milestone summary report | `kami-parchment` | Warm-parchment ground (`#f5f4ed`) + ink-blue accent + single serif; calmer long-form reading for executive recap, inspired by `tw93/kami` / `nexu-io/html-anything` `doc-kami-parchment` skill |
+| Mode B review sheet | `default-cool` | Same long structured technical read as spec/design, and the reader moves between the two; a different skin would read as a different kind of document |
 | Customer-facing stakeholder card | `xhs-pastel` | Pastel surfaces + soft shadow; works as standalone share card if exported via PNG |
 
 Presets above are **palette + font-family + radius/shadow swaps only**. Section structure, mandatory callouts (`why-box`, `scenario`), badge taxonomy, and citation discipline are unchanged across presets — they are the structural contract of this template.

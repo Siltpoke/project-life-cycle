@@ -351,9 +351,9 @@ def test_extract_topic_codex_first_user_message():
     assert ac.extract_topic(_CODEX).startswith("codex please refactor")
 
 
-def test_extract_topic_prefers_ecc_summary():
-    text = ("<!-- ECC:SUMMARY:START -->\n### Tasks\n- Profit model design\n"
-            "<!-- ECC:SUMMARY:END -->\n" + _CLAUDE)
+def test_extract_topic_is_first_user_message():
+    text = json.dumps({"type": "user",
+                       "message": {"role": "user", "content": "Profit model design"}})
     assert "Profit model design" in ac.extract_topic(text)
 
 

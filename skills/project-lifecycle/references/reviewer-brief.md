@@ -44,6 +44,12 @@ distinct tier); N identical reviewers just vote their shared blind spots. Pick t
   pass (does the diff actually implement each claimed-closed AC; does "success" code perform the
   action or merely log it). **Needs a `user-story.md` + spec** to compare against; fall back to the
   `quality` lens when neither exists, and say so.
+- **`cross-check`** (the document-assembly lens — reviews the phase's own *design docs*, not code) —
+  does the spec faithfully reflect every locked brainstorm decision, and does the plan cover the spec?
+  Two sub-modes (A spec↔Q&A, B plan↔spec) defined in the **Cross-check lens** section below. **Needs
+  the phase's `docs/qa-log.d/*.md` fragment + `-design.md` spec** (sub-mode A) or **spec + `plans/*.md`**
+  (sub-mode B). This lens is why the spec and plan — otherwise reviewed by nothing — get an independent
+  witness before code starts.
 
 For a thorough pass, dispatch these as **parallel agents** with distinct prompts (single message,
 multiple `Agent` calls) rather than one mega-review.
@@ -83,6 +89,49 @@ Bloat smell checklist:
   [ ] Could this be ~half the lines and still solve the problem? → if yes, flag with the simpler shape sketched
 ```
 
+## Cross-check lens — spec↔Q&A and plan↔spec (the `cross-check` lens)
+
+This lens reviews the phase's **prose design documents**, not a code diff. It exists because every
+brainstorm *question* passes a blind 2nd agent and every *code change* passes verifier + validator +
+code-quality + Copilot — but the assembled **spec** and **plan** are witnessed by nothing except the
+writer. Assembly is exactly where a locked decision goes missing, gets contradicted, or is silently
+widened. Dispatch is **fresh-context + read-only** like every other lens, and the same output format
+(refute-first → findings with `file:line`/quoted-snippet evidence gate → **no self-declared verdict**)
+applies verbatim — a "finding" here quotes the offending spec/plan line, not code.
+
+Pick ONE sub-mode per dispatch:
+
+- **Sub-mode A — spec ↔ locked Q&A** (run at brainstorm close, SKILL.md step 3). Inputs: the branch's
+  `docs/qa-log.d/*.md` fragment + `user-story.md` (when present) + the `-design.md` spec. **One
+  question:** does the spec faithfully reflect *every* locked decision — is any lock **missing**,
+  **contradicted**, or **silently widened** (scope crept past what the user actually locked)?
+  **Guard: this is NOT a design review.** A locked decision is ground truth; the lens may not
+  re-litigate the choice, only check the spec is faithful to it. Flag a decision the user locked as
+  "wrong" → out of scope; flag the spec *departing* from what was locked → in scope.
+  - **Output C — the absorbed self-review.** Sub-mode A ALSO does what the old writer self-review did:
+    for each major decision, name **≥2 failure modes** ("what could go wrong with this choice we may be
+    missing"), each line tagged **`cross-check agent A`**. Agent A stays read-only — it *produces* these
+    lines in its report; the controller records them into that decision's qa-log entry `Risks (what
+    could go wrong with this choice)` slot, exactly as the blind 2nd agent's risk lines "land in"
+    `Risks` without the agent editing the log. This *replaces* the writer's own revision pass (the
+    writer no longer grades its own risks) — same schema field, independent producer.
+    - **When the brainstorm was conversational (no `docs/qa-log.d/*.md` fragment written)** — there is
+      no entry slot to record into. Agent A still returns the ≥2-failure-modes-per-decision lines in
+      its report; the controller records them wherever this phase keeps its decision trail (the spec's
+      own risks section, or the journal FACT entry). Output C must never silently vanish just because
+      the decisions were locked in chat rather than in a fragment.
+
+- **Sub-mode B — plan ↔ spec** (run at plan close, SKILL.md step 4). Inputs: the `-design.md` spec +
+  the `plans/*.md` plan. **Bidirectional coverage — both directions are findings:**
+  - every **plan step** must trace to a spec item → an orphan step (does work the spec never asked for)
+    is a finding;
+  - every **spec item** must be covered by a plan step → an uncovered item (the plan forgot it) is a
+    finding.
+
+Keep the not-a-design-review guard (A) and the both-directions rule (B) explicit in the dispatch — they
+are the two ways this lens most easily drifts (into re-litigating locks, or into one-directional
+coverage that misses forgotten spec items).
+
 ## Language appendices — attach by changed-file extension (they compose)
 
 The dispatcher greps the diff's file extensions and appends the matching appendix (or several, for a
@@ -116,10 +165,10 @@ emits and consumes, under that same rule (top two = Critical + Important are mer
 **Forward-looking** and **Bloat-smell** are orthogonal *categories*, not severities — each carries its
 own Critical/Important/Minor severity.
 
-If an appendix or upstream source hands you a `CRITICAL / HIGH / MEDIUM / LOW` scale, normalize
+If an appendix or upstream source hands you an external `CRITICAL / HIGH / MEDIUM / LOW` scale, normalize
 through the `review-record.md` constraint-6 mapping — **do not carry a parallel scale**:
 
-| Incoming | PLC severity |
+| Incoming (external) | PLC severity |
 |---|---|
 | CRITICAL | Critical |
 | HIGH / MEDIUM | Important |

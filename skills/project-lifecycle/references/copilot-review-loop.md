@@ -1,6 +1,21 @@
 # Copilot review loop (per-PR)
 
-Every PR — stacked or not — passes through a `@copilot review` loop on top of CI before merge. The loop guarantees a fresh independent reviewer scans the diff with full file context, and that **every finding is either fixed (with a visible audit trail) or explicitly deferred (with a reason in the same thread)**.
+> **STATUS — Copilot is ADVISORY, never a gate.** The sole review gate is the
+> independent general-purpose reviewer; its termination contract lives in
+> [`review-record.md`](review-record.md) §"Termination contract". Copilot's output — present OR
+> absent — never counts as a PASS on its own. This doc is the *how-to* for the advisory Copilot
+> pass (useful where an adopter's Copilot works); it does not decide whether a phase may close.
+>
+> **Why it was demoted (measured, not assumed).** A review OBJECT being present is not evidence a
+> review was PERFORMED. In one sampled batch, **every** Copilot review objects across a sampled batch of PRs are
+> `state:COMMENTED` bodies reading *"Copilot was unable to review … quota limit"* — each has the
+> right author (`copilot-pull-request-reviewer[bot]`) and a fresh `submitted_at`, and each is a
+> non-review. Any terminator keyed on "a Copilot review object exists" would read all seven as a
+> clean pass. So a Copilot object of ANY shape (findings, "no issues", or a failure body) is only
+> advisory input; the gate is the independent reviewer's affirmative verdict + an empty coverage
+> window (`review-record.md`). Absence, silence, and failure bodies all map to **UNVERIFIED**.
+
+Every PR — stacked or not — is gated by the independent general-purpose reviewer on top of CI before merge, and **every finding is either fixed (with a visible audit trail) or explicitly deferred (with a reason)**. A Copilot pass MAY run alongside as advisory signal; the steps below describe it.
 
 ## Loop steps
 
@@ -33,6 +48,12 @@ digraph copilot_loop {
   "Comment @copilot review again" -> "Wait for Copilot review (~1-3 min)";
 }
 ```
+
+> **The `"no — clean" → merge` edge above is the OLD, dishonest terminator — superseded.** Copilot
+> returning no findings does not license a merge: it is indistinguishable from Copilot failing to
+> review (the quota-failure case, 7/7 here). The merge gate is the independent reviewer's
+> affirmative verdict with an empty coverage window (`review-record.md` §"Termination contract").
+> Read this graph as the *advisory* Copilot pass only.
 
 ## Trigger format
 
@@ -99,7 +120,11 @@ Re-trigger `@copilot review` after every fixup-commit round, no matter how small
 1. **Fix introduced a new finding** — common when fixing a Zod schema gap or renaming a field; downstream callers may not have been migrated.
 2. **Copilot graded the fix** — even a "still has a minor concern" follow-up is signal the user should see before merge.
 
-Stop the loop when Copilot's response is either explicitly "no actionable issues" OR the user signs off on remaining items (deferred with reason in-thread).
+Copilot's response never terminates the gate — it is advisory. The loop's terminator is the
+independent reviewer's contract in `review-record.md` §"Termination contract": an **affirmative**
+clean verdict over a coverage window that reaches HEAD. A Copilot "no actionable issues" reply is
+useful signal to fold into the fixups, not a licence to merge; a Copilot failure body (quota/error)
+is **UNVERIFIED**, not "0 findings".
 
 **Hard round cap: 3 re-triggered rounds maximum.** The loop does not converge on its own — every fixup adds new text, and new text is fresh nitpick surface (observed: a prose PR ran 10 → 5 → 1 → 1 → 4 findings across five rounds; both real bugs surfaced by round 2). After round 3: remaining CRITICAL/IMPORTANT findings are fixed WITHOUT re-triggering another review; remaining minor findings are reply-deferred in-thread (`Deferred by round-cap: logged as S3 follow-up`) and the PR proceeds to the user's merge decision. This is a loop guard independent of reviewer judgment — never "just one more round."
 
@@ -110,8 +135,8 @@ Stop the loop when Copilot's response is either explicitly "no actionable issues
 | Pure docs-only PR (no `.ts` / `.py` / `.go` etc.) | OK to skip; flag in PR body |
 | Trivial 1-line fix that doesn't touch security / state / DB | OK to skip; flag in PR body |
 | User explicitly says "merge it, skip Copilot" | OK to skip; record reason in PR body |
-| GitHub Actions billing-paused (Copilot's runner blocked) — 1st pass completed | **Run 1st-pass loop fully + use an independent general-purpose reviewer (per `references/reviewer-brief.md`) as 2nd-pass stand-in** — see `ci-cd-gates.md` §Pattern E + below |
-| GitHub Actions billing-paused — 1st pass also failed to spawn (Copilot reviewed: 0 findings) | Default path is NOT skipped — it failed. Dispatch **two sequential general-purpose reviewer passes** (per `references/reviewer-brief.md`) (one as initial reviewer, one as 2nd-pass to confirm clean). Record in the PR-comment evidence that Copilot reviewed 0 findings due to the billing block. |
+| Copilot advisory pass returned findings | Fold them into the fixups; the independent reviewer still gates. Never merge on Copilot's say-so alone. |
+| Copilot returned nothing, a "no issues" reply, OR a failure body (quota/billing/error) | **All three are UNVERIFIED for Copilot — not "0 findings", not "clean".** The independent reviewer is the gate regardless; dispatch it per `review-record.md`. Record the Copilot outcome verbatim in the PR-comment evidence (e.g. "Copilot: quota-limited, no review performed"), never as "reviewed: 0 findings". |
 | Phase delivery PR (any non-trivial feature) | **MANDATORY — never skip** |
 | Stacked PR where base is a feature branch | **MANDATORY — same as standalone** |
 
@@ -146,7 +171,9 @@ After base merges and the PR auto-retargets to `main`, **do not re-trigger** unl
 - ❌ Amending the fixup commit after Copilot reads it → review thread points at a dead SHA.
 - ❌ Marking a finding "won't fix" without a deferred-reason reply → reviewer can't tell if it was intentional or missed.
 - ❌ Skipping the loop on a stacked PR because "Copilot already reviewed the parent" — stacked PRs add NEW commits that the parent review never saw.
-- ❌ Using the bare `@copilot review` trigger on a non-trivial PR — Copilot may finish silently with no public response. Use a directive prompt (see Trigger format) so silent-clean is distinguishable from silent-failed.
+- ❌ **Treating the presence of a Copilot review object as proof a review happened** — the headline defect described above. A `state:COMMENTED` object with the right author and a fresh `submitted_at` can be a "unable to review … quota limit" failure body (7/7 here). Presence ≠ performed. Only the independent reviewer's affirmative verdict gates.
+- ❌ **Trusting the directive prompt (the "state explicitly if nothing actionable" line) to make silence safe** — that puts the mitigation in the *prompt*, asking Copilot to self-declare, when the fix belongs in the *assertion*: the gate must require an affirmative verdict from the independent reviewer, not hope Copilot speaks. A prompt cannot force a quota-blocked bot to answer.
+- ❌ Using the bare `@copilot review` trigger on a non-trivial PR — Copilot may finish silently. (Advisory only now; the independent reviewer gates regardless.)
 - ❌ Fabricating SHAs in per-finding replies — always paste a real `git log --oneline -1` SHA. Wrong SHAs leave the audit trail pointing at nothing and reviewers can't follow up.
 
 ## Tool / API reference

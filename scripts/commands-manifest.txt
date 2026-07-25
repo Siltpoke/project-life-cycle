@@ -18,5 +18,9 @@ builder-profile.md
 capture.md
 cognition-distill.md
 research.md
+catchup.md
 review.md
 handoff.md
+recall.md
+reconcile.md
+tasklist.md

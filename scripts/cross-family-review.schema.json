@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "criteria": { "type": "array", "items": { "type": "string" } },
+    "option_holes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "option": { "type": "string" },
+          "strongest_hole": { "type": "string" }
+        },
+        "required": ["option", "strongest_hole"]
+      }
+    },
+    "independent_pick": { "type": "string" },
+    "rationale": { "type": "string" },
+    "missing_option": { "type": "string" },
+    "risk_with_pick": { "type": "string" }
+  },
+  "required": ["criteria", "option_holes", "independent_pick", "rationale", "missing_option", "risk_with_pick"]
+}

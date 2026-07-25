@@ -36,14 +36,41 @@ print(json.dumps({"hookSpecificOutput": {"hookEventName": sys.argv[1], "addition
 PY
 }
 
-# throttle <file>: returns 0 (proceed) at most once per 10 min per file.
+# --- machine-local state --------------------------------------------------------------
+# WHERE THIS HOOK'S STATE LIVES: $PLC_STATE_DIR, else ~/.claude/plc-state/<repo-key>/.
+# Named here on purpose — moving state out of the worktree hides it from the reviewer who would
+# otherwise notice it misbehaving, so the path has to be discoverable from the code.
+#
+# It used to live at .claude/.close-gate-nudge-last, GIT-TRACKED. That is a closed loop: this
+# hook rewrites the stamp on every Stop, which makes the tree dirty, and "the tree is dirty" is
+# one of this same hook's trigger conditions — so it re-armed on its own throttle file, and every
+# phase's history carried a commit whose entire content was a timestamp. A throttle is neither
+# shared team state nor evidence of anything; it is per-machine UX state and belongs out of the
+# tree entirely, next to the session digests PLC already keeps in ~/.claude/plc-session-data/.
+# (The /clear throttle at .claude/.clear-nudge-last had the same problem in a quieter form: it was
+# neither tracked NOR ignored, so it showed up as an untracked `??` entry and fed the same
+# dirty-tree trigger. The original write-up named only the first of the two.)
+plc_state_dir() {
+  local root key
+  root="${PLC_STATE_DIR:-$HOME/.claude/plc-state}"
+  key="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+  # One flat directory name per worktree. Slashes and spaces become dashes; the result is a
+  # stable key for this checkout without needing a hash or a lookup table.
+  key="$(printf '%s' "$key" | tr '/ ' '--')"
+  printf '%s/%s' "$root" "$key"
+}
+
+# throttle <name>: returns 0 (proceed) at most once per 10 min per name.
+# Takes a NAME, not a path — callers must not be able to place state back in the worktree.
 throttle() {
-  local f="$1" now last
+  local name="$1" dir f now last
+  dir="$(plc_state_dir)"
+  mkdir -p "$dir" 2>/dev/null || true
+  f="$dir/$name"
   now="$(date +%s)"
   last=0
   [ -f "$f" ] && last="$(cat "$f" 2>/dev/null || echo 0)"
   [ $((now - last)) -lt 600 ] && return 1
-  mkdir -p .claude 2>/dev/null || true
   echo "$now" > "$f" 2>/dev/null || true
   return 0
 }
@@ -55,7 +82,7 @@ if [ ! -f .claude/.last-test-run ]; then
 fi
 
 if [ -n "$REASON" ]; then
-  throttle .claude/.close-gate-nudge-last || exit 0
+  throttle close-gate-nudge-last || exit 0
   emit "[project-lifecycle] On ${BRANCH} with ${REASON}. Before claiming done: run make task-done / phase-done and paste its output; confirm every wrap-up todo (journal / tests-3x / handoff / CHANGELOG / smoke / PR-comment) is checked or logged as SKIP. (SKILL.md \"Definition of Done\")"
   exit 0
 fi
@@ -129,6 +156,6 @@ PY
 [ -z "$OVER" ] && exit 0
 
 OCC_K="${OVER%% *}"; FLOOR_K="${OVER##* }"
-throttle .claude/.clear-nudge-last || exit 0
+throttle clear-nudge-last || exit 0
 emit "[project-lifecycle] Task close just passed on ${BRANCH} and context ~${OCC_K}K is over the ~${FLOOR_K}K floor — this task boundary is the cheapest moment to checkpoint: write/refresh RESUME.md + handoff notes, commit, then /clear before the next task. Late-session turns cost 2-3x early turns (SKILL.md cost-aware behaviors)."
 exit 0

@@ -32,7 +32,7 @@ Example:
 
 ## Step 0 — Materialize the chain as a task list (FIRST action, before Phase 0)
 
-Before dispatching any subagent, the controller emits the phase chain as a `TaskCreate` task list — **one `TaskCreate` call per phase below** (Phase 0 research → … → the final smoke + PR), plus the 3 human checkpoints as their own tasks. `TaskCreate` creates one task per call; enumerate each phase, never just announce "N-phase chain". The wrap-up phases (journal / smoke / PR / test-evidence) are **non-optional tasks**. Mark each `in_progress`→`completed` via `TaskUpdate` as the chain advances. Announcing the chain length without emitting the tasks is a skip — the tail phases are the ones that silently drop once the build "feels done".
+Before dispatching any subagent, the controller materializes the phase chain as an enumerated task list — **the portable contract is `.claude/tasklist.md`, one `- [ ]` line per phase below** (Phase 0 research → … → the final smoke + PR), plus the 3 human checkpoints as their own lines. Where the host has a first-class task tool (Claude Code's `TaskCreate`, one call per phase + `TaskUpdate` to advance; or another CLI's `update_plan` / `write_todos` / equivalent), **prefer it as the upgrade — it renders as live UI** — but the file is what satisfies the contract on every host and is what the guard checks; a tool-name-keyed requirement is unsatisfiable wherever the host lacks that tool (see SKILL.md "Two ways to satisfy it" + `hooks/tasklist-first.sh`). Enumerate each phase, never just announce "N-phase chain". The wrap-up phases (journal / smoke / PR / test-evidence) are **non-optional**. Mark each in-progress→done as the chain advances. Announcing the chain length without emitting the list is a skip — the tail phases are the ones that silently drop once the build "feels done".
 
 ## Chain (controller executes in order)
 
@@ -171,7 +171,7 @@ Commits as `docs(journal): <phase> <feature>`.
 - Push branch
 - Open PR with 3-section body (§1 What was done w/ Use cases / §2 Why this approach / §3 Requirements satisfied — close each AC explicitly)
 - Post test evidence as PR COMMENT (raw output blocks per `~/.claude/skills/project-lifecycle/references/ci-cd-gates.md`)
-- Trigger `@copilot review` (or Pattern E stand-in if billing-blocked) per `~/.claude/skills/project-lifecycle/references/copilot-review-loop.md`
+- Dispatch the independent reviewer (`~/.claude/skills/project-lifecycle/references/reviewer-brief.md`) — the sole review gate, whose computed verdict gates the merge. `@copilot review` is an optional advisory pass on top, never a gate (and is unavailable anyway under Pattern E, when Actions billing is blocked) — per `~/.claude/skills/project-lifecycle/references/copilot-review-loop.md`
 
 ### ⏸ HUMAN CHECKPOINT 3: Approve PR
 
@@ -187,7 +187,7 @@ Everything between checkpoints (research, build BE, build FE, verify, validate, 
 
 ## Anti-patterns
 
-- Running the chain without first emitting each phase as a `TaskCreate` task (Step 0) → the wrap-up phases (journal / smoke / PR) silently drop once the build "feels done".
+- Running the chain without first emitting each phase as an enumerated task-list line (Step 0 — `.claude/tasklist.md`, or the host task tool where present) → the wrap-up phases (journal / smoke / PR) silently drop once the build "feels done".
 - Using `/ship` for a 1-line fix → just do it inline.
 - Using `/ship` for an entire milestone → too coarse; use phase-level `project-lifecycle` workflow.
 - Skipping HUMAN CHECKPOINT 1 because "the story is obvious" → the obvious feature is where scope creep starts.

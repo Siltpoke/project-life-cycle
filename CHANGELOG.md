@@ -10,6 +10,68 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 Nothing yet.
 
+## [3.7.0] - 2026-07-25
+
+### Added
+
+- Adds an optional per-pull-request verification gate: a reviewer's report is checked against your acceptance criteria before merge, including a check that your code's own safety guards still catch real breakage — not just that tests pass.
+- The independent second-opinion review used during brainstorming can now run on a different AI assistant (opt-in), for a genuinely independent perspective.
+- Adds `/tasklist`, a terminal reader for the `.claude/tasklist.md` checklist file, so you can see the current task list at two levels of detail without opening the file. Works on every supported CLI.
+
+### Changed
+
+- The close-gate now runs in two modes — a check on every commit, and a stricter check before merge — so the first finished piece of a phase can be pushed right away instead of waiting for the whole phase to close.
+- Renames this plugin's `/resume` command to `/recall`, so it no longer collides with Claude Code's own built-in `/resume` (which reopens a past conversation rather than briefing you from the saved digest). Behaviour is unchanged; update anything that invoked the old name.
+
+### Fixed
+
+- Fixes several safety-hook bugs: a push-safety check that matched on the wrong text, a reminder that could re-arm itself even after a failed check, and file "freshness" checks that are now proven from file content rather than a timestamp that file-syncing tools can silently alter.
+
+## [3.6.0] - 2026-07-19
+
+### Added
+
+- Adds `/reconcile`, which finds roadmap or status decisions made in conversation or shipped in merged changes but never written down, and proposes them back into your project's roadmap and status docs for your approval.
+
+## [3.5.0] - 2026-07-18
+
+### Added
+
+- `/catchup` now renders a richer roadmap view — pinned project vision, a "you are here" marker, collapsed completed work, and expanded detail for the current and upcoming stations.
+
+## [3.4.0] - 2026-07-17
+
+### Added
+
+- `/handoff` now archives the previous session snapshot before overwriting it, so a full history of past continuity notes accumulates instead of being lost on every write.
+
+### Fixed
+
+- Fixes `/catchup` and `/resume` failing outright on plugin installations, caused by an incorrect internal file path.
+
+## [3.3.0] - 2026-07-17
+
+### Added
+
+- Adds `/catchup`, a warm "welcome back" summary combining your git state, your saved status file, and your last session's digest.
+
+## [3.2.0] - 2026-07-17
+
+### Added
+
+- Adds a background-agent script for the standard post-implementation review sequence (verify, code-quality, validate), replacing a manual, prose-driven review flow.
+- The close-gate can now run declared project-specific checks automatically, not just confirm that required files exist.
+
+## [3.1.0] - 2026-07-16
+
+### Added
+
+- Adds automatic session-save: a digest of every turn's transcript is saved locally, with a `/resume` command that briefs a new session from the latest save for the current project.
+
+### Changed
+
+- Adds a fourth onboarding habit covering session continuity — the automatic save versus the curated handoff file, and when to use each.
+
 ## [3.0.0] - 2026-07-15
 
 ### Added
@@ -202,7 +264,8 @@ Initial release.
 - Adds a research protocol for locking design decisions, backed by a second, independent reviewer check.
 - Adds Architectural Decision Records, a domain glossary convention, and delivery templates (issue breakdown, changelog, PR body).
 
-[Unreleased]: https://github.com/Victoriakaey/project-life-cycle/compare/v3.0.0...HEAD
+[Unreleased]: https://github.com/Victoriakaey/project-life-cycle/compare/v3.7.0...HEAD
+[3.7.0]: https://github.com/Victoriakaey/project-life-cycle/compare/v3.0.0...v3.7.0
 [3.0.0]: https://github.com/Victoriakaey/project-life-cycle/compare/v1.0.0...v3.0.0
 [1.0.0]: https://github.com/Victoriakaey/project-life-cycle/compare/v0.4.0...v1.0.0
 [0.4.0]: https://github.com/Victoriakaey/project-life-cycle/releases/tag/v0.4.0

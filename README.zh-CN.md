@@ -20,7 +20,7 @@ claude plugin marketplace add Victoriakaey/project-life-cycle
 claude plugin install project-lifecycle@project-life-cycle
 ```
 
-重启 Claude Code。Skill 以 `project-lifecycle` 名注册；新项目启动 / 规划 milestone / 跑 per-phase 工作时自动触发。四个斜杠命令可用 —— 在命令列表里以 plugin namespace 形式显示：`/project-lifecycle:init-harness`（bootstrap 项目）、`/project-lifecycle:ship`（vertical-slice feature）、`/project-lifecycle:release`（切版）、以及 opt-in 的 `/project-lifecycle:builder-profile`（你实际怎么用 AI coding agent 的本机快照）。本 README 通篇用的裸形式（`/init-harness`、`/ship`……）也能用，前提是没有别的已安装命令占用同名。
+重启 Claude Code。Skill 以 `project-lifecycle` 名注册；新项目启动 / 规划 milestone / 跑 per-phase 工作时自动触发。三个主命令 —— `/project-lifecycle:init-harness`（bootstrap 项目）、`/project-lifecycle:ship`（vertical-slice feature）、`/project-lifecycle:release`（切版）—— 驱动核心主线，外加 opt-in 的 `/project-lifecycle:builder-profile`（你实际怎么用 AI coding agent 的本机快照）。另有一组辅助命令补全工作流 —— `/catchup`、`/handoff`、`/reconcile`、`/review`、`/research`、`/capture`、`/recall`、`/cognition-distill`、`/tasklist` —— 各自作用见[指南](GUIDE.zh-CN.md)。本 README 通篇用的裸形式（`/init-harness`、`/ship`……）也能用，前提是没有别的已安装命令占用同名。
 
 升级：
 

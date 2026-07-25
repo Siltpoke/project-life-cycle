@@ -17,7 +17,7 @@ if [ -f RESUME.md ]; then
 fi
 [ -z "$RESUME_HEAD" ] && exit 0   # no RESUME.md → nothing to inject
 
-CTX="[project-lifecycle resume] Current branch: ${BRANCH}. RESUME.md head follows — re-ground in the current phase before acting:
+CTX="[project-lifecycle resume] Current branch: ${BRANCH}. Session loop: /handoff before /clear (writes the next-step) then /catchup on return (renders it). RESUME.md head follows — re-ground in the current phase before acting:
 ${RESUME_HEAD}"
 
 python3 - "$CTX" <<'PY'

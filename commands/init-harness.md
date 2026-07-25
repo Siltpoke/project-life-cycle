@@ -177,7 +177,7 @@ Create empty scaffolds with TOC stubs (per `references/document-indexing.md`) so
 
 #### 7b. `docs/ROADMAP.md` whole-plan-map stub
 
-Seed `docs/ROADMAP.md` (per `references/roadmap.md`) with the one-sentence goal (ask user if not obvious from README), an empty milestone table with the status legend, and the standard "how a milestone runs" loop block. The milestone rows are filled in during the first milestone's brainstorm once the breakdown is known — at bootstrap it's a stub so the whole-plan map exists from day one. An optional `docs/ROADMAP.html` companion follows the normal `html-policy` opt-in.
+Seed `docs/ROADMAP.md` (per `references/roadmap.md`) with the one-sentence goal (ask user if not obvious from README), an empty milestone table with the status legend, and the standard "how a milestone runs" loop block. The milestone rows are filled in during the first milestone's brainstorm once the breakdown is known — at bootstrap it's a stub so the whole-plan map exists from day one. An optional `docs/ROADMAP.html` companion can be generated on request under the normal `html-policy` key — ad-hoc, not one of the counted artifacts (`references/output-format.md`).
 
 #### 8. `.claude/commands/` project-shared slash commands (skeleton)
 
@@ -210,9 +210,30 @@ Each scaffold is a `// TODO` skeleton with the trigger + action + inject signatu
 
 Copy the skill's `hooks/inject-resume.sh.template` → `.claude/hooks/inject-resume.sh` (`chmod +x`) and additively wire the `SessionStart:resume` block into `.claude/settings.json` (never clobber existing SessionStart hooks). On resume it injects the current branch + head of `RESUME.md` as `additionalContext` so the session re-grounds in the live phase deterministically. Project-level, NOT skill frontmatter (skill inactive at session start). Spec: `references/init-harness.md` §"RESUME-injection hook" + `references/harness-primitives.md` §2.
 
+#### 9c. `Stop` → `save_session.py` (automatic session digest — the save half of `/recall`)
+
+Additively wire a `Stop` hook running the skill's `scripts/save_session.py` into **machine-local `~/.claude/settings.json`** (parallel to 9b, but machine-local like `context-floor` — it must fire for every session on the machine, not only PLC-active ones). After each assistant turn it writes a deterministic mechanical digest to `~/.claude/plc-session-data/` so `/recall` can brief the next session — PLC's own automatic session-save half. **Additive merge is mandatory:** read the existing `Stop` array and **append**; never clobber a `say`/voice Stop, `close-gate-nudge`, or any other Stop hook. Idempotent: skip if a `save_session` entry is already present. NOT the same event as the agent-chats `capture-hook` (that is `SessionEnd`), so the two coexist without collision. The hook must be `async: true` with a generous `timeout` and **always exits 0** (a per-turn hook must never block or crash a session). Entry shape:
+
+```json
+{ "matcher": "*", "hooks": [ { "type": "command",
+  "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/save_session.py\"",
+  "async": true, "timeout": 30 } ] }
+```
+
+**Machine-local (`~/.claude/settings.json`), NOT project-level and NOT skill frontmatter** — Stop fires regardless of skill-active state, and the save must run for every session on the machine (installing it into project `.claude/settings.json` would defeat the machine-wide intent). Contrast §9b, which IS project-level. Spec: `references/init-harness.md` §"session-save hook".
+
 #### 10. `CHANGELOG.md`
 
 If absent, create with Keep a Changelog 1.1.0 format + empty `[Unreleased]` block (per `references/changelog.md` template).
+
+#### 10b. `.gitignore` — machine-local working-state entries
+
+Ensure `.gitignore` ignores the per-session working-state artifacts the skill instructs every adopter to write, so they never enter git history. **The universal one is `/.claude/tasklist.md`** — the tasklist-first guard's portable satisfier (`SKILL.md` §"Definition of Done"): it carries a per-phase session nonce, so committing it puts a meaningless one-line diff in every phase and leaks a nonce. Without this step an adopter commits it by default (the requirement was documented in `SKILL.md` prose only — the weakest enforcement layer).
+
+- **Idempotent + non-clobbering:** if `.gitignore` exists, read it; append `/.claude/tasklist.md` only if no equivalent line is already present (match `/.claude/tasklist.md` anchored, not a loose substring); never rewrite or reorder existing entries. If `.gitignore` is absent, CREATE it with just this line (+ a one-line comment). On `--refresh`, the same ensure-line-exists check runs — this is the retrofit path for a project bootstrapped before this step existed.
+- **Anchor with a leading `/`** (`/.claude/tasklist.md`, not `.claude/tasklist.md`) so it matches only the repo-root file, not a same-named file nested elsewhere.
+- Add a comment line above it: `# per-phase working state (session nonce) — never commit`.
+- If the project opts into keeping `RESUME.md` / `docs/` gitignored, those ignores are the project's choice and are added at CHECKPOINT 3 when the retention/leak policy is set — NOT here. Step 10b is only the universal tasklist line.
 
 #### 11. `.claude-plugin/{marketplace,plugin}.json`
 
@@ -316,3 +337,4 @@ Detect + report only. Write nothing. Useful for "what would this do to my repo?"
 - `~/.claude/skills/project-lifecycle/references/output-format.md` — policy keys this command pre-fills.
 - `/ship` — first command to run after `/init-harness` completes.
 - `/release` — release-cut command (only relevant when project is a Claude-plugin OR user opts in to the release workflow).
+- **Session loop** — `/handoff` before you `/clear` (writes the next-step + gotchas into `RESUME.md`), then `/catchup` on return to a fresh session (renders a welcome-back card from git + RESUME + the session digest). Surface both to the user at the end of `/init-harness`.

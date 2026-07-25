@@ -47,8 +47,13 @@ wiring required.
 - `PreToolUse:TaskCreate|TodoWrite` + `PreToolUse:Edit|Write|MultiEdit|NotebookEdit`
   → `hooks/tasklist-first.sh` (`mark` / `check`): realizes Definition-of-Done forcing
   function 1 as platform enforcement — the first file edit of each phase is blocked ONCE
-  (exit 2, actionable message) when no task list has been created yet; after that
-  single block it stays silent (block-once, never a wall). A close-gate run
+  (exit 2, actionable message carrying a nonce to transcribe) when no task list has been
+  created yet. After that single block it is still never a wall, but it no longer goes
+  silent: each later gated call returns `permissionDecision: "defer"` plus an
+  `additionalContext` **UNVERIFIED** notice, keeping "could not verify" distinct from
+  "verified" in the model's context. `defer` is deliberate — `allow` would proceed
+  *without the user's permission prompt*, buying the guard's visibility with the human's
+  consent, and `permissionDecisionReason` is explicitly not shown anywhere under `allow`, and unspecified under `defer`. A close-gate run
   (`make task-done`/`phase-done`, `close-gate.sh`) re-arms the guard so the NEXT phase
   re-forces a fresh ≥`PLC_TASKLIST_MIN` list — PLC's "one task = one list = one gate"
   boundary (`PLC_TASKLIST_REARM=1`, default on; set `0` for once-per-session).
@@ -174,7 +179,7 @@ a recommended-first option), instead of free-text "I'll ask in prose".
 **Node it strengthens.** The skill has many "ask the user once" opt-ins currently
 phrased as prose questions:
 - brainstorm Mode A vs B (`references/brainstorm-research-protocol.md`)
-- `html-policy` companion opt-in (steps 1 / 4 / 9, `references/output-format.md`)
+- `html-policy` companion opt-in (at the asking moments `references/output-format.md` defines — that file is the only place they are listed)
 - `smoke-mode` self vs guided (step 8)
 - intent-gate confirm-intent (`references/intent-gate.md`, when a question is
   genuinely needed)

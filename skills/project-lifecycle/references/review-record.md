@@ -25,6 +25,43 @@ So: a separate same-family reviewer removes the biggest bias term but keeps a **
 7. **Pre-seeded suspicions are allowed, AFTER an unanchored pass.** The dispatcher may inject specific worries ("verify the cleanup path can't delete a file the guard skipped") — live experience shows these catch real bugs — but the prompt must require one unanchored full-diff pass FIRST, then the seeded checks, so the reviewer's attention isn't anchored to only what the writer already suspects.
 8. **Different lenses, not clones.** When multiple reviewers run, give each a distinct lens (correctness-vs-promise / security / code-quality), distinct prompt, ideally distinct tier. N identical reviewers vote their shared blind spots ([PoLL 2024](https://arxiv.org/abs/2404.18796)).
 
+## Termination contract — when the review gate is satisfied
+
+The review gate has **three** outcomes, not two. Reading "no findings surfaced" as "reviewed and
+clean" is the defect this contract exists to remove: absence of findings is not the same
+event as an affirmative clean review, and the gate must be able to tell them apart.
+
+The gate is the **independent general-purpose reviewer** (dispatched per `reviewer-brief.md` under
+the constraints above). An external bot (Copilot, per `copilot-review-loop.md`) is **advisory
+input only** — its output feeds the FINDINGS state but never produces a PASS and never satisfies
+the coverage window. See that file's STATUS banner for why (a present review object is not a
+performed review — 7/7 quota-failure objects here would otherwise read as clean).
+
+| Outcome | Condition | What it licenses |
+|---|---|---|
+| **FINDINGS** | An affirmative reviewer report with ≥1 open finding in the active scale's top two tiers (constraint 6). | The fix loop: address each, one review-fix = one commit, then re-dispatch a fresh pass over the new commits. |
+| **PASS** | An **affirmative** computed clean verdict (a real per-criterion report with **zero** open top-two-tier findings — constraint 6, never a reviewer-stated boolean) **AND** an empty coverage window (the recorded dispatch-SHA reaches HEAD: `git log <review-SHA>..HEAD` is empty). | Merge. |
+| **UNVERIFIED** | Anything else: the reviewer produced no parseable per-criterion report, produced nothing, crashed/failed to spawn, the coverage window is non-empty (commits after the last review SHA), or only an advisory bot signal exists. | **Nothing on its own.** Never silently a PASS. |
+
+**PASS requires an affirmative report, not the absence of one.** An empty reviewer output, a timed-
+out dispatch, or a bot failure body are all **UNVERIFIED** — identical to silence. This rule applies
+to the independent reviewer too, not only to Copilot: removing the flaky bot
+does not remove the silence risk, it relocates it to the reviewer you now depend on.
+
+**Closing a phase under UNVERIFIED requires an explicit, logged `SKIP:`** — the same escape-hatch
+shape every other absent artifact uses (`close-gate.md`: *"a skip is legit only with a `SKIP:`
+line"*; *"State #1 makes skips obvious; gate #2 makes them impossible to hide"*). Write
+`SKIP: reviewer-unverified — <reason>` in the journal "Plan deviations" section. No `SKIP:` line →
+the phase does not close. A silent empty result is **never** a pass. The human owns that decision;
+the machine's job is to make the skip un-hideable, not to forbid it — a hard block would only push
+a pressured builder to fabricate the "verified" signal, reintroducing the self-certification this
+whole file guards against.
+
+**The coverage window is the authoritative, un-spoofable half of PASS** (see §"Coverage window"
+below): the recorded review-SHA at dispatch vs `HEAD`, computed by `git log` range emptiness —
+**never** a SHA string pasted into a writer-editable file (that is a spoofable proxy, the exact
+self-certification class this file warns about).
+
 ## The review record — two companion PR comments
 
 In `pr-boundary` mode (and on any PR where reviewer subagents ran), the PR carries the full bidirectional review conversation. Both files are drafted to the session scratchpad first (normal draft-first workflow, `references/pr-comment-template.md` §"Draft-first workflow" — the draft dies with the session, the posted PR comment is the durable record), then posted via `--body-file`.

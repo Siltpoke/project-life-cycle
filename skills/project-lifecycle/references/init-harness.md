@@ -19,9 +19,11 @@ A project is bootstrapped when these artifacts exist + are wired together:
 | `.claude/commands/` | ✅ (skeleton OK) | Team-shared project-scoped slash commands |
 | `.claude/handlers/` | ✅ (scaffold OK) | Deterministic pre-step handlers (auth, lint, secret guard, migration safety, tenant isolation) |
 | `.claude/hooks/inject-resume.sh` + `.claude/settings.json` `SessionStart:resume` block | ✅ (when `docs/RESUME.md` is used) | Auto-injects the current phase branch + head of `RESUME.md` on session resume, so the model re-grounds in the phase without being told to read RESUME. **Project-level, NOT skill frontmatter** — at session start the skill is not yet active, so a frontmatter hook would never fire. Installed from the template shipped at the skill's `hooks/inject-resume.sh.template`. See `references/harness-primitives.md` §2 |
+| `~/.claude/settings.json` `Stop` → `scripts/save_session.py` + `/recall` command | ✅ (opt-in — automatic session capture) | The save/recall pair: a machine-local `Stop` hook writes a deterministic per-turn digest to `~/.claude/plc-session-data/`; `/recall` briefs the next session from it. PLC's own session save/recall. **Machine-local, additive merge, never clobbers other Stop hooks; different event from agent-chats `capture-hook` (SessionEnd).** See §"Session-save hook" below |
 | `scripts/close-gate.sh` + `scripts/test-close-gate.sh` + `.claude/close-gate.json` + `make task-done`/`phase-done`/`test-gate` + **active** pre-push hook (`.githooks/pre-push` + `git config core.hooksPath .githooks`) | ✅ (scaffold + **hook ACTIVATED, not a stub**) | Deterministic "done" gate — exits non-zero on missing wrap-up artifacts (journal / journal FACT-entry fields / tests-evidence / CHANGELOG / smoke / ROADMAP). `test_command` + `exempt_*` flags filled from detected stack; optional `retention` block (hot caps / count caps / archive dir / coverage floor / journal dir / `qa_log_dir` / `changelog_dir`) mirrored from the CLAUDE.md `retention:` key per `references/retention.md` §"Policy keys". **The pre-push hook is the un-bypassable layer and MUST be activated** (`core.hooksPath` set) — scaffolding the scripts without activating the hook leaves only the weakest model-discipline layer, which is the exact gap that lets wrap-up (esp. tests) get skipped. `test-close-gate.sh` is the gate's own self-test (throwaway-worktree, asserts every check flips) — run `make test-gate PHASE=X.Y` after wiring. See `references/close-gate.md` |
 | `scripts/retention-drain.sh` | ✅ (scaffold OK, only when a `retention:` key or default drain is in use) | Deterministic no-LLM archival drain materialized from `references/retention.md`'s embedded spec (same ship-pattern as `close-gate.sh`) — the milestone-done "Archival drain run" step invokes it per doc. No hook wiring (it runs at milestone close, not on push). See `references/retention.md` §"Embedded portable script". |
 | `CHANGELOG.md` | ✅ (empty seed OK) | Keep a Changelog 1.1.0 format |
+| `.gitignore` | ✅ (ensure line, idempotent) | Ensure `/.claude/tasklist.md` is ignored — the tasklist-first guard's portable satisfier carries a per-phase session nonce and must never be committed (`SKILL.md` §"Definition of Done"). Append-if-missing to an existing file, create if absent; `--refresh` retrofits. See §".gitignore" merge strategy |
 | `.claude-plugin/{marketplace,plugin}.json` | Only if project is itself a Claude-plugin | Plugin manifest pair |
 | `.github/release.yml` | Only if Claude-plugin OR user opts in | PR-label release-notes config |
 | `.github/workflows/release.yml` | Only if Claude-plugin OR user opts in | Tag-driven GitHub Release builder |
@@ -170,6 +172,10 @@ If absent → create placeholder.
 If exists → check format. If Keep a Changelog format → leave alone. If different format → propose conversion (preserve content; restructure to Keep a Changelog sections).
 If absent → create with `[Unreleased]` + introductory header + the "How to read / How to contribute" sections from this skill's own CHANGELOG.
 
+### `.gitignore`
+
+Ensure the machine-local working-state line `/.claude/tasklist.md` is present (the tasklist-first guard's per-session-nonce satisfier — see `commands/init-harness.md` step 10b). **Idempotent + non-clobbering:** if `.gitignore` exists, append the line only when no anchored `/.claude/tasklist.md` entry is already there, preserving every existing line and its order; if absent, CREATE it with just that line plus the comment `# per-phase working state (session nonce) — never commit`. Anchor with the leading `/` so it matches only the repo-root file. `--refresh` runs the same ensure-check — this is the retrofit path for projects bootstrapped before the step existed. Project-specific ignores (a gitignored `docs/`, a gitignored `RESUME.md`) are the project's choice, set with the retention/leak policy at CHECKPOINT 3, not here.
+
 ### `.claude/commands/<name>.md`
 
 If file exists → leave alone (user's version wins).
@@ -248,6 +254,33 @@ contract" discipline — see `references/harness-primitives.md` §2.
 
 Skip generation only when the project does not use `docs/RESUME.md` (rare —
 single-session throwaway repos).
+
+## Session-save hook (the automatic save half of `/recall`)
+
+Additively wire a `Stop` hook running `scripts/save_session.py` into **machine-local
+`~/.claude/settings.json`** (machine-local, not project — like `context-floor`; it must
+fire for every session on the machine, not only when the PLC skill is active). After each
+assistant turn it writes a deterministic, zero-LLM mechanical digest (last-N user messages
++ tool names + modified files + git metadata) to `~/.claude/plc-session-data/`, keyed
+per-conversation by `session_id`, atomically (temp → `os.replace`), with a 30-day / 50-file
+retention cap. `/recall` reads it back. This is PLC's own automatic session-save half.
+
+**Additive merge — never clobber.** Read the existing `hooks.Stop` array and **append**;
+never remove a `say`/voice Stop, `close-gate-nudge`, or any other Stop hook. If a
+`save_session` entry already points at the script → leave alone (idempotent). This is a
+different event from the agent-chats `capture-hook` (`SessionEnd`), so the two coexist with
+no collision. The entry MUST be `async: true`, generous `timeout`, and the script **always
+exits 0** — a per-turn hook must never block or crash a session. Block to add:
+
+```json
+{ "hooks": { "Stop": [
+  { "matcher": "*",
+    "hooks": [{ "type": "command",
+      "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/save_session.py\"",
+      "async": true, "timeout": 30 }] } ] } }
+```
+
+Skip generation only when the user opts out of automatic session capture.
 
 ## Generated `.claude/commands/` skeleton
 
