@@ -17,8 +17,8 @@ GOOD = """# Builder Profile — snapshot
 ## Five dimensions
 
 - **Steering — the spine.** *(interpretation confidence: med — qual.)* evidence.
-- **Engineering — not assessable.** *(confidence: n/a.)* Bash 1200 vs Agent 80
-  = 15:1, main-thread only; delegated work excluded / unmeasured. No verdict.
+- **Engineering — not assessable.** *(confidence: n/a.)* Bash 1200 vs Agent 400
+  = 3:1, main-thread only; delegated work excluded / unmeasured. No verdict.
 
 ## Usage (band — external prior, inline only)
 
@@ -53,7 +53,7 @@ def test_band_on_plan_ratio_blocked() -> None:
 
 
 def test_band_on_volume_ok() -> None:
-    ok = "## Usage\n\n- **Volume:** 159 sessions ≈ heavy — per prior.\n"
+    ok = "## Usage\n\n- **Volume:** 42 sessions ≈ heavy — per prior.\n"
     assert v.check_band_placement(ok) == []
 
 
@@ -79,7 +79,7 @@ def test_dimension_with_confidence_ok() -> None:
 def test_toolcount_without_scope_blocked() -> None:
     bad = """## Five dimensions
 
-- **Engineering.** *(confidence: med)* Bash 1200 vs Agent 80, very hands-on.
+- **Engineering.** *(confidence: med)* Bash 1200 vs Agent 400, very hands-on.
 """
     fails = v.check_toolcount_scope(bad)
     assert fails
@@ -96,13 +96,13 @@ def test_toolcount_with_scope_ok() -> None:
 
 # --- band provenance -------------------------------------------------------- #
 def test_band_without_provenance_blocked() -> None:
-    bad = "## Usage\n\n- **Volume:** 159 sessions ≈ heavy.\n"
+    bad = "## Usage\n\n- **Volume:** 42 sessions ≈ heavy.\n"
     fails = v.check_band_provenance(bad)
     assert fails
 
 
 def test_band_with_provenance_ok() -> None:
-    ok = "## Usage\n\n- **Volume:** 159 sessions ≈ heavy — per a stale impression.\n"
+    ok = "## Usage\n\n- **Volume:** 42 sessions ≈ heavy — per a stale impression.\n"
     assert v.check_band_provenance(ok) == []
 
 

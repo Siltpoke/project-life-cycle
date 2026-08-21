@@ -85,6 +85,6 @@ it tight — the take's key judgment + the actionables, not the whole entry re-p
 
 ## Out of scope
 
-A `/ref` command; a per-project log; a heavy write script; the one-time backfill transcript
-sweep (separate pending task); retention/pruning of the growing global log (future); content
+A `/ref` command; a per-project log; a heavy write script; a backfill of past transcripts;
+retention/pruning of the growing global log; content
 privacy filtering (the content here is your composed analysis plus a shared link — lower risk).

@@ -2,7 +2,7 @@
 
 **Status: design-only.** This reference defines a contract; this skill ships no runtime for it.
 An adopter whose `/ship` chain runs with human checkpoints implements the contract below. The
-skill itself does not run `/ship` on its own repo, so it has no personal consumer — the same
+skill ships the contract only, and adopters implement the runtime — the same
 contract-not-runtime split as `references/verify-gate.md`'s liveness layer.
 
 ## The problem
@@ -77,7 +77,7 @@ tries to also erase the human's own inferability is chasing an impossibility.
 
 ## Why every persisted form was rejected
 
-Design convergence (recorded in the phase's design spec) tried and discarded each persisted
+The design considered and discarded each persisted
 shape, because each leaked or muddied:
 
 - A **labeled subsection** with monotonic IDs (`RC1, RC2, …`) titled "auto-derived from

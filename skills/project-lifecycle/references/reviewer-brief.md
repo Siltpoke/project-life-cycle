@@ -73,10 +73,12 @@ multiple `Agent` calls) rather than one mega-review.
 
 **Plus PLC-unique — forward-looking findings.** Call out anything that works for the current spec but
 a downstream task will be hurt by (e.g. a generated artifact uses an unstable name a not-yet-written
-consumer will need stable). A finding *category*, orthogonal to severity (`cadence.md` §"Step 2: Validator" — forward-looking findings).
+consumer will need stable). A finding *category*, orthogonal to severity (`cadence.md` §"Step 3: Code
+quality review", the "third category" paragraph).
 
 **Plus PLC-unique — the bloat / overcomplication smell.** LLM default is over-abstracted code. Run
-this checklist **explicitly**, as its own pass — not implicitly inside "design" (`cadence.md` §"Step 3: Code quality review" — the bloat-smell checklist):
+this checklist **explicitly**, as its own pass — not implicitly inside "design" (`cadence.md` §"Step 3:
+Code quality review", the "Bloat smell checklist"):
 
 ```
 Bloat smell checklist:
@@ -157,7 +159,7 @@ never to zero. Extensible: add `### Appendix: Go` / `Rust` / … the same way la
 ## Severity — reuse PLC's scale, do NOT invent a new one
 
 Canonical scale for findings: **Critical / Important / Minor**, matching the cadence's own step-2/3
-report headers (`cadence.md` §"Step 3" report headers) and the Copilot family (`copilot-review-loop.md`). This is a
+report headers (`cadence.md` §"Step 3: Code quality review", its `Output:` line) and the Copilot family (`copilot-review-loop.md`). This is a
 *declared rebase*, not a fork: `review-record.md` constraint 6 names CRITICAL/HIGH/MEDIUM/LOW as ITS
 default but explicitly rules that the controller counts the active scale's top two tiers as
 merge-blocking — **"whatever the scale"**; this brief picks the 3-tier scale the cadence actually
@@ -190,7 +192,19 @@ Per `review-record.md` constraints 4-6, structure the report in this order:
    it** (evidence gate, `review-record.md` constraint 5).
 4. **Forward-looking** findings.
 5. **Bloat-smell** findings.
-6. **NO self-declared verdict.** Emit per-criterion pass/fail + severity-tagged findings and STOP.
+6. **Probe controls — REQUIRED whenever you built a probe.** For every grep, script, mutant, or stub
+   you constructed to check something, state the **positive control you ran before trusting its
+   result**: an input the probe *must* hit. A probe that reports "not found" and a probe that is
+   simply broken produce **identical output**, so an unverified negative is not evidence — it is an
+   absence of evidence wearing evidence's clothes. Write one line per probe; "none built" is a valid
+   answer. Concrete controls: grepping for a phrase → first confirm the phrase exists in the source
+   at all; extracting ids with a regex → spot-check three extractions against their originals; a
+   mutant → `md5`/`cmp` it against the original before concluding anything from a null result; a
+   stub → make it faithful to what it replaces (an `exit 0` stub that does not drain stdin SIGPIPEs
+   its producer and reddens unrelated rows). This is the reviewer-side twin of the mutation
+   discipline: *a harness that has never been shown to fail is decoration rather than evidence* —
+   and so is a probe.
+7. **NO self-declared verdict.** Emit per-criterion pass/fail + severity-tagged findings and STOP.
    "Approved / blocked" is **computed by the controller** from open top-two-tier counts — never a
    reviewer-stated boolean (`review-record.md` constraint 6; anti-pattern: reviewer-stated "APPROVED"
    treated as the gate).

@@ -2,7 +2,7 @@
 
 python here is TEST tooling (subprocess-drives the bash gate against fixture git repos),
 NOT the gate's runtime envelope — the gate itself stays jq-only.
-Mirrors scripts/test_close_gate_local.py's fixture-git-repo approach.
+Each case builds its own fixture git repo.
 
 Invariant for should-block tests: bind report.prHeadSha to the head you pass (via
 _perturb_commit) so exactly the target check fires, and assert a check-UNIQUE message
@@ -176,7 +176,7 @@ def test_missing_ac_from_report_blocks(tmp_path: Path) -> None:
 
 
 def test_spec_introducing_pr_is_process_only_na(tmp_path: Path) -> None:
-    # base has NO .plc/spec.json; head introduces it (+report). R1: gate N/A, not silent pass.
+    # base has NO .plc/spec.json; head introduces it (+report). Gate N/A, not silent pass.
     repo = tmp_path / "r"
     repo.mkdir()
     _git(repo, "init", "-q"); _git(repo, "config", "user.email", "t@t"); _git(repo, "config", "user.name", "t")
@@ -266,7 +266,7 @@ def test_test_and_hunk_refs_type_check_only(tmp_path: Path) -> None:
     assert r.returncode == 0, r.stdout
 
 
-# --- verdict-teeth: override-present-if-not-qualified (AC1, HARD CONSTRAINT) ------------------
+# --- verdict-teeth: override-present-if-not-qualified (HARD CONSTRAINT) ------------------------
 # Block = ABSENCE of the human override artifact, never the LLM verdict value by itself.
 # QUALIFIED needs no override; anything else (incl. malformed) requires a matching, non-empty
 # .plc/override-<reviewedHeadSha>.json. Should-block cases bind prHeadSha via _perturb_commit
@@ -367,7 +367,7 @@ def test_override_reviewed_sha_mismatch_blocks(tmp_path: Path) -> None:
     assert "requires .plc/override" in r.stdout
 
 
-# --- override-only-diff bypass (AC1b, R2): resolves the SHA-staleness paradox ------------------
+# --- override-only-diff bypass: resolves the SHA-staleness paradox ------------------
 # A NOT_QUALIFIED report is bound (prHeadSha) to a reviewed sha X. A human then pushes ONE
 # commit that adds ONLY .plc/override-<X>.json — HEAD moves to Y, but the report correctly
 # still says X (nothing about the reviewed code changed). BASE here is "the point already
@@ -415,7 +415,7 @@ def test_override_plus_code_change_is_not_a_bypass(tmp_path: Path) -> None:
     assert "prHeadSha" in r.stdout
 
 
-# --- type guards against set -e crash on wrong-typed-but-valid-JSON artifacts (final review) --
+# --- type guards against set -e crash on wrong-typed-but-valid-JSON artifacts ---------------
 # A bare jq command-substitution over valid-JSON-but-wrong-TYPE (or non-JSON) crashes the gate
 # under set -euo pipefail: jq exits 5, pipefail propagates, script dies with a raw jq trace,
 # NO structured bad()/BLOCK line, remaining checks skipped. These guards make that fail
@@ -547,7 +547,7 @@ def test_base_spec_malformed_ac_elements_blocks(tmp_path: Path) -> None:
     assert "verify-gate BLOCK" in r.stdout
 
 
-# --- jq-only envelope lock (AC7) ------------------------------------------------------------
+# --- jq-only envelope lock ------------------------------------------------------------------
 # Regression guard: locks the gate's envelope (bash + git + jq + coreutils) so a future edit
 # that reaches for python3/node/npx fails this test instead of silently widening the gate's
 # dependency footprint. Only WHOLE-LINE comments (`^\s*#`) are dropped before scanning — the
@@ -573,11 +573,11 @@ def test_gate_is_jq_only_no_python_or_node() -> None:
     assert "jq " in code_only
 
 
-# ============================ AC3 — guard potency ============================
+# ============================ guard potency ============================
 # The gate READS diff-guards.json (routed guards, produced by diff-guards.sh) +
 # guard-manifest.json (author bindings) + potency-result.json (produced by potency-runner.sh).
 # It does NOT re-derive "added" — that is the out-of-envelope producer's job. These tests drive
-# the gate's AC3 block against hand-written artifacts; the producers have their own unit tests.
+# the gate's guard-potency block against hand-written artifacts; the producers have their own unit tests.
 
 def _hash_object(repo: Path, rel: str) -> str:
     return subprocess.run(["git", "hash-object", rel], cwd=repo,
@@ -587,7 +587,7 @@ def _hash_object(repo: Path, rel: str) -> str:
 def _add_guards(repo: Path, head: str, *, guards: list, manifest: list,
                 potency: dict | None = None, potency_head: str | None = None,
                 potency_mhash: str | None = None) -> None:
-    """Write AC3 artifacts into a valid _mk() repo's working tree, bound to `head`. potency=None
+    """Write guard-potency artifacts into a valid _mk() repo's working tree, bound to `head`. potency=None
     means 'no potency-result.json file'. Fields default to the consistent (fresh) values so a
     test perturbs only the one it targets."""
     _write(repo, ".plc/diff-guards.json",
@@ -706,7 +706,7 @@ def test_ac3_stale_potency_sha_blocks(tmp_path: Path) -> None:
 
 
 def test_ac3_always_failing_fixture_blocks(tmp_path: Path) -> None:
-    # AC3.5 is a DELTA: an always-failing fixture (fixtureResult=failed) bound to a dead guard
+    # Potency is a DELTA: an always-failing fixture (fixtureResult=failed) bound to a dead guard
     # must NOT pass as potent just because its neutered run also failed — no flip is proven.
     repo, base, head = _mk(tmp_path)
     gid = "scripts/thing.sh:2"
@@ -720,7 +720,7 @@ def test_ac3_always_failing_fixture_blocks(tmp_path: Path) -> None:
 
 
 def test_ac3_nonobject_guard_element_fails_closed(tmp_path: Path) -> None:
-    # HIGH-2: a corrupt diff-guards.json whose .guards holds a non-object must fail CLOSED with a
+    # A corrupt diff-guards.json whose .guards holds a non-object must fail CLOSED with a
     # message, never crash the gate under set -e with a raw jq trace.
     repo, base, head = _mk(tmp_path)
     _write(repo, ".plc/diff-guards.json",
@@ -732,7 +732,7 @@ def test_ac3_nonobject_guard_element_fails_closed(tmp_path: Path) -> None:
 
 
 def test_ac3_nonobject_manifest_element_fails_closed(tmp_path: Path) -> None:
-    # HIGH-2: a manifest array holding a non-object must not crash the select(.guardId) read.
+    # A manifest array holding a non-object must not crash the select(.guardId) read.
     repo, base, head = _mk(tmp_path)
     _add_guards(repo, head, guards=[{"guardId": "scripts/thing.sh:2", "kind": "throw"}],
                 manifest=["oops-not-an-object"])
@@ -744,7 +744,7 @@ def test_ac3_nonobject_manifest_element_fails_closed(tmp_path: Path) -> None:
 
 
 def test_ac3_guardid_with_space_in_path_passes(tmp_path: Path) -> None:
-    # MED-1: a guardId whose file part contains a space must still match its potency entry (no
+    # A guardId whose file part contains a space must still match its potency entry (no
     # word-split false-positive "missing from potency-result").
     repo, base, head = _mk(tmp_path)
     gid = "my dir/thing.sh:2"

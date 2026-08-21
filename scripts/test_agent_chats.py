@@ -537,3 +537,219 @@ def test_hook_reference_documents_sessionend_and_machine_local():
 def test_skill_points_at_reference():
     body = (_SKILL / "SKILL.md").read_text(encoding="utf-8")
     assert "agent-chats-registry.md" in body
+
+
+# ---------------------------------------------------------------------------
+# A codex guardian subagent rollout is not a conversation.
+#
+# The fixtures below follow the shape of codex's `session_meta` envelope field for field
+# (ids and timestamps are made up), with the conversation
+# bodies dropped. Real rollout files are machine-local, so the envelopes travel
+# with the test instead.
+#
+# This matters more than it looks: the false-green to avoid here
+# is "a fixture invented from the code's assumptions instead of one shaped after
+# a real rollout" — a fixture asserting the shape the code already assumes.
+# Every field under test here (`session_id`, `id`, `source`, `originator`) is
+# laid out as a real rollout lays it out. Note in particular that the guardian's `session_id` is
+# the PARENT's while its `id` is its own; a fixture invented from the code's assumptions would very
+# plausibly have made them equal and quietly deleted the whole defect.
+#
+# Why the bodies are trimmed, and why no row here uses a long transcript:
+# trimming is what makes these committable at all -- real rollout files run to hundreds of KB
+# of machine-local conversation. It costs nothing in coverage because BOTH
+# predicates read only the first `session_meta` envelope and stop; transcript
+# length is not an input to either. Recorded here rather than left implicit,
+# because a trimmed fixture reads like laziness unless the reason is next to it,
+# and the next person deciding whether to "fix" this should see that the trim is
+# a deliberate trade with a stated basis. If a future predicate ever reads past
+# `session_meta`, this note stops being true and the fixtures must grow with it.
+# ---------------------------------------------------------------------------
+
+_ROUND1_ID = "0190a000-0000-7000-8000-000000000001"
+_ROUND2_ID = "0190a000-0000-7000-8000-000000000002"
+_GUARDIAN_OWN_ID = "0190a000-0000-7000-8000-000000000003"
+
+
+def _codex_meta(session_id: str, own_id: str, source) -> str:
+    return json.dumps({
+        "timestamp": "2026-01-01T00:00:01.000Z",
+        "type": "session_meta",
+        "payload": {
+            "session_id": session_id,
+            "id": own_id,
+            "timestamp": "2026-01-01T00:00:00.500Z",
+            # Deliberately not a real home path: a fixture carries no machine's
+            # home directory, and cwd is not a field under test here.
+            "cwd": "/w/repo",
+            "originator": "codex_exec",
+            "cli_version": "0.143.0",
+            "source": source,
+            "model_provider": "openai",
+        },
+    })
+
+
+def _codex_turn(role: str, text: str) -> str:
+    return json.dumps({
+        "type": "response_item",
+        "payload": {
+            "type": "message",
+            "role": role,
+            "content": [{"type": "input_text", "text": text}],
+        },
+    })
+
+
+def _codex_rollout(session_id: str, own_id: str, source, turns: int = 6) -> str:
+    lines = [_codex_meta(session_id, own_id, source)]
+    for i in range(turns):
+        lines.append(_codex_turn("user" if i % 2 == 0 else "assistant", f"line {i}"))
+    return "\n".join(lines) + "\n"
+
+
+_ROUND1 = _codex_rollout(_ROUND1_ID, _ROUND1_ID, "exec")
+_ROUND2 = _codex_rollout(_ROUND2_ID, _ROUND2_ID, "exec")
+_GUARDIAN = _codex_rollout(_ROUND2_ID, _GUARDIAN_OWN_ID, {"subagent": {"other": "guardian"}})
+
+
+# --- the subagent predicate ------------------------------------------
+
+def test_guardian_rollout_is_labelled_a_subagent():
+    assert ac.rollout_subagent_kind(_GUARDIAN) == "guardian"
+
+
+def test_exec_rollouts_are_not_subagents():
+    assert ac.rollout_subagent_kind(_ROUND1) == ""
+    assert ac.rollout_subagent_kind(_ROUND2) == ""
+
+
+# --- identity comes from session_id, never from `id` ------------------
+
+def test_guardian_conversation_id_is_the_parent_not_its_own():
+    # The whole defect in one assertion: the guardian's own uuid is what the
+    # FILENAME carries, and it is not the conversation.
+    assert ac.rollout_conversation_id(_GUARDIAN) == _ROUND2_ID
+    assert ac.rollout_conversation_id(_GUARDIAN) != _GUARDIAN_OWN_ID
+
+
+def test_conversation_id_of_an_ordinary_rollout():
+    assert ac.rollout_conversation_id(_ROUND1) == _ROUND1_ID
+    assert ac.rollout_conversation_id(_ROUND2) == _ROUND2_ID
+
+
+# --- a Claude transcript is untouched ---------------------------------
+
+def test_claude_transcript_has_no_subagent_and_no_conversation_id():
+    claude = "\n".join(
+        json.dumps({"type": "assistant", "message": {"role": "assistant",
+                                                     "model": "opus",
+                                                     "content": "hi"}})
+        for _ in range(3)
+    ) + "\n"
+    assert ac.rollout_subagent_kind(claude) == ""
+    assert ac.rollout_conversation_id(claude) == ""
+
+
+# --- both registration paths ------------------------------------
+
+def _write(tmp_path, name: str, text: str) -> str:
+    p = tmp_path / name
+    p.write_text(text, encoding="utf-8")
+    return str(p)
+
+
+def test_upsert_skips_a_guardian_even_with_a_hand_passed_id(tmp_path, capsys):
+    reg = tmp_path / "reg.jsonl"
+    path = _write(tmp_path, "guardian.jsonl", _GUARDIAN)
+    rc = ac.main([
+        "upsert", "--family", "codex",
+        "--resume-id", _GUARDIAN_OWN_ID,   # exactly what reading the filename gives
+        "--transcript-path", path,
+        "--registry", str(reg),
+    ])
+    assert rc == 0
+    assert not reg.exists() or reg.read_text(encoding="utf-8").strip() == ""
+    err = capsys.readouterr().err
+    assert "guardian" in err and "skipping" in err
+
+
+def test_upsert_takes_the_id_from_the_transcript_over_the_passed_one(tmp_path, capsys):
+    reg = tmp_path / "reg.jsonl"
+    path = _write(tmp_path, "round2.jsonl", _ROUND2)
+    rc = ac.main([
+        "upsert", "--family", "codex",
+        "--resume-id", "id-read-off-the-filename",
+        "--transcript-path", path,
+        "--registry", str(reg),
+    ])
+    assert rc == 0
+    rows = ac.parse_lines(reg.read_text(encoding="utf-8"))
+    assert [r.resume_id for r in rows] == [_ROUND2_ID]
+    assert "overrides the passed id" in capsys.readouterr().err
+
+
+def test_upsert_without_a_transcript_still_trusts_the_passed_id(tmp_path):
+    # The override is scoped to "a transcript was supplied"; Trigger A with no
+    # transcript must keep working exactly as before.
+    reg = tmp_path / "reg.jsonl"
+    rc = ac.main(["upsert", "--resume-id", "plain-id", "--registry", str(reg)])
+    assert rc == 0
+    assert [r.resume_id for r in ac.parse_lines(reg.read_text(encoding="utf-8"))] == ["plain-id"]
+
+
+def test_capture_hook_skips_a_guardian_rollout(tmp_path, capsys, monkeypatch):
+    reg = tmp_path / "reg.jsonl"
+    path = _write(tmp_path, "guardian.jsonl", _GUARDIAN)
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.StringIO(json.dumps({"session_id": _ROUND2_ID, "transcript_path": path})),
+    )
+    rc = ac.main(["capture-hook", "--registry", str(reg)])
+    assert rc == 0
+    assert not reg.exists() or reg.read_text(encoding="utf-8").strip() == ""
+    assert "guardian" in capsys.readouterr().err
+
+
+# --- the golden case --------------------------------------------------
+
+def test_golden_three_rollouts_yield_exactly_two_conversations(tmp_path, capsys):
+    """The golden oracle.
+
+    Three rollout files sit in one directory; the correct answer is two
+    conversations, and the guardian is not one of them. A change that cannot
+    turn 3 into 2 has done nothing.
+    """
+    reg = tmp_path / "reg.jsonl"
+    files = [
+        ("round1.jsonl", _ROUND1, _ROUND1_ID),
+        ("round2.jsonl", _ROUND2, _ROUND2_ID),
+        ("guardian.jsonl", _GUARDIAN, _GUARDIAN_OWN_ID),  # id as the filename gives it
+    ]
+    for name, text, filename_id in files:
+        ac.main([
+            "upsert", "--family", "codex",
+            "--resume-id", filename_id,
+            "--transcript-path", _write(tmp_path, name, text),
+            "--registry", str(reg),
+        ])
+    capsys.readouterr()
+    rows = ac.parse_lines(reg.read_text(encoding="utf-8"))
+    assert sorted(r.resume_id for r in rows) == sorted([_ROUND1_ID, _ROUND2_ID])
+    assert _GUARDIAN_OWN_ID not in {r.resume_id for r in rows}
+
+
+def test_an_object_source_without_a_subagent_key_is_still_a_conversation():
+    """Pins the `sub is None` branch, which nothing else reached.
+
+    Found by mutation, not by reading: the mutant that drops this branch —
+    "any object `source` means subagent" — survived the whole suite. That
+    surviving mutant is the map: the predicate deliberately keys on the
+    `subagent` KEY rather than on `source` being an object, and until this row
+    existed that narrowing was a claim with no check behind it. No such
+    envelope has been observed on disk; what is pinned here is the behaviour
+    the code already has, not a guess about what codex will emit.
+    """
+    rollout = _codex_rollout(_ROUND2_ID, _ROUND2_ID, {"terminal": {"kind": "tty"}})
+    assert ac.rollout_subagent_kind(rollout) == ""
+    assert ac.rollout_conversation_id(rollout) == _ROUND2_ID

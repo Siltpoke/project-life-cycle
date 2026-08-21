@@ -17,7 +17,7 @@ def test_schema_forbids_wrapper_owned_fields():
     assert ac["properties"]["verdict"]["enum"] == ["met", "unmet"]
     assert ac["properties"]["evidence"]["minItems"] == 1
     assert ac["properties"]["evidence"]["items"]["pattern"] == r"^(file|test|hunk)://"
-    # M1: findings items must be as strict as perAc items (symmetric additionalProperties:false).
+    # findings items must be as strict as perAc items (symmetric additionalProperties:false).
     assert props["findings"]["items"]["additionalProperties"] is False
 
 
@@ -251,7 +251,7 @@ def test_peraC_string_element_fail_closed(tmp_path):
 
 def test_missing_perac_key_fail_closed_even_with_empty_ac_spec(tmp_path):
     # The exact spurious-QUALIFIED case: empty-AC spec + model reply with NO `perAc` key at
-    # all (only `findings`). Before that fix this derived UNMET=0 and wrote a QUALIFIED
+    # all (only `findings`). Before a missing key failed closed, this derived UNMET=0 and wrote a QUALIFIED
     # report; it must now fail-closed instead. Contrast with
     # test_empty_ac_spec_emits_empty_peraC, which uses the WELL-FORMED `perAc:[]` and must
     # still pass.
@@ -410,6 +410,7 @@ def test_broken_backend_is_loud_error(tmp_path):
 
 
 GATE = REPO / "scripts" / "verify-gate.sh"
+
 
 def test_end_to_end_producer_then_gate(tmp_path):
     """Stubbed producer writes a report; the REAL verify-gate.sh accepts it on an all-met case."""

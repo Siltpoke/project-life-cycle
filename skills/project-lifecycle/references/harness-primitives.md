@@ -2,13 +2,13 @@
 
 This skill predates a wave of native Claude Code primitives that now realize, as
 first-class platform features, several harness concepts the skill previously could
-only describe in prose ("dispatch parallel reviewers", "the un-bypassable layer",
+only describe in prose ("dispatch parallel reviewers", "the enforcing layer",
 "auto-load RESUME on resume"). This doc maps each **verified** primitive to the
 skill node it strengthens, and how to use it.
 
 > **Verification provenance.** Every primitive below was checked against the
-> official `code.claude.com/docs` changelog + hooks reference on **2026-06-08**.
-> Two primitives a research pass had suggested were checked and **NOT found** —
+> official `code.claude.com/docs` changelog + hooks reference when this doc was written.
+> Two primitives that are sometimes cited were checked and **NOT found** —
 > `/batch` and skill-frontmatter `invocationMode` — and are deliberately omitted.
 > Do not cite them. Re-verify versions before relying on exact behavior; the
 > platform moves fast.
@@ -28,9 +28,9 @@ hook events are supported (`PreToolUse`, `Stop`, `SubagentStop`, …). `Stop` /
 `SubagentStop` can return `hookSpecificOutput.additionalContext` to inject text
 back into the model's context.
 
-**Verified firing (2026-06-08).** A throwaway test skill confirms in a
+**Verified firing.** A minimal test skill confirms in a
 live session that a frontmatter `PreToolUse:Bash` hook fires on a real tool call
-AND its `additionalContext` is injected into the transcript. Registration happened
+AND its `additionalContext` is injected into the transcript. Registration happens
 **mid-session** on skill invocation (no restart needed to register; but see the
 caveat below).
 
@@ -41,9 +41,9 @@ wiring required.
 
 **How this skill uses it** (see SKILL.md frontmatter `hooks:` block + scripts in
 `skills/project-lifecycle/hooks/`):
-- `PreToolUse:Bash` → `hooks/guard.sh`: blocks `--no-verify` and direct
-  `git push` to `main` while the skill is active (exit 2 = block). Belt-and-braces
-  with the git pre-push hook; this one travels with the skill.
+- `PreToolUse:Bash` → `hooks/guard.sh`: a best-effort, fail-open speed bump over the command
+  string for `--no-verify` and direct `git push` to `main` while the skill is active (exit 2 when it matches). Belt-and-braces
+  with the git pre-push hook, which is the layer that enforces; this one travels with the skill.
 - `PreToolUse:TaskCreate|TodoWrite` + `PreToolUse:Edit|Write|MultiEdit|NotebookEdit`
   → `hooks/tasklist-first.sh` (`mark` / `check`): realizes Definition-of-Done forcing
   function 1 as platform enforcement — the first file edit of each phase is blocked ONCE
@@ -126,7 +126,7 @@ per `cadence.md` §"Background-by-default") **deterministic control flow**, and
   orchestration shape is known, encode it as a Workflow script: `pipeline()` over
   the cadence steps, `parallel()` for the independent reviewers (§4), `schema` on
   each `agent()` for the Builder Summary / Validator Report / Acceptance Report.
-- **Full `/ship` → Workflow conversion is its own milestone**, not a doc edit — it
+- **Converting `/ship` itself into a Workflow script is not a doc edit** — it
   re-implements `commands/ship.md` as a script and must go through this skill's own
   brainstorm → spec → TDD discipline; do not silently rewrite.
 
@@ -219,8 +219,9 @@ a platform-enforced gate that cannot edit until the user exits plan mode.
     persistence, NOT a license to self-grade; satisfaction is still judged by the
     deterministic gate + independent verifier subagents, not by the looping model.
   - **Layering:** `/goal` = self-correction layer (model keeps hillclimbing);
-    close gate + pre-push hook = un-bypassable floor. The former never replaces
-    the latter.
+    close gate + pre-push hook = the deterministic floor (automatic, though
+    `--no-verify` still skips a pre-push hook — only forge-side branch
+    protection cannot be skipped locally). The former never replaces the latter.
 - **`/context`** (and `/context all`): visualize what consumes the window
   (CLAUDE.md / skills / subagents / MCP / history). Add to
   `references/cost-aware-behaviors.md` as the tool to decide `/clear` vs `/compact`
@@ -233,8 +234,9 @@ a platform-enforced gate that cannot edit until the user exits plan mode.
 
 ## 9. Context-saturation hard floor — deterministic block (enforce-only)
 
-**What it is.** `hooks/context-floor.sh`, a single PreToolUse:Edit|Write hook that
-turns the prose "`/clear` at >50%" rule (`cost-aware-behaviors.md`) into a
+**What it is.** `hooks/context-floor.sh`, one PreToolUse:Edit|Write hook plus the
+sibling library `hooks/lib/floor-env.sh` it sources (see "It is not one file" under
+Wiring), turning the prose "`/clear` at >50%" rule (`cost-aware-behaviors.md`) into a
 deterministic *block*. It reads the transcript JSONL's newest assistant `usage`
 (`input_tokens + cache_read_input_tokens + cache_creation_input_tokens`) to compute
 context occupancy and compares it to an **absolute-token** floor. Over the floor and
@@ -254,13 +256,12 @@ arming step is needed — the gate arms itself on the tool call it blocks.
 **RESUME exemption (deadlock guard).** Writing/refreshing `RESUME.md` is the action
 that CLEARS the block — so a Write/Edit whose `tool_input.file_path` resolves to the
 RESUME path (or any `RESUME.md` basename) is NEVER gated. Without this the gate
-deadlocks: you can't write the checkpoint that unblocks you. (Caught in a real session —
-the hook went live mid-session and blocked its own RESUME write.)
+deadlocks: you can't write the checkpoint that unblocks you.
 
 **Node it strengthens.** `cost-aware-behaviors.md` §Session boundaries and the
 RESUME contract. The "80% problem" — the model degrading past its own context
-boundary instead of checkpointing — was the one part the soft warners never
-enforced; this is the floor.
+boundary instead of checkpointing — is the one part a soft warning layer never
+enforces; this is the floor.
 
 **Why machine-local global, NOT skill frontmatter.** Frontmatter hooks fire only
 while the skill is active (§1) and would miss every non-workflow session, which is
@@ -292,6 +293,15 @@ to checkpoint (late-session turns cost 2-3× early turns).
 `<SCRIPT>` = absolute path to the installed `context-floor.sh`. That file usually already
 has other `PreToolUse` entries — append, don't clobber.
 
+**It is not one file.** `context-floor.sh` sources a sibling library,
+`lib/floor-env.sh`, holding the floor-math jq definitions it shares with
+`close-gate-nudge.sh`. The hook resolves it relative to its own location, so
+**copy the `lib/` directory along with the hook** — an absolute-path wiring that
+points at a hook with no sibling library still runs, but the floor is OFF. It
+fails open on purpose and says so on stderr once per session; it does not block
+and it does not go quiet. Set `PLC_FLOOR_LIB` to an absolute path if the library
+has to live somewhere other than beside the hook.
+
 **Three safety rails.** (1) Never auto-`/clear` — the script only blocks/records;
 the destructive clear is always a human/model action. (2) Threshold is absolute
 tokens by default (`PLC_CONTEXT_FLOOR=150000`) — a rot curve bites by ~50K
@@ -314,7 +324,7 @@ floor re-arms only when occupancy climbs a further `PLC_CONTEXT_FLOOR_STEP`
 |---|---|---|
 | Frontmatter hooks | close-gate / Definition of Done | **wired** (SKILL.md `hooks:` + `hooks/`) |
 | `SessionStart:resume` | RESUME contract | recommended project-settings block (init-harness) |
-| Workflows / `ultracode` | cadence + `/ship` | documented option; a full `/ship` port is a separate piece of work |
+| Workflows / `ultracode` | cadence + `/ship` | documented option; `/ship` itself is not a Workflow script |
 | `run_in_background` / `Monitor` | cadence steps 1.5-3 | **default** (background verification tail, `cadence.md` §Background-by-default) |
 | Worktree isolation | builder-split / issue-breakdown | documented (only when builders run concurrently) |
 | `AskUserQuestion` | opt-in checkpoints | documented (replaces freeform forks) |

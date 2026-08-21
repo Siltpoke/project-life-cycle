@@ -37,6 +37,7 @@ flowchart LR
 - **`/capture`** (auxiliary — not part of the core pipeline) — pin a stated project intent (the "why") into the cold cognition log. Elicits at most two questions, appends a validated entry to `docs/cognition-log.d/`, and surfaces any prior intent on the same subject for supersede confirmation.
 - **`/cognition-distill`** (auxiliary — not part of the core pipeline) — regenerate the hot cognition doc (`docs/cognition.md`) from the cold intent-log (regenerate-from-source): groups non-superseded intents into four sections + runs deterministic guards. Runs at milestone close or on demand, outside the close-gate.
 - **`/tasklist`** (auxiliary — not part of the core pipeline) — render the current phase's progress from `.claude/tasklist.md` (the tasklist contract) in the terminal: a collapsed done/total line by default, `--tree` for the full glyphed overview. Pure portable bash, read-only.
+- **`/plc-status`** (auxiliary — not part of the core pipeline) — render the lifecycle ledger: for every process stage of a run, whether it was observed, only claimed, missing, not applicable, or unknown (retro). `--run <id>` shows one run plus its timeline; `--all` shows the conformance matrix over every run. Read-only; `jq` is the single dependency.
 
 Between commands: every PR updates `[Unreleased]` + carries one category label + uses a Conventional Commits title (see [`CONTRIBUTING.md`](CONTRIBUTING.md)). The Validator (cadence step 2, read-only) catches builder lies; the Acceptance Verifier (cadence step 1.5) writes one test per AC; deterministic handlers (`.claude/handlers/`) inject auth / secrets / pre-flight lint / migration safety before the LLM ever sees them.
 
@@ -110,7 +111,7 @@ Full workflow burns ~100–300 K tokens per phase. Earn it; don't spend it on tr
 | Phase PRD (opt-in) | `docs/superpowers/specs/…-prd.md` |
 | Phase plan | `docs/superpowers/plans/…` |
 | Research notes | `docs/research/…` |
-| Phase-delivery handoff | *retired* — §7 findings fold into the journal FACT (`references/journal-schema.md`). **Not** the `/handoff` continuity command (that writes `docs/RESUME.md`, above). |
+| Phase-delivery handoff | *retired* — §7 findings fold into the journal FACT (`references/journal-schema.md`). **Not** the `/handoff` continuity command (that writes `docs/RESUME.md`, below). |
 | Journal | `docs/iteration-journal.md` (append-only, TOC at top) |
 | Milestone state | `docs/RESUME.md` |
 | Whole-plan map | `docs/ROADMAP.md` (milestone table + status, updated at milestone boundaries) |
@@ -163,8 +164,8 @@ Manual fallback (only when `/release` is unavailable or you're recovering from a
 ```bash
 # 1. CHANGELOG: rename [Unreleased] → [X.Y.Z] — YYYY-MM-DD; add fresh [Unreleased] block
 $EDITOR CHANGELOG.md
-# 2. Bump all plugin manifests to the same version
-$EDITOR .claude-plugin/marketplace.json .claude-plugin/plugin.json .qoder-plugin/plugin.json .qoder-plugin/marketplace.json .codebuddy-plugin/plugin.json .codebuddy-plugin/marketplace.json
+# 2. Bump the version in the manifest source, then regenerate every plugin manifest from it
+$EDITOR .claude-plugin/plugin.source.json && python3 scripts/gen_plugin_manifests.py
 git commit -am "chore(release): vX.Y.Z"
 # 3. Tag + push
 git tag vX.Y.Z && git push origin vX.Y.Z
@@ -197,28 +198,35 @@ skills/project-lifecycle/
     │  ── onboarding + ergonomics (start here for new contributors) ──
     ├── onboarding.md                     Day 1 protocol — codebase Q&A only, no edits. Anchor checklist (CLAUDE.md / CONTEXT.md / RESUME.md / journal / .claude/commands/). Day 2+ gradient to /ship. Includes project-level .claude/commands/ schema for team-shared slash commands.
     ├── ergonomics.md                     Claude Code session habits — 5 to internalize: # memory append, ! bash mode, shift-tab auto-accept, escape interrupt, drag-drop multimodal. Full keybinding + claude -p SDK + multi-Claude parallelism reference.
+    ├── archaeology.md                    brownfield adoption pass — one-time READ-ONLY derivation of the baseline artifacts a greenfield project would have accumulated (ROADMAP, glossary, backfilled ADRs, journal start, RESUME), every one marked an AI-inferred draft; re-running is an idempotent merge, never a refresh
+    ├── repo-intake.md                    GitHub onboarding for non-technical users — fires at new-project / first-milestone kickoff to settle where the code will live
     │
     │  ── per-phase building blocks ──
     ├── intent-gate.md                    the workflow FRONT DOOR — classify → confirm intent → reframe+sharpen on every fresh request; turns a fuzzy ask into a precise prompt with a named oracle; doubles as machinery triage (trivial→inline / medium→cadence / large→brainstorm)
     ├── changelog.md                      CHANGELOG.md (Keep a Changelog 1.1.0) discipline + PR label taxonomy + per-PR rules + SemVer bump + release flow. Universal across every project this skill touches.
     ├── brainstorm-research-protocol.md   per-question 7-step loop (frame → research → 1st rec → blind 2nd verifier → compare → evidence-tag → surface) + Mode A interactive / Mode B batch
+    ├── cross-family-review.md            lets the brainstorm's blind 2nd agent run on a DIFFERENT CLI family for lineage diversity (codex is the built adapter). Armed-optional: a repo that never sets `second-agent-family` behaves byte-identically to a PLC without the feature
+    ├── references-log.md                 gated auto-offer to capture an external reference the user shares into their GLOBAL references-log — the entry schema lives in that log's own header, never copied here
+    ├── handoff-snapshot.md               the discipline behind `/handoff` — a schema-enforced, MOMENT-tense mid-session continuity snapshot to RESUME.md, plus a conditional durable journal FACT
     ├── context-md.md                     ubiquitous-language glossary (CONTEXT.md / CONTEXT-MAP.md) — DDD-style domain anchor
     ├── adr.md                            Architectural Decision Records (3-criteria gate: hard-to-reverse AND surprising AND real-tradeoff)
     ├── prd-template.md                   optional product-facing PRD when stakeholders include non-engineers
     ├── user-story.md                     MANDATORY for user-observable phases — numbered acceptance criteria + Out-of-Scope + Open Questions + pre-declared Contingencies (when X → do Y, injected into builder prompts) + optional machine-checkable Invariants; signed off BEFORE spec
     ├── issue-breakdown.md                optional Step 4b — split plan into vertical-slice tracer-bullet issues
+    ├── reconcile.md                      the reference behind `/reconcile` — the WRITE-twin of `/catchup`: catchup reads roadmap/status drift and surfaces it, reconcile lands the drifted decisions back into ROADMAP.md + the read-first status doc as staged, individually-approvable edits
     ├── roadmap.md                        docs/ROADMAP.md whole-plan map — one-sentence goal + milestone table + status legend (✅▶☐⏸✗); updated at every milestone boundary; the ROADMAP-vs-RESUME split + the status-file ring close protocol (active + 2 most recent closed entries; oldest moves verbatim to a dedicated archive)
     ├── parallel-work.md                  WIP=1 (one active code track per project) + the sidecar exception (doc-only research parallel to the active track) + the single-writer rule (one session holds the pen for the status/roadmap file)
     │
     │  ── per-task cadence (6 steps) ──
     ├── cadence.md                        full per-task cadence: implementer(s) → acceptance verifier → validator (with lie-detection step 0) → code quality → fixup → journal
+    ├── reviewer-brief.md                 the PLC-native review prompt dispatched to a read-only general-purpose agent — the button behind `/review`, and the referent every cadence/CI review site points at, replacing any by-name dependency on an external reviewer agent
     ├── builder-split.md                  backend-builder + frontend-builder w/ folder-scoped tools + Builder Summary contract (API handoff)
     ├── verify-loop.md                    feedback-loop pattern (3 canonical loops: test / visual screenshot / runtime curl) — give the LLM a way to check its own work; cap iterations; without it, the LLM self-grades and lies
     ├── deterministic-handlers.md         harness-injected pre-step pattern (auth / secret / lint / migration safety / tenant isolation). Pure code, fires every loop iteration before LLM, injects [HARNESS] message when it acts. 6 canonical handler examples + dynamic-handlers path
     ├── journal-schema.md                 6-section journal entry template
     ├── defer-vs-fix.md                   triage rule for review findings
     ├── diagnose-loop.md                  hard-bug discipline: feedback loop → ranked hypotheses → fix + regression. Iron Law + 3-Fix Rule
-    ├── close-gate.md                     deterministic done-gate — task-done / phase-done checks (journal header / fresh test-evidence / CHANGELOG touch / smoke / ROADMAP), portable script + manifest, pre-push-hook wiring (the un-bypassable layer) + the close-gate policy key (per-task | pr-boundary — where the human-blocking approval sits, with the self-certification attack surface written out)
+    ├── close-gate.md                     deterministic done-gate — task-done / phase-done checks (journal header / fresh test-evidence / handoff sections / CHANGELOG touch / smoke / ROADMAP), portable script + manifest, pre-push-hook wiring (the un-bypassable layer) + the close-gate policy key (per-task | pr-boundary — where the human-blocking approval sits, with the self-certification attack surface written out)
     ├── review-record.md                  trustworthy AI review — reviewer dispatch constraints (fresh context / read-only / tier asymmetry / refute-first / file:line evidence gate / computed verdicts), the bidirectional review record on the PR (reviewer report verbatim + builder per-finding response), finding→fix rules (reviewer snippets are untrusted input; mandatory final-pass), coverage-window check
     │
     │  ── delivery + CI ──
@@ -229,12 +237,17 @@ skills/project-lifecycle/
     ├── copilot-review-loop.md            per-PR @copilot review loop + per-finding inline-reply convention
     ├── pr-comment-template.md            9-layer PR-comment audit narrative (golden/negative-path demo / before-after / cost / perf / findings tier / gate output / reviewer asks / what's next) + the review-record companion comments + draft-first workflow + folded raw evidence
     ├── research-gate.md                  when online research is required before deciding
+    ├── verify-gate.md                    the per-PR "qualified?" artifact contract — `scripts/verify-gate.sh` (jq-only) VALIDATES artifacts; separate runtimes PRODUCE them
+    ├── deploy.md                         putting a non-technical user's project online — fires at project finish, reuses the plain-language voice in audience-tone.md
     │
     │  ── output discipline ──
     ├── output-format.md                  MD-canonical force list + HTML opt-in nodes + CLAUDE.md policy keys (html-policy / smoke-mode / comprehension / close-gate)
     ├── html-companion-template.md        HTML companion structure + style presets (default-cool / kami-parchment / swiss-grid / xhs-pastel) + 4 anti-AI-slop hard rules
     ├── html-companion-skeleton.html      copy-paste skeleton for spec/design HTML companions
     ├── document-indexing.md              TOC convention for long-lived append-only docs
+    ├── audience-tone.md                  plain-language layer for CONVERSATIONAL, user-facing output only — never touches specs / plans / journal / commits / PR bodies / ADRs
+    ├── proactive-tips.md                 surfacing a genuine high-value app improvement inline, in plain language, while a non-technical user is building
+    ├── retention.md                      the hot/cold document model — dual-limit caps, a coverage-discovery net, and a deterministic drain that runs at milestone close; every transition is event-triggered off the lifecycle, never a calendar chore
     │
     │  ── release ──
     ├── release-process.md                full /release spec — artifact inventory, SemVer bump table, per-release file updates, commit + tag conventions, workflow behavior on tag push, verification checklist, failure-mode recovery, retroactive-tag flow, cadence guidance
@@ -244,14 +257,24 @@ skills/project-lifecycle/
     │
     │  ── meta ──
     ├── harness-primitives.md             native Claude Code primitives → skill-node map (frontmatter hooks / SessionStart:resume / dynamic Workflows / run_in_background parallel reviewers / worktree isolation / AskUserQuestion / plan mode / goal,context,branch) + verification provenance. Documents the self-enforcing layer the skill now ships.
-    ├── cost-aware-behaviors.md           per-token leverage rules + tool-adopt tiers (RTK / token-savior / caveman)
+    ├── cost-aware-behaviors.md           per-token leverage rules + tool-adopt tiers (token-savior / context-mode / code-review-graph)
+    ├── cognition.md                      the INPUT side of the project-cognition memory layer — git captures what changed and the journal captures what happened; this captures WHY the human wanted it that way (the rationale, the rejected alternative, the stated quality bar)
     ├── comprehension-co-discovery.md     opt-in anti-cognitive-offloading round (comprehension policy key) — one why-question per phase on the validated diff; discovery-not-judgment, no scoreboard
     ├── builder-profile.md                /builder-profile mechanism — gated pipeline (deterministic stats → evidence gate → cold-read → adversarial verify → independent verification) + framing-safety rules + report shape
     ├── milestone-done.md                 closing-the-milestone gate
+    ├── mode.md                           the `mode: fast | detailed` preset and its declarative expansion map — what each mode sets, the keys it never touches, precedence, the dispatch table, the skip-marker template, and the shipped resolver
+    ├── careful-paths.md                  the exception channel out of `fast` — the `careful-paths` key, the one data block holding the three signals that need no declaration plus the tick-box word list, what a hit upgrades and what it deliberately does not, and the four sentences saying what this will miss
+    ├── kickoff-confirmation.md           the one screen `fast` stops on before starting: mode line first, work-kind plus its reason, every acceptance criterion in the story's order, uncertainties as must-answer questions, and what not to use `fast` for
+    ├── pre-merge-brief.md                the fixed block at the top of a `fast` PR: one guidance line plus exactly four items, the two stop counts kept separate, and the sentence saying this is not a human code review
+    ├── dependency-boundary.md            PLC depends on nothing external — the drop-in-anywhere claim, and how integration happens through open contracts instead
+    ├── progressive-disclosure.md         deciding what may leave an always-loaded surface: SKILL.md is read every session, references/ are not
+    ├── checkpoint-segmentation.md        splitting a checkpoint-gated chain (like /ship's outer chain) into Workflow-scriptable segments
+    ├── checkpoint-reflow.md              DESIGN-ONLY contract (this skill ships no runtime for it) — how an adopter's /ship folds prior checkpoint rejections back into the spec-writer
+    ├── agent-chats-registry.md           machine-local, per-repo index mapping this repo's CLI-agent conversations to their resume ids, across families
     ├── self-update-flow.md               how the AI updates this skill itself
     └── origin.md                         pilot history
 
-hooks/                                     ← self-enforcing frontmatter hooks — fire only while the skill is active (see references/harness-primitives.md)
+skills/project-lifecycle/hooks/            ← self-enforcing frontmatter hooks — fire only while the skill is active (see references/harness-primitives.md)
 ├── guard.sh                               PreToolUse:Bash — blocks --no-verify and direct pushes to main
 ├── close-gate-nudge.sh                    Stop/SubagentStop — throttled close-gate reminder, only on a feat/phase-* branch with pending wrap-up
 ├── inject-resume.sh.template              SessionStart:resume RESUME-injection template (installed per-project by /init-harness)
@@ -270,7 +293,8 @@ commands/                                  ← slash commands shipped with the s
 ├── catchup.md                             /catchup — warm welcome-back card post-/clear (live git + RESUME.md + digest → where/shipped/doing/save-state; read-only; auxiliary)
 ├── capture.md                             /capture — pin a stated intent (the "why") into the cold cognition log (≤2 questions → docs/cognition-log.d/; supersede-confirm on same subject; auxiliary)
 ├── cognition-distill.md                   /cognition-distill — regenerate hot docs/cognition.md from the cold intent-log (four sections + deterministic guards; runs outside the close-gate; auxiliary)
-└── tasklist.md                            /tasklist — render current-phase progress from .claude/tasklist.md (tasklist contract) in the terminal (collapsed line, --tree for full glyphed overview; portable bash, read-only; auxiliary)
+├── tasklist.md                            /tasklist — render current-phase progress from .claude/tasklist.md (tasklist contract) in the terminal (collapsed line, --tree for full glyphed overview; portable bash, read-only; auxiliary)
+└── plc-status.md                          /plc-status — render the lifecycle ledger (observed / claimed / missing / not applicable / unknown per stage; --run for one run's timeline, --all for the matrix; jq only, read-only; auxiliary)
 
 CHANGELOG.md                              Keep a Changelog 1.1.0 — per-version log of what shipped. [Unreleased] at top.
 CONTRIBUTING.md                           Commit/PR/CHANGELOG/label discipline applied at the repo boundary.

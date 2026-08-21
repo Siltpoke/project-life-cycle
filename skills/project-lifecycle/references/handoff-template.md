@@ -1,6 +1,6 @@
 # Phase Handoff — field reference (retired as a standalone file)
 
-Phases used to end with a **single delivery document** at `docs/handoff/YYYY-MM-DD-phase-X.Y-handoff.md`. **That file is retired — do not write it.** Measured on a long-running project that adopted this skill, 7 of its 8 sections were pure caches of information already available elsewhere (the file index is in git, the tests are in the test run, the PR-body appendix is on GitHub). No gate checks for the file (`references/close-gate.md`) and no cadence step instructs writing it (`SKILL.md` §"Per-Phase Workflow" step 7).
+Phases used to end with a **single delivery document** at `docs/handoff/YYYY-MM-DD-phase-X.Y-handoff.md`. **That file is retired — do not write it.** 7 of its 8 sections were pure caches of information already available elsewhere (the file index is in git, the tests are in the test run, the PR-body appendix is on GitHub). No gate checks for the file (`references/close-gate.md`) and no cadence step instructs writing it (`SKILL.md` §"Per-Phase Workflow" step 7).
 
 This reference is **retained for two things only**:
 
@@ -52,7 +52,7 @@ The mandatory PR body template. **MANDATORY 3-section shape, in this order:**
 **Plain-language, 4-6 sentences, ZERO jargon — at the very top, before
 everything else.** Written for someone who does NOT know this part of the
 code and is skimming to learn "what did this PR actually do." Any technical
-term (conflict-guard / topology-blind / I≈0 / bucketer / etc.) is either
+term (idempotency key / N+1 query / debounce / etc.) is either
 avoided OR immediately followed by a plain-English gloss in parentheses.
 Fixed four-part shape, in this order:
 
@@ -198,4 +198,4 @@ states that limit in plain words, not as a buried caveat.
 
 Product owners shouldn't need to read code to merge a PR. The (now-retired) handoff doc was the boundary contract: AI says "this is shippable, here's what changed, here's how to confirm." The same job is now split across artifacts that already exist rather than a dedicated cache file: the journal (§7 findings, FACT schema), the PR body (§1-3 built from this doc's appendix template), and the Track A/B smoke artifacts (verification) — the owner still reads all of that in ~5 minutes, it just isn't compiled into one intermediate file first.
 
-The reason a single-file compile isn't worth it: measured on a long-running project that adopted this skill, 7 of the 8 sections were pure caches of information already sitting elsewhere (file index in git, tests in the test run, PR-body appendix on GitHub), at the cost of an extra artifact to keep in sync and to retention-manage.
+The reason a single-file compile isn't worth it: 7 of the 8 sections were pure caches of information already sitting elsewhere (file index in git, tests in the test run, PR-body appendix on GitHub), at the cost of an extra artifact to keep in sync and to retention-manage.

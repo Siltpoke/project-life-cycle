@@ -5,8 +5,8 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT="$HERE/tasklist-view.sh"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 fails=0
-run() { PLC_TASKLIST_FILE="$1" bash "$SCRIPT" "${2:-}"; }         # stdout
-rc()  { PLC_TASKLIST_FILE="$1" bash "$SCRIPT" "${2:-}" >/dev/null 2>&1; echo $?; }
+run() { PLC_TASKLIST_FILE="$1" /bin/bash "$SCRIPT" "${2:-}"; }         # stdout
+rc()  { PLC_TASKLIST_FILE="$1" /bin/bash "$SCRIPT" "${2:-}" >/dev/null 2>&1; echo $?; }
 has() { # name  file  needle  (case-match, no pipe: grep -q + pipefail = SIGPIPE false-negatives)
   local o; o="$(run "$2" "${4:-}")"
   case "$o" in *"$3"*) echo "ok   $1";; *) echo "FAIL $1 — expected to contain: $3"; fails=1;; esac; }
@@ -72,7 +72,7 @@ eq   "exit 0 malformed"   "$(rc "$TMP/mal.md")" "0"
 has  "unknown→todo glyph" "$TMP/mal.md" "○ weird" "--tree"
 has  "count ignores junk" "$TMP/mal.md" "1/2"     "--tree"
 
-# --- AC5 label independence: rename text, counts/current unchanged ---
+# --- label independence: rename text, counts/current unchanged ---
 printf '# P\n## T\n- [x] RENAMED_LABEL_ZZZ\n- [/] xx\n' > "$TMP/lbl.md"
 has  "label-indep count"  "$TMP/lbl.md" "1/2"
 has  "label-indep now"    "$TMP/lbl.md" "▶ now:"

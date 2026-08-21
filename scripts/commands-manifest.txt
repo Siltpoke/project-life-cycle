@@ -1,15 +1,14 @@
 # commands-manifest.txt — curated list of slash commands this repo ships.
 #
-# One filename per line, relative to `commands/` in this repo and to
-# `~/.claude/commands/` on disk. Lines beginning with `#` and blank
-# lines are ignored. The mirror step reads this file to decide what to mirror
-# between live and repo (it does NOT mirror the whole commands directory,
-# only the entries listed here).
+# One filename per line, relative to `commands/` in this repo. Lines
+# beginning with `#` and blank lines are ignored. `scripts/validate.py`
+# reads this file and checks it BOTH ways: a name listed here with no file
+# on disk fails, and a `commands/*.md` on disk that nobody listed here
+# fails too.
 #
 # To add a new command:
-#   1. Author it live at ~/.claude/commands/<name>.md
+#   1. Author it in `commands/<name>.md` in this repo
 #   2. Append `<name>.md` here
-#   3. Commit the updated manifest
 
 ship.md
 release.md
@@ -24,3 +23,4 @@ handoff.md
 recall.md
 reconcile.md
 tasklist.md
+plc-status.md

@@ -134,10 +134,10 @@ When in doubt, add the entry.
    - **MINOR** if any `feature` / `new-reference` / `new-command` is in.
    - **PATCH** if only `fix` / `docs` / `chore` are in.
 2. In `CHANGELOG.md`: rename `## [Unreleased]` → `## [X.Y.Z] — YYYY-MM-DD`; add a fresh `## [Unreleased]` block above; update the compare links at the bottom.
-3. Bump the version in all six SemVer manifests to the same value:
+3. Bump `version` in `.claude-plugin/plugin.source.json`, then regenerate the six SemVer manifests from it (never hand-edit them — the validator rejects a manifest that differs from the source):
    ```bash
-   $EDITOR .claude-plugin/marketplace.json
-   $EDITOR .claude-plugin/plugin.json
+   $EDITOR .claude-plugin/plugin.source.json
+   python3 scripts/gen_plugin_manifests.py
    git commit -am "chore(release): vX.Y.Z"
    ```
 4. Tag + push:

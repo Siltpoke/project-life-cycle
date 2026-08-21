@@ -7,7 +7,7 @@ The fix is structural, per the skill's own rule (*structure > rules*): a **pure-
 Two layers, used together:
 
 1. **Visible state** — the AI materializes the step list at invocation — **the portable contract is `.claude/tasklist.md`, one `- [ ]` line per step**, wrap-up steps included; a host task tool (`TaskCreate` / `update_plan` / equivalent) is the upgrade where present, never the required mechanism — a `PreToolUse` hook cannot enumerate the session's tools and no two CLIs agree on the primitive's name (see SKILL.md "Two ways to satisfy it" + "Definition of Done"). Enumerate each step, never announce a count. Unchecked wrap-up tasks glare at done-time.
-2. **Hard gate** — `task-done` / `phase-done` exits 1 on any missing required artifact. The AI MUST run it and paste the output before claiming the task/phase is complete. A pre-push hook makes it un-bypassable.
+2. **Hard gate** — `task-done` / `phase-done` exits 1 on any missing required artifact. The AI MUST run it and paste the output before claiming the task/phase is complete. A pre-push hook makes it automatic (though `--no-verify` still skips it; only a required CI check is un-bypassable).
 
 State #1 makes skips *obvious*; gate #2 makes them *impossible to hide*.
 
@@ -18,40 +18,60 @@ State #1 makes skips *obvious*; gate #2 makes them *impossible to hide*.
 ### `task-done` (one cadence task)
 - [ ] the task's commit **touched the product tree** — the files changed in HEAD include a path under manifest `.product_paths[]` (e.g. `src/`, or `backend/`+`frontend/` for a split app, `skills/` for a skill repo). Path-based is the honest check: a legit `refactor:`/`docs(skill):` that changes the product passes, a meta-only change fails — the old commit-verb proxy couldn't tell them apart. **Backward-compatible:** when `product_paths` is not declared, this falls back to the legacy check that HEAD is a `feat(...)`/`fix(...)` commit
 - [ ] a `docs:` journal commit exists in the branch range (`origin/main..HEAD`), and the journal entry contains the literal header `## Plan deviations` (present even if body = "none") — the journal checked is the **most-recently-modified** `*.md` fragment under `retention.journal_dir` (default `docs/journal.d/`) when one exists (mtime order, deliberately not filename order: same-day fragments like `…-note10.md` vs `…-note5.md` sort wrong lexicographically, and multiple undrained fragments coexisting within a milestone is the expected state), else the manifest `journal` monolith
-- [ ] a fresh, **non-empty** test-evidence file exists — by **content fingerprint** when the manifest declares `test_evidence_inputs` (the evidence file's `# plc-gate-evidence inputs=<digest>` header must match the current-tree digest of the declared inputs), else by the legacy **mtime** check (newer than the feat commit). `-s` not just `-f` — an empty-but-fresh file is a false pass, e.g. an interrupted `tee`. Written by the project's test runner, not by hand; if `test_runs_required` > 1 the file must also contain a `RUNS=N` line with N ≥ required. **Scope note:** after a fixup, task-level evidence may be scoped to the suites the fixup diff touched (per `cadence.md` §"Selective re-verification after fixup") — the scoping is task-level ONLY; `phase-done` below always demands full-suite evidence, and that full run is the safety net for anything task-level scoping skipped
+- [ ] a **non-empty** test-evidence file, unchanged since it was generated (NOT proof a command ran) — by **content fingerprint** when the manifest declares `test_evidence_inputs` (the evidence file's `# plc-gate-evidence inputs=<digest>` header must match the current-tree digest of the declared inputs), else by the legacy **mtime** check (newer than the feat commit). `-s` not just `-f` — an empty-but-fresh file is a false pass, e.g. an interrupted `tee`. Written by the project's test runner, not by hand; if `test_runs_required` > 1 the file must also contain a `RUNS=N` line with N ≥ required. **Scope note:** after a fixup, task-level evidence may be scoped to the suites the fixup diff touched (per `cadence.md` §"Selective re-verification after fixup") — the scoping is task-level ONLY; `phase-done` below always demands full-suite evidence, and that full run is the safety net for anything task-level scoping skipped
+- [ ] `user-story.md` exists for the phase (unless `exempt_user_story` true) — **required at `task-done`, not only at `phase-done`**, because the `ac-oracle-binding` row below reads the story to get its denominator. A task-mode gate with no story has nothing to count against, and passing over that absence would hand a green row to every phase that never wrote one
+- [ ] `ac-oracle-binding` — every acceptance criterion has a runnable oracle or a still-true written-down exclusion. At `task-done` the scope is **what this task's commits declare they close** (`Closes: <phase>:AC<n>` trailers in the range `merge-base(<default-branch>, HEAD)..HEAD`), so a task is gated on its own claims and not on criteria it never touched. An empty scope prints a loud informational line, never a silent ✓ — nothing requires a trailer to exist, and a gate that reports a pass over an empty set is reporting a ceremony it only inferred. Base the range on the **default branch**, never `@{u}`: on a phase branch `@{u}` is that branch's own remote, which makes the merge-base equal HEAD and the scope empty
 - [ ] no orphan `[DEBUG-` logs remain in the diff
 - [ ] **(Sweeper only)** if a commit in range carries an `Archetype: sweep` trailer, the code diff (`docs/**` + `CHANGELOG.md` excluded) is net-negative LOC **or** a `SWEEP-PERF: <evidence>` line is logged — see §"Sweeper diff-direction"
 - [ ] if any artifact is absent, a `SKIP:` line with a reason exists in the journal "Plan deviations" section
 
 ### `phase-done` (phase close, before PR-merge)
 - [ ] `user-story.md` exists for the phase (unless `exempt_user_story` true — refactor/docs/infra)
+- [ ] `ac-oracle-binding` — every acceptance criterion has a runnable oracle or a still-true written-down exclusion. At `phase-done` the scope is the **whole criterion set** the story declares, not just what the branch's trailers claim, so a criterion nobody ever pointed at fails the phase by its qualified id. Exemption is never silent: `exempt_user_story: true` prints a SKIPPED row that names the `SKIP:` line the journal still owes. A criterion may be excluded instead of mapped only by a written-down exclusion whose **condition** is machine-checkable; the exclusion self-destructs when that condition stops holding. Removal from the grandfathering baseline happens here, at phase close — never in the pre-push hook, where writing a tracked file leaves the pushed commit without it, the remote stale, and the operator holding a dirty tree
 - [ ] spec doc + plan doc exist for the phase
 - [ ] the journal was touched in this phase's commit range — a change under manifest `retention.journal_dir` (default `docs/journal.d/`) **or** the manifest `journal` path (monolith fallback for projects not yet on the fragment convention) satisfies this (per-task completeness is a reviewer concern, not deterministically gated)
-- [ ] the newest `*.md` fragment under `retention.journal_dir` (or the monolith fallback) contains a complete FACT entry — `Date`, `Decision`, `Why`, **`Backing`**, `Rejected`, `Source` all present as `- **Field:**` markdown bullets (the canonical form — matches what journals written under this schema use; see `references/journal-schema.md` §"The FACT entry"). Any missing field → hard fail naming exactly which. This is where the retired handoff file's one non-derivable section (§7 findings/gotchas) is *actually* enforced, not merely asserted to be — the journal-touched check above only proves some file changed, not that it carries the FACT content. **`Backing` is required for the same reason the other five are**: without a slot for the evidence, a distilled `Why` degrades into an assertion — measured on this schema's own first subject (2026-07-14), which carried `Rejected` 7/7 and lost the statistic its entire argument rested on.
+- [ ] the newest `*.md` fragment under `retention.journal_dir` (or the monolith fallback) contains a complete FACT entry — `Date`, `Decision`, `Why`, **`Backing`**, `Rejected`, `Source`
+      - **After the milestone-close drain, look in the archive.** The drain is mandated and it empties the hot directory (`references/retention.md`: *"the hot directory drains to zero"*), so a gate that only reads `retention.journal_dir` demands an artifact another mandated step deletes, and reports "write this phase's FACT entry" about an entry that was written and archived. This is not only a close-time annoyance: the same row runs in **task** mode, which the pre-push hook runs on every push of a `feat/phase-*` branch, so a drained branch stops being pushable. When no fragment for the phase exists, fall back to **`<archive_dir>/journal/*.md` specifically** — not `<archive_dir>/*.md`. The qa-log archive sits in the same directory, is written by the same drain, and carries **the same sentinel format and the same `<date>-phase-<id>-<slug>.md` fragment names**, so the wider glob reads a locked Q&A decision as though it were this phase's journal entry. Match this phase's `<!-- fragment: … -->` sentinel and evaluate **only that fragment's slice**, from its sentinel to the line before the next one. Reading the whole archive would let another phase's complete FACT fields turn these rows green, which is the same failure the cross-phase fallback below is already fenced against. **A sentinel is a position, not a string** — a line counts as a fragment boundary only when it is outside any fenced code block **and** preceded by a blank line or the start of the file, both conditions and not either. Match the fence, do not count it: remember the opening delimiter's character and run length, and close only on the same character, at least as long, with nothing but whitespace after it — a ``` block quoting a `~~~` line is one block, not two, and a parity counter inverts on it for the rest of the file. **Then stop claiming to parse markdown.** The mechanism claims exactly one property and can be checked against it: **every ambiguity costs a FAIL, never a PASS.** Three rules deliver that, and each is chosen for its error direction rather than its correctness. (i) A boundary is accepted only when the fence state is closed at it, so an unterminated fence is *not* discarded — it propagates, and every later boundary in that archive stops being readable. That is a loud false FAIL, and the gate must name the archive rather than telling the operator to write an entry that already exists. Discarding the fence instead is what lets a fence holding *two* quoted sentinels have its second one accepted — a false PASS built out of the repair for a false FAIL. (ii) A slice ends at **any** sentinel-shaped boundary, fenced or not: ending early can only make the gate demand more, while running long is exactly how one phase collects another's FACT fields. (iii) Report the ambiguous case; do not resolve it. Recognise fences at column 1 only. Scanning for the literal marker cannot tell a boundary from a passage that merely *quotes* one, and archives full of tooling notes quote it, so a phase that wrote no journal at all can read as `close-gate PASS`, exit 0, on the strength of a code block in another entry. The same rule governs choosing **which** archive file to read, not just where the slice starts — the two scans have the same blind spot and must be the same scan. Freshness is **not** asserted on the archive path — the archive's mtime belongs to the drain, not to the phase, so claiming mtime evidence there would be a `✓` about something the gate cannot see. The FACT fields must all be present as `- **Field:**` markdown bullets (the canonical form — matches what journals written under this schema use; see `references/journal-schema.md` §"The FACT entry"). Any missing field → hard fail naming exactly which. This is where the retired handoff file's one non-derivable section (§7 findings/gotchas) is *actually* enforced, not merely asserted to be — the journal-touched check above only proves some file changed, not that it carries the FACT content. **`Backing` is required for the same reason the other five are**: without a slot for the evidence, a distilled `Why` degrades into an assertion and drops the statistic its argument rested on.
 - [ ] `CHANGELOG.md` `[Unreleased]` was touched in this phase's commit range — a change under manifest `retention.changelog_dir` (default `changelog.d/`) **or** `CHANGELOG.md` itself satisfies this (unless `exempt_changelog`)
 - [ ] smoke artifacts exist — Track A checklist + Track B spec — when `user_visible` true
 - [ ] acceptance tests exist for the phase (glob `acceptance_glob`), unless `exempt_user_story` true (cadence step 1.5)
-- [ ] `docs/ROADMAP.md` touched in the phase's commit range **and the phase identifier actually appears in it**. Both, because "touched" is a proxy: a whitespace edit satisfies it, and the mtime variant used by the gitignored-docs gate is weaker still — that one printed `✓ ROADMAP.md updated this phase` while `grep -c <phase> docs/ROADMAP.md` returned 0. A row must not report a ceremony it only inferred; where the artifact's content is readable, read it
-- [ ] **fresh, non-empty test-evidence file exists** (`test_evidence`, `-s` — the runner emitted it this phase, proving the tests actually ran before the phase ships; an empty-but-fresh file, e.g. an interrupted `bun test | tee`, is rejected). Freshness is a **content fingerprint** of `test_evidence_inputs` when declared, else mtime newer than HEAD. If `test_runs_required` > 1 the file must also contain `RUNS=N` with N ≥ required. Skipped only when the manifest has no `test_command`. **This is the check that makes the pre-push hook force tests** — without it, `phase-done` passed with tests never run, and the test pile silently slipped (the original gap). The PR-comment evidence block is the human-facing companion; this file check is the machine gate.
+- [ ] `docs/ROADMAP.md` touched in the phase's commit range **and the phase identifier actually appears in it**. Both, because "touched" is a proxy: a whitespace edit satisfies it, and an mtime check is weaker still — it can print `✓ ROADMAP.md updated this phase` while `grep -c <phase> docs/ROADMAP.md` returns 0. A row must not report a ceremony it only inferred; where the artifact's content is readable, read it
+- [ ] **non-empty test-evidence file exists and is unchanged since it was generated** (`test_evidence`, `-s` — an empty file, e.g. an interrupted `bun test | tee`, is rejected). **What this does NOT prove:** that a test command ever ran. The gate reads a file; a hand-authored file carrying a valid header passes. It catches evidence that has gone *out of date* relative to the declared inputs — nothing more, and the ✓ it prints says only that. Freshness is a **content fingerprint** of `test_evidence_inputs` when declared, else mtime newer than HEAD. If `test_runs_required` > 1 the file must also contain `RUNS=N` with N ≥ required. Skipped only when the manifest has no `test_command`. **This is the check that makes the pre-push hook force tests** — without it, `phase-done` passed with tests never run, and the test pile silently slipped (the original gap). The PR-comment evidence block is the human-facing companion; this file check is the machine gate.
 - [ ] every absent-but-claimed-skipped item has a `SKIP: <reason>` line
-- [ ] **(warn-only, never fails the gate)** the context-floor hook (`context-floor.sh`) is wired in `~/.claude/settings.json` or the project's `.claude/settings*.json`. The floor is a machine-local user-settings hook (`references/harness-primitives.md` §9) — a project gate must not fail on a user's global config — but an un-armed floor is exactly how a session runs far past it unnoticed. Missing → the gate prints a `⚠` row pointing at `/init-harness --refresh`
+- [ ] **(armed by the manifest; absent key = the check does not run at all)** `closure-declaration` — the phase declares which backlog ids it closed, and the declaration agrees with the closure ledger in **both** directions. Configure with a `closure_declaration` object naming a `ledger` (an append-only closure log) and a `deriver` (whatever answers "what state is this id in"). **Its absence is the disarm**, deliberately: a check that fires on projects which never configured the feature turns their green runs red for a feature they never opted into.
+      - **Three verdicts, and the middle one is the whole point.** No declaration block → **FAIL**. A block saying `closes: none` → **PASS**. A block naming ids → passes only if every id it declares closed derives to `closed` in the ledger. If "absent" also passed it would be indistinguishable from "declared nothing", and *forgetting* is precisely the failure this check exists to catch: a phase that forgot must not look like a phase that decided.
+      - **Both directions, scoped to what THIS BRANCH added.** A declared closure with no ledger event fails. A closure line **this branch added** that the declaration names under neither key also fails. The scoping is what lets both hold at once: closures that predate the branch point are silent, so adopting this never becomes a retroactive audit of work already done. Without the second direction the check reproduces the exact defect it was built for — a phase closing three ids and declaring two leaves the third indistinguishable from a legitimate historical backfill.
+      - **"Deliberately left open" is a first-class statement.** `left-open: <id> — <reason>` makes no claim about the ledger and requires no event, but the reason is **mandatory**: a stated non-closure with no reason is indistinguishable from having forgotten, which is the thing being fixed.
+      - **Nothing in this check ever matches prose.** The declaration is parsed as data and the reason is stored, never branched on. A text matcher reports an entry as done that is deliberately still open, because the reason it stays open is written in words no matcher can read. **The writer has to run at close, when the person knows.**
+      - **Phase mode only.** What a phase closes is knowable only when it is closing; its first task cannot know. A per-push variant would demand an answer that does not exist yet.
+      - Scripts: `scripts/closure-declaration.sh` (`extract` / `reconcile`) and `scripts/lib/closure-log-added.sh`. **Not embedded in this document, and that is a decision rather than an omission:** the two embedded copies below exist because their scripts are small and their drift is invisible; a third embed adds surface that an invariant must keep byte-identical forever. Copy the files instead.
+- [ ] **(warn-only, never fails the gate)** the context-floor hook (`context-floor.sh`) is wired in `~/.claude/settings.json` or the project's `.claude/settings*.json`, **and `jq` was resolvable when the gate ran**. The floor is a machine-local user-settings hook (`references/harness-primitives.md` §9) — a project gate must not fail on a user's global config — but an un-armed floor is exactly how a session runs far past it unnoticed. **Three reported states, never two** (a fourth — wired, `jq` present, but the hook's shared floor library missing or unusable — is not distinguished and reads as wired): not wired → `⚠` pointing at `/init-harness --refresh`; wired → `✓`; wired but inert (`jq` missing, and `context-floor.sh` exits 0 without it) → `⚠`. Wiring is *liveness*, `jq` is *readiness*; a row that reports only the first reads as though it had reported both. The `✓` claims only that `jq` was resolvable **when the gate ran, in the gate's own process** — not that the hook works, will run, or is verified: the client that later spawns the hook may hand it a stripped `PATH` in which the same probe fails. Note that the third state's `⚠` **cannot print for a user in either direction** — a genuinely jq-less machine kills this gate at its first `jq` call before any row is reached, and the stripped-`PATH` client this warning is about leaves the gate itself able to find `jq`, so it prints the `✓`. The branch is a contract for gates that *can* reach it, not a warning you will see; the row's comment in the gate spells this out along with the `PATH` blind spot
 - [ ] **(warn-only, never fails the gate)** hot-doc retention caps: each configured hot doc (defaults: RESUME 200L/25K, status doc 300L/30K, `docs/journal.d/` total 100K, qa-log 50K, `changelog.d/` total 50K; overrides via manifest `retention.hot_caps`) is measured `wc -l` + `wc -c`; over either limit → `⚠` row. Same doc over-cap at two consecutive closes (tracked in `.claude/retention-state.json`) → wording escalates to "SECOND consecutive over-cap close". See `references/retention.md` §"Hot-doc caps".
 - [ ] **(warn-only, never fails the gate)** coverage discovery: any `docs/**/*.md` over `retention.coverage_floor_kb` (default 50K) that is neither manifest-known nor under `journal_dir`/`archive_dir` → `⚠` row naming the file ("manifest-known" is a v1 approximation: a substring match of the file's basename against the manifest text — slightly looser than "referenced by a manifest key"). See `references/retention.md` §"Coverage discovery".
 - [ ] **(warn-only, never fails the gate)** qa-log citation coverage: each `### Q` section in a `retention.qa_log_dir` fragment (default `docs/qa-log.d/`) that carries a `**Locked:**` decision but **no `http(s)` URL** → `⚠` row naming the fragment + Q header. Enforces the brainstorm protocol's "no citation, no send" rule (`references/brainstorm-research-protocol.md`) — the #1 silent degradation is skipping research and opinion-polling. Deliberately **warn-only, not hard-fail**: a compressed established-pattern decision may legitimately cite a prior-phase lock (`M2.3 Q4`) rather than a URL, which a URL-only hard gate would false-block; the row informs the human at PR instead. Scoped to the fragment dir (current-phase, short-lived); the compiled monolith is historical and not re-litigated (v1 limitation — un-adopted projects that write only the monolith get no row).
-- [ ] **(warn-only at `task`/`phase`; BLOCKING at `milestone` — see §"Milestone mode")** retention **count** caps: the number of `.md` files under `docs/superpowers/specs/`, `docs/superpowers/plans/`, and `docs/**` (excluding `*/screenshots/*` **and** `retention.archive_dir` — an archived doc must be able to clear the cap that told you to archive it) is compared against manifest `retention.count_caps` (defaults: specs 10, plans 10, docs_total 150 — applied by `cc()`'s default arg even when `count_caps` or the whole `retention` block is absent from the manifest; never silently unlimited). `0` = unlimited, `"none"` = exempt. **Why a count axis exists at all:** the size caps and the 50K coverage floor are blind to many-small-files growth — measured on a long-running project that adopted this skill, **596 of 610 docs were below every threshold**, and `docs/pr-drafts/` (143 files, 1.1 MB) was invisible to the net in its entirety. See `references/retention.md` §"The count axis".
+- [ ] **(warn-only at `task`/`phase`; BLOCKING at `milestone` — see §"Milestone mode")** retention **count** caps: the number of `.md` files under `docs/superpowers/specs/`, `docs/superpowers/plans/`, and `docs/**` (excluding `*/screenshots/*` **and** `retention.archive_dir` — an archived doc must be able to clear the cap that told you to archive it) is compared against manifest `retention.count_caps` (defaults: specs 10, plans 10, docs_total 150 — applied by `cc()`'s default arg even when `count_caps` or the whole `retention` block is absent from the manifest; never silently unlimited). `0` = unlimited, `"none"` = exempt. **Why a count axis exists at all:** the size caps and the 50K coverage floor are blind to many-small-files growth: a directory of hundreds of small drafts can sit below every size threshold and stay invisible to the net in its entirety. See `references/retention.md` §"The count axis".
 - [ ] **(non-blocking `⊘` at `task`/`phase`; BLOCKING at `milestone`, unconditionally — see §"Milestone mode")** required-artifact manifest keys `phase_docs_glob`, `plan_glob`, `acceptance_glob`: an absent key prints a visible `⊘ <key> not configured in manifest` row (never a ✓, never silent) but never fails task/phase. At milestone close — `PHASE` arg or not — any of these three still unconfigured is a hard failure — the accumulated, ignored `⊘` finally stops being free. (`handoff_glob` is deliberately not in this set — the handoff file was retired.)
 
 Checks are deliberately **deterministic + greppable** (file exists / header present / commit in range / mtime fresh). The gate does NOT judge quality — that is the validator + code-quality reviewer. The gate only proves the *ceremony actually happened*.
+
+### What `ac-oracle-binding` does NOT prove
+
+Read this before wiring the check, and keep both sentences when you materialize your own gate — they are the bound on what a green row means, and a row whose bound goes missing reads as a stronger claim than the mechanism can make:
+
+> this proves each criterion HAS an oracle. It never proves the oracle is correct,
+> and an exclusion self-destructs only when its condition fails, never when its reasoning was wrong.
+
+Concretely: a criterion mapped to a test that asserts nothing passes this check. An exclusion whose stated condition still holds passes it forever, however bad the reasoning behind that condition was. The check moves one failure mode — *a criterion nobody ever pointed at* — and moves no others. It is deliberately not a coverage percentage, a score, or any single number: a ratio invites the reader to treat 15/16 as nearly-done, when the one criterion missing an oracle is the entire finding.
 
 ---
 
 ## Milestone mode — `close-gate.sh milestone [PHASE]`
 
-The only mode where a retention row **fails the gate**. Rationale, measured on a real project, where warn-only was worth exactly zero three times over:
+The only mode where a retention row **fails the gate**. Rationale — three shapes in which warn-only is worth exactly zero:
 
-1. A CI lint job **exits 1 today**, parked behind a "make it blocking later" comment. It has never blocked anything; the comment is a promise that never came true.
-2. A deferred-work list carried a dated trigger: a module had crossed its own hard line-count cap, and the next edit was to split it first, "no longer optional". The module is larger today. It grew. The trigger fired. Nothing happened.
-3. The status doc carries a banner announcing that its own headline count is stale and understated — dozens of lines above the line still printing the stale number. **The document names its own lie and keeps telling it — because nothing fails.**
+1. A CI lint job **exits 1**, parked behind a "make it blocking later" comment. It never blocks anything; the comment is a promise that never comes true.
+2. A deferred-work list carries a dated trigger: a module has crossed its own hard line-count cap, and the next edit is to split it first, "no longer optional". The module keeps growing. The trigger fires. Nothing happens.
+3. A status doc carries a banner announcing that its own headline count is stale and understated — dozens of lines above the line still printing the stale number. **The document names its own lie and keeps telling it — because nothing fails.**
 
 > **A warn-only gate is not a gentle gate. It is no gate — and it is worse than none, because it manufactures the feeling of safety.**
 
@@ -72,7 +92,7 @@ Failure message naming the exact unconfigured keys:
 
 ## Project manifest — `.claude/close-gate.json`
 
-The gate is stack-agnostic; per-project specifics live in a small manifest the gate reads. A ready-to-edit copy of exactly the block below ships at `.claude/close-gate.json.example` — copy it to `.claude/close-gate.json` and replace `test_command`:
+The gate is stack-agnostic; per-project specifics live in a small manifest the gate reads. A ready-to-edit manifest built from the block below (plus an empty `invariants` list and the `retention.order` / `retention.non_entry_headings` keys) ships at `.claude/close-gate.json.example` — copy it to `.claude/close-gate.json` and replace `test_command`. Neither the example nor the block below carries `validator_input_paths_rationale`: the gate that ships in this repository's own `scripts/close-gate.sh` requires that key — a JSON array whose text states the argument for keeping `test_evidence_inputs` narrow (shape-checked: at least two numbers plus a word beginning "track") — and hard-fails whenever the test-evidence rows run (`task`, `phase`, and a `diff` that touches `product_paths`). The portable gate embedded further down never reads it. The manifest shape:
 
 ```json
 {
@@ -84,7 +104,7 @@ The gate is stack-agnostic; per-project specifics live in a small manifest the g
   "smoke_b_glob": "tests/e2e/**/*phase-{PHASE}*",
   "acceptance_glob": "tests/acceptance/**/*phase-{PHASE}*",
   "test_evidence": ".claude/.last-test-run",
-  "test_command": "REPLACE_ME e.g. 'bun test' or '.venv/bin/python -m pytest -q'",
+  "test_command": "{ bash scripts/close-gate.sh evidence-header {SET}; REPLACE_ME e.g. 'bun test' or '.venv/bin/python -m pytest -q'; } | tee {EVIDENCE_FILE}",
   "test_evidence_inputs": ["src/**", "tests/**"],
   "test_runs_required": 1,
   "user_visible": true,
@@ -99,9 +119,24 @@ The gate is stack-agnostic; per-project specifics live in a small manifest the g
     "journal_dir": "docs/journal.d",
     "qa_log_dir": "docs/qa-log.d",
     "changelog_dir": "changelog.d"
-  }
+  },
+  "user_story_glob": "docs/superpowers/specs/*-phase-{PHASE}-*user-story*",
+  "exempt_user_story": false,
+  "ac_evidence": ".claude/ac-evidence.json",
+  "ac_baseline": ".claude/ac-baseline.json",
+  "ac_heading_set": ["acceptance criteria"]
 }
 ```
+
+The last five keys drive `ac-oracle-binding`, and **they are in this template on purpose**: without
+`user_story_glob` the check prints `⊘ … not configured` on every run and the gate still passes, so an
+adopter who copied the template unchanged would have the checklist row, the scripts, and no binding —
+a shipped ceremony. `exempt_user_story` is written out rather than left absent because an absent key
+resolving to *not exempt* by accident is one refactor away from resolving the other way; declare the
+answer you mean. `ac_heading_set` lists the headings a user story's acceptance-criteria section may
+carry — add your own spelling here rather than
+teaching the parser new heuristics. `ac_baseline` may be omitted while you have nothing to
+grandfather; the other four should not be.
 
 `retention` cap values are `[lines, KB]`; `0` means that dimension is unlimited. The whole block is optional — the gate falls back to these defaults when it (or any key inside it) is absent. `hot_caps.<doc>: "none"` exempts that doc — the only exemption mechanism. See `references/retention.md` §"Hot-doc caps" / §"Policy keys".
 
@@ -111,7 +146,13 @@ The gate is stack-agnostic; per-project specifics live in a small manifest the g
 
 `product_paths` (optional array, **task mode**) names the code/product tree; a task's commit satisfies check #1 by touching a path under it (`git diff-tree … HEAD`). This asks the honest question — *did the task change the product* — that the legacy `feat|fix` commit-verb check only proxied: a legitimate `refactor:` or `docs(skill):` that changes the product now passes, while a meta-only change fails, which no widened verb list could tell apart. Set it to your product tree — `["src/"]`, `["backend/","frontend/"]`, `["skills/"]` for a skill repo. **Backward-compatible:** an *absent* key falls back to the legacy `feat|fix` check, so a manifest predating this key is unaffected and no adopter's gate flips on upgrade — the path check is opt-in by declaring the key. A malformed value (present but not a non-empty array — an object, string, or empty array) fails closed.
 
-`test_evidence_inputs` (optional array) switches the **test-evidence freshness** check from mtime to a **content fingerprint**. mtime is not evidence that the tests ran against the *current* code — git does not preserve mtime across a checkout, and a fresh clone / CI checkout / synced folder shuffles mtimes, so a mtime-only row false-PASSES by construction there. Declare the inputs whose change means "the tests must be re-run" (globs, e.g. `["src/**","tests/**"]`); the gate then requires the evidence file's first line to be a `# plc-gate-evidence inputs=<digest>` header that matches the current-tree digest of those inputs. **The runner must produce that header** — prepend it with the `evidence-header` subcommand: `{ close-gate.sh evidence-header; <test_command>; } | tee <test_evidence>`. **Two-part opt-in, so no adopter breaks:** an *absent* key keeps the legacy mtime check byte-identical (existing manifests are untouched), and even a declared key does nothing until the runner writes the header — a declared-but-unheaded evidence file **hard-fails** (never silently falls back to mtime) with the exact regenerate command. Inputs that match no tracked file, or a malformed value, fail closed. The digest is over git-**tracked** working-tree content (an uncommitted edit to a tracked input *is* caught; a brand-new *unstaged* file is not — stage before generating evidence), the same git-tracked convention `product_paths` uses. `/init-harness` wiring (generate the key + the header-prefixed runner for new adopters) is not wired: an adopter opts in by declaring the key and prefixing the runner.
+`test_evidence_inputs` (optional array) switches the **test-evidence freshness** check from mtime to a **content fingerprint**. mtime is not evidence that the tests ran against the *current* code — git does not preserve mtime across a checkout, and a fresh clone / CI checkout / synced folder shuffles mtimes, so a mtime-only row false-PASSES by construction there. Declare the inputs whose change means "the tests must be re-run" (globs, e.g. `["src/**","tests/**"]`); the gate then requires the evidence file's first line to be a `# plc-gate-evidence inputs=<digest>` header that matches the current-tree digest of those inputs. **The runner must produce that header** — prepend it with the `evidence-header` subcommand: `{ close-gate.sh evidence-header; <test_command>; } | tee <test_evidence>`. **Two-part opt-in, so no adopter breaks:** an *absent* key keeps the legacy mtime check byte-identical (existing manifests are untouched), and even a declared key does nothing until the runner writes the header — a declared-but-unheaded evidence file **hard-fails** (never silently falls back to mtime) with the exact regenerate command. Inputs that match no tracked file, or a malformed value, fail closed. The digest is over git-**tracked** working-tree content (an uncommitted edit to a tracked input *is* caught; a brand-new *unstaged* file is not — stage before generating evidence), the same git-tracked convention `product_paths` uses. **`/init-harness` generates both for new adopters**: the key is filled from the detected source/test tree, the `test_command` is emitted in the header-prefixed placeholder form above, and `scripts/gen-test-evidence.sh` (§Evidence runner) is scaffolded — so a bootstrapped repo is in fingerprint mode from its first run rather than only if someone knew to turn it on. **Do not hand-write the pipeline** even when retrofitting: the documented `… | tee <file>` form ends in a bare `tee`, which exits 0 even when the step writing the header fails, silently overwriting good evidence with a broken file. Copy the runner instead. An *existing* manifest with no key is still untouched and stays on mtime, so no adopter's gate flips on upgrade.
+
+> **Declare inputs that cover what `test_command` actually exercises — the two must be read together, and nothing checks that they agree.** The failure is silent in *both* directions and neither is visible in the gate's output. **Under-declare** and the row greens on evidence older than the code it is trusted to guarantee: a commit touching only an undeclared path recomputes a byte-identical digest, so the ✓ prints while the evidence predates the change. **Over-declare** and the digest breaks on files the command never runs, so the ✓ certifies freshness for things nothing tested — which trains you to clear a red row by re-running the command as a reflex, and a gate cleared by reflex is worse than no gate. This is the "missing dependency" bug class every incremental build system names: Bazel calls the result *"an incorrect incremental build"*, and Gradle states the asymmetry — *"Failing to specify an input that affects the task's outputs can result in incorrect builds, while needlessly specifying inputs that do not affect the task's output can cause cache misses."* Under-declaring costs correctness; over-declaring costs time. When a suite is too slow to put in `test_command`, do **not** declare its inputs here to compensate — run it in CI and leave this row's scope honest.
+>
+> Two related traps in the runner, neither of which the gate can see:
+> - `{ …; } | tee <file>` exits with **`tee`'s** status, so a failing `test_command` still writes a green-looking evidence file. Put the runner in a script with `set -o pipefail`, or check the command's status explicitly.
+> - The gate never executes `test_command` — it is interpolated into failure messages so a reader is told how to satisfy the row. Its dependency envelope is the *runner's*, not the gate's, so it may use tools the jq-only gate may not.
 
 When `test_runs_required` > 1, the project's `make test-evidence` (or test runner) **MUST emit a `RUNS=N` line** into the evidence file (e.g. `echo "RUNS=$n" >> .claude/.last-test-run`). The gate reads that line; if absent it treats the run-count as 0 and fails.
 
@@ -125,8 +166,10 @@ Drop this in the project; wire `make task-done` / `make phase-done` to call it. 
 
 ```bash
 #!/usr/bin/env bash
-# Usage: close-gate.sh task            (gate one cadence task)
-#        close-gate.sh phase X.Y       (gate a phase close)
+# Usage: close-gate.sh task              (gate one cadence task)
+#        close-gate.sh phase X.Y         (gate a phase close)
+#        close-gate.sh evidence-header   (print the evidence file's required first line)
+#        close-gate.sh test-command      (print the declared test_command, placeholders unresolved)
 set -euo pipefail
 MODE="${1:?task|phase|milestone}"; PHASE="${2:-}"
 M=".claude/close-gate.json"; [ -f "$M" ] || { echo "✗ missing $M"; exit 1; }
@@ -186,11 +229,101 @@ evidence_header() { printf '# plc-gate-evidence inputs=%s\n' "$(evidence_digest)
 # Exits before the phase/PHASE-arg requirements. (Unlike a project-local variant, this
 # one DOES read the manifest — the declared inputs live there — so it needs `$M`, already resolved.)
 if [ "$MODE" = evidence-header ]; then evidence_header; exit 0; fi
+# Subcommand: print the DECLARED test_command, raw and with its placeholders UNRESOLVED. This is
+# the one place that value is read from the manifest; the evidence runner below resolves the
+# placeholders, so runner and gate cannot drift on what the declared command is. Not a gating
+# mode — it needs no PHASE, and it prints one manifest key rather than judging a phase.
+# `jq empty` is checked first so "the manifest is not valid JSON" and "the key is absent" stop
+# being the same message: without it, jq's parse error is swallowed and both causes print the
+# absent-key text, sending an adopter to look for a key in a file that never parsed.
+if [ "$MODE" = test-command ]; then
+  jq empty "$M" >/dev/null 2>&1 || { echo "✗ $M is not valid JSON — cannot read test_command"; exit 1; }
+  TC="$(jq -r '.test_command // empty' "$M" 2>/dev/null)"
+  [ -n "$TC" ] || { echo "✗ no test_command declared in $M"; exit 1; }
+  printf '%s\n' "$TC"
+  exit 0
+fi
 
 fail=0
 ok()  { echo "✓ $1"; }
 bad() { echo "✗ $1"; fail=1; }
 warn() { echo "⚠ $1"; }   # never touches $fail — warn-only by construction
+
+# --- resolving the journal AFTER the mandated milestone-close drain --------------------------
+# THIS LIVES IN THE SCRIPT, not only in the checklist at the top of this file: the script is
+# the artifact `/init-harness` scaffolds into every adopter's repo, so a fix made only in the
+# checklist would leave an adopter who closed a milestone with the exact bug it describes,
+# including the unpushable branch (this row runs in task mode, which the pre-push hook
+# runs on every push). Unlike `retention.md`, whose embedded copy is byte-compared against the
+# real script by the suite, this file's script is a DIFFERENT gate (the canonical git-range
+# variant) and cannot be byte-compared, so no test watches this copy for drift.
+#
+# Resolution order: this phase's own fragment (last by NAME — see the ordering note at the
+# fragment lookup below) → this phase's slice of the archive → the newest fragment → the monolith.
+# The archive step is what the milestone-close drain makes necessary: it empties the hot
+# directory by design, so a gate that only reads it demands an artifact another mandated step
+# deletes.
+JARCHIVE=""; JSLICE=""; JFENCED=""
+# A sentinel is a POSITION, not a string: a line counts as a fragment boundary only outside a
+# fenced block AND preceded by a blank line or BOF. Fences are MATCHED (opening character and run
+# length remembered, closed only by the same character at least as long with nothing after it),
+# never counted. The one property this parser claims is that EVERY AMBIGUITY COSTS A FAIL, NEVER
+# A PASS: an unterminated fence is not discarded (that would let a fence holding two quoted
+# sentinels have its second one accepted), a slice ends at ANY sentinel-shaped line fenced or
+# not, and the ambiguous case is reported (exit 2) rather than resolved. See this file's check-5
+# entry for why each rule is chosen by its error direction rather than by correctness.
+journal_slice() {
+  awk -v pat="phase-$2" '
+    function frun(s) { if (match(s, /^(`+|~+)/) && RLENGTH >= 3) return RLENGTH; return 0 }
+    function fclose(s, ch, ln,   r) {
+      r = frun(s)
+      if (!r || substr(s, 1, 1) != ch || r < ln) return 0
+      return (substr(s, r + 1) ~ /^[[:space:]]*$/)
+    }
+    BEGIN { fopen = 0; prevblank = 1; inb = 0; found = 0; fenced = 0 }
+    {
+      if (prevblank == 1 && $0 ~ /^<!-- fragment: /) {
+        k = index($0, pat)
+        after = (k > 0) ? substr($0, k + length(pat), 1) : ""
+        nm = (k > 0 && (after == "-" || after == ".")) ? 1 : 0
+        if (fopen == 0) { inb = nm; if (nm) found = 1; prevblank = 0; next }
+        if (nm) fenced = 1
+        inb = 0
+      }
+      if (fopen == 0) { r = frun($0); if (r) { fopen = 1; fchar = substr($0, 1, 1); flen = r } }
+      else if (fclose($0, fchar, flen)) fopen = 0
+      if (inb) print
+      prevblank = ($0 ~ /^[[:space:]]*$/) ? 1 : 0
+    }
+    END { exit(found ? 0 : (fenced ? 2 : 1)) }
+  ' "$1"
+}
+# $1 journal dir  $2 phase  $3 archive dir (may be empty)  $4 monolith fallback
+resolve_journal() {
+  _rj_jd="$1"; _rj_ph="$2"; _rj_ad="${3:-docs/archive}"; _rj_fb="$4"; _rj_p=""
+  if [ -n "$_rj_ph" ]; then
+    _rj_p="$(ls "$_rj_jd"/*phase-"$_rj_ph"-*.md 2>/dev/null | tail -1 || true)"
+    if [ -z "$_rj_p" ]; then
+      # `<archive_dir>/journal/` explicitly, never `<archive_dir>/*.md`: the qa-log archive lives
+      # beside it and carries the SAME sentinel format and the same fragment names, so the wider
+      # glob reads Q&A content as though it were the journal.
+      for _rj_a in "$_rj_ad"/journal/*.md; do
+        [ -f "$_rj_a" ] || continue
+        _rj_s="$(mktemp)" || return 1
+        # `&& … || …`, never `cmd; rc=$?`: under `set -e` a bare non-zero simple command aborts
+        # the gate, and this one returns non-zero on every archive that is not the right one —
+        # i.e. on the common case.
+        journal_slice "$_rj_a" "$_rj_ph" > "$_rj_s" && _rj_rc=0 || _rj_rc=$?
+        if [ "$_rj_rc" -eq 0 ]; then JARCHIVE="$_rj_a"; JSLICE="$_rj_s"; printf '%s' "$_rj_s"; return 0; fi
+        [ "$_rj_rc" -eq 2 ] && JFENCED="${JFENCED:-$_rj_a}"
+        rm -f "$_rj_s"
+      done
+    fi
+  fi
+  [ -n "$_rj_p" ] || _rj_p="$(ls -t "$_rj_jd"/*.md 2>/dev/null | head -1 || true)"
+  [ -n "$_rj_p" ] || _rj_p="$_rj_fb"
+  printf '%s' "$_rj_p"
+}
 glob_exists() { compgen -G "$1" >/dev/null 2>&1; }
 # `compgen -G ""` exits 0 vacuously — an ABSENT manifest glob key (empty pattern)
 # used to print a silent ✓ for every glob-gated bad() (hard-fail) check below, so a manifest
@@ -203,11 +336,96 @@ req_glob() { # $1=pattern (already {PHASE}-substituted, may be empty) $2=ok-labe
   elif glob_exists "$1"; then ok "$2"
   else bad "$3"; fi
 }
-# bash 3.2's `[ a -nt b ]` truncates mtimes to whole seconds — verified on this
-# machine's /bin/bash: two files placed 0.2-0.9s apart in the SAME wall-clock second compare
+# context-floor arming row — WARN-ONLY (never flips $fail): the floor is a machine-local
+# user-settings hook, so a project gate must not fail on it; but an un-armed floor silently
+# costs 2-3x per late-session turn. Built as a function with no arguments and no
+# reads of gate state so the same bytes can be exercised on their own — every branch of a
+# warn-only row is otherwise reached only through a full gate run, and one of the three
+# cannot be reached that way at all (see "THE INERT BRANCH CANNOT PRINT FOR A USER" below).
+#
+# MORE THAN TWO states. Wiring and capability are different questions — liveness
+# (configured) vs readiness (able to do its job) — and a row that answers only the first
+# reads as though it had answered both:
+#   not wired        no settings file names context-floor.sh
+#   wired            settings name it AND `jq` was resolvable when this gate ran
+#   wired but inert  settings name it and `jq` was NOT resolvable when this gate ran.
+#                    hooks/context-floor.sh's first act is `command -v jq >/dev/null || exit 0`,
+#                    so the floor is silently off wherever that probe fails — the fail-open is
+#                    deliberate (a broken floor must never block work) and this row is the
+#                    separate warning that comment relies on.
+#
+# A FOURTH state exists and this row does NOT distinguish it: wired, `jq` present,
+# but the shared floor library (`hooks/lib/floor-env.sh`, or wherever `PLC_FLOOR_LIB` points) is
+# absent or unusable. The hook fails open there too, and says so on its own stderr once per
+# session — but from this gate's vantage that host still reads as plain `wired ✓`.
+# That is stated here rather than papered over: the row's narrowness is the point, and a reader
+# counting states is exactly who this comment is for.
+# Detecting the fourth state from the gate would mean re-running the hook's own library probe
+# in the gate's environment, which is the blind spot named below in different clothes. So it
+# is not attempted.
+# The two ⚠ states and the ✓ state all go through ok()/warn(), never bad(), so warn-only is
+# structural here rather than a property to be remembered.
+#
+# ${HOME:-}: under set -u a stripped hook/CI environment without HOME would abort the whole
+# gate on the bare expansion — the one thing a warn-only row must not do.
+#
+# WHAT THE CAPABILITY BRANCH DOES NOT PROVE — written here because the row's text is
+# deliberately narrower than a reader's instinct, and widening it is the failure this row
+# exists to stop rather than an improvement to it. `command -v jq` runs in THIS process, with
+# THIS PATH, at gate time. It is the same probe the hook uses, in a different environment, and
+# it says nothing about the environment the hook is later spawned in. The concrete blind spot
+# is a GUI client (or any launchd-started app) whose PATH is stripped to /usr/bin:/bin while
+# jq lives in /opt/homebrew/bin: the gate, started from a login shell, finds jq and prints
+# "wired", and the hook that client spawns does not and exits 0. So the ✓ may say only that jq
+# was resolvable when the gate ran; it may not say the hook works, will run, or is verified.
+#
+# THE INERT BRANCH CANNOT PRINT FOR A USER, IN EITHER DIRECTION. Stated plainly rather than as a
+# testing note, because it bounds what this branch IS. The gate is bash + git + jq and reads the
+# manifest through `jq` (`g()`) long before this row runs, so both worlds the warning could
+# describe swallow it:
+#   • a genuinely jq-less machine — the gate dies at its first `g` call with rc 127 and prints
+#     NOTHING AT ALL. No row is reached, so this one is not either.
+#   • a GUI/launchd client with a stripped PATH — the case this warning is actually about — the
+#     gate runs from a login shell, finds jq, and prints the ✓ WIRED row. The hook is the inert
+#     one; this branch stays silent while the row above it says "wired".
+# There is no third arrangement: the branch is wired into the row and is unreachable in any real
+# run of THIS gate. It exists as a CONTRACT for gates that CAN reach it — an adopter's variant
+# that drops the jq dependency, or a runner that reaches this row under a different PATH than the
+# one its manifest was read with — and driving `floor_arming_row` directly in the tests is not a
+# convenience but the only execution context in which the branch exists at all.
+# Consequently the parenthetical in hooks/context-floor.sh ("The arming path warns about this
+# separately") is true about THIS ROW'S EXISTENCE — a wired-but-inert floor is named somewhere in
+# the gate — and is NOT a claim that any user will see the warning fire. Do not upgrade it to one.
+#
+# WHAT THE GREP CAN AND CANNOT SEE: it is a literal substring search for `context-floor.sh` across
+# the three settings files, which is exactly what the ✓ claims ("settings reference
+# context-floor.sh") — pattern and claim are deliberately the same string, so neither can drift
+# wider than the other. It does NOT parse the hooks array: the same ✓ prints when the name appears
+# only in a comment, in an unrelated key, or inside a `disabledHooks` list. That residual is the
+# price of staying grep-only in the not-wired branch (jq is not yet known to exist there — it is
+# the very thing the next branch probes), and it is why the row says "settings reference" instead
+# of "the hook is installed".
+#
+# The ⚠ is held to the same tie, and was not at first: it said "project `.claude/settings*.json`"
+# while the grep reads two named files, so the row whose entire subject is a claim wider than its
+# mechanism carried one. It now names the three paths the grep is given, in the same order, with
+# `~` for the `${HOME:-}` the shell expands. A test pins the ⚠'s path list to the grep's the way
+# the ✓'s pattern is already pinned — adding a file to the grep without naming it in the ⚠ (or
+# widening the ⚠ back to a glob) is a failure, not a wording preference.
+floor_arming_row() {
+  if ! grep -qs 'context-floor\.sh' "${HOME:-}/.claude/settings.json" .claude/settings.json .claude/settings.local.json 2>/dev/null; then
+    warn "context-floor hook not wired in ~/.claude/settings.json, project .claude/settings.json or .claude/settings.local.json — sessions can silently run to very large per-turn contexts. Fix: /init-harness --refresh (references/harness-primitives.md §9)"
+  elif command -v jq >/dev/null 2>&1; then
+    ok "context-floor hook wired (settings reference context-floor.sh) and jq was resolvable when this gate ran — not proof the hook fires where your client spawns it"
+  else
+    warn "context-floor hook wired but inert: jq was not resolvable when this gate ran, and hooks/context-floor.sh exits 0 without jq — the floor is silently off. Fix: install jq"
+  fi
+}
+# bash 3.2's `[ a -nt b ]` truncates mtimes to whole seconds — verified on macOS
+# /bin/bash 3.2: two files placed 0.2-0.9s apart in the SAME wall-clock second compare
 # `-nt` FALSE regardless of which one is actually newer, so a freshness check built on `-nt`
 # can wrongly reject genuinely-fresh evidence written less than a second after the commit it
-# covers. `find X -newer Y` reads the full (sub-second) mtime — verified on the system bash:
+# covers. `find X -newer Y` reads the full (sub-second) mtime — verified on macOS
 # /usr/bin/find to order two such files correctly in both directions — and, checked
 # empirically, prints nothing for byte-identical timestamps, i.e. it fails CLOSED on an exact
 # tie (equal timestamps = NOT fresh) with no separate fallback needed.
@@ -223,12 +441,27 @@ fresh() { [ -e "$1" ] && [ -e "$2" ] && [ -n "$(find "$1" -newer "$2" -print 2>/
 stamp_head_date() { touch -t "$(git show -s --format=%cd --date=format-local:%Y%m%d%H%M.%S HEAD)" "$1" 2>/dev/null; }
 # The RUNS=N tail shared by both evidence modes: when test_runs_required>1 the evidence must carry a
 # RUNS=N line with N>=required (the runner emits it). $1=evidence-file $2=required $3=ok-detail.
+#
+# $3 IS THE WHOLE CLAIM, and the CALLER owns it. This helper used to prefix every ✓ with the
+# word "fresh", which asserts more than EITHER mode actually checks: the fingerprint mode proves only
+# that the DECLARED inputs are unchanged (it is blind to every path outside `test_evidence_inputs`),
+# and the mtime mode proves only that the file is newer than the branch point (mtime is not evidence
+# that anything ran). A reader takes "fresh test-evidence" as "the tests are fresh", so the
+# adjective made the row claim the one thing neither mechanism can support. Hard-coding it here also
+# put the claim out of reach of the callers that DO know their own scope. Do not reintroduce it.
+#
+# NEITHER MAY $3 SAY "since it ran". One move breaks that wording:
+# hand-author the evidence file with a valid header and a body reading "I DID
+# NOT RUN ANY TEST", run nothing, and the gate prints its ✓ and PASSes.
+# The gate reads a FILE; no branch of it observes a process. "since it ran" smuggles execution
+# back into a claim about bytes -- the same defect class the adjective was removed for, one wording
+# further in. Say "since this file was generated".
 evidence_runs_ok() {
   if [ "$2" -gt 1 ]; then
     n=$(grep -oE 'RUNS=[0-9]+' "$1" | head -1 | cut -d= -f2 || true); n=${n:-0}
-    if [ "$n" -ge "$2" ]; then ok "fresh test-evidence, RUNS=$n (>=$2)"
+    if [ "$n" -ge "$2" ]; then ok "test-evidence RUNS=$n (>=$2); $3"
     else bad "test-evidence RUNS=$n < required $2 — run tests ${2}× (runner must emit 'RUNS=N')"; fi
-  else ok "fresh test-evidence ($3)"; fi
+  else ok "test-evidence non-empty; $3"; fi
 }
 # check_evidence: the one evidence check, called from both task and phase mode (they were byte-identical
 # duplicates). TWO modes, selected by whether the manifest declares `test_evidence_inputs`:
@@ -259,14 +492,14 @@ check_evidence() {
     elif [ "$EVDIG" != "$NOWDIG" ]; then
       bad "test-evidence $EV is stale — a declared test_evidence_input changed since it was generated — re-run: $REGEN"
     else
-      evidence_runs_ok "$EV" "$REQ" "fingerprint matches the current tree"
+      evidence_runs_ok "$EV" "$REQ" "declared test_evidence_inputs are unchanged since this file was generated — NOT proof a test command ran, and blind outside that set"
     fi
   elif [ "$TEI_TYPE" = null ]; then
     HREF="$(mktemp)"; stamp_head_date "$HREF" || true  # HEAD committer-date, not .git/HEAD mtime.
     # `|| true`: on a stamp failure (bad/empty date → touch -t non-zero) set -e must NOT abort before the
     # rm below, or the temp file leaks. HREF then keeps its recent mktemp mtime, so evidence reads older
     # → fail-CLOSED (never a false fresh); the failure just cannot leak a /tmp file.
-    if fresh "$EV" "$HREF"; then evidence_runs_ok "$EV" "$REQ" "$EV"
+    if fresh "$EV" "$HREF"; then evidence_runs_ok "$EV" "$REQ" "$EV is newer than the branch point by mtime — mtime is not evidence the tests ran"
     else bad "stale/missing test-evidence — run: $(g test_command)"; fi
     rm -f "$HREF"
   else
@@ -284,9 +517,9 @@ skip_logged() { grep -qE '^[[:space:]]*SKIP:' "$(g journal)" 2>/dev/null; }
 # cc(): $1=key $2=default. Mirrors hot_caps' cap_val ($3-default arg) below — jq -r on an
 # absent key (or an entirely absent 'retention'/'count_caps' block, via jq's null-safe
 # chaining) yields empty, and count_row's `case "$3" in ""|none|0) return 0 ;; esac` then
-# swallows that SILENTLY: no row, no warn, no ⊘. That is the same vacuous-pass-on-absent-key defect `req_glob` above was
-# written to kill — reintroduced here for the count axis a few commits later, in
-# this branch's own new code. Routing through a caller-supplied default (specs/plans 10,
+# swallows that SILENTLY: no row, no warn, no ⊘. That is the same vacuous-pass-on-absent-key defect `req_glob` above
+# exists to kill, on the count axis.
+# Routing through a caller-supplied default (specs/plans 10,
 # docs_total 150 — the values this doc's manifest example and §"Project manifest" prose have
 # always claimed as defaults) makes that prose true instead of aspirational.
 cc() { jq -r ".retention.count_caps.$1 // $2" "$M"; }
@@ -306,6 +539,114 @@ count_md() { # $1=path $2=optional dir to exclude entirely, in addition to scree
 count_row() { # $1=label $2=count $3=cap — silent when at/under cap, "none", or "0" (unlimited)
   case "$3" in ""|none|0) return 0 ;; esac
   if [ "$2" -gt "$3" ]; then warn "count: $1 $2 files (cap $3)"; MILESTONE_COUNT_FAIL=1; fi
+}
+
+# ac-oracle-binding — every acceptance criterion has a runnable oracle or a still-true written-down
+# exclusion. Implemented in the two companion scripts shipped below (`scripts/ac-evidence.sh`,
+# `scripts/ac-baseline.sh`); this is only the wiring.
+#
+# Mode split: `task` checks ONLY what this branch's `Closes: <phase>:AC<n>` trailers claim, so a
+# task is gated on its own declarations; `phase` checks the whole set the story declares, so a
+# criterion nobody ever pointed at fails the close. Called from both mode blocks below.
+#
+# THREE non-pass rows, none of them silent, because each means something different:
+#   ⊘  the manifest never configured this (same rule as req_glob — a hard failure here would brick
+#      every manifest that predates the key, i.e. switch the whole gate off in practice)
+#   ⚠  configured, but task mode was invoked without a phase id, so no criterion set resolved
+#   ✗  configured, resolved, and a criterion in scope has neither an oracle nor a live exclusion
+# A green with no row reads exactly like a green with a passing row; that is why none of these is
+# allowed to print nothing.
+ac_oracle_binding() { # $1 = mode (task|phase)
+  local mode="$1" ac_sh="scripts/ac-evidence.sh" ac_bl="scripts/ac-baseline.sh"
+  local exempt story_glob pat story args base_file ids out base mb
+  exempt="$(jq -r '.exempt_user_story // false' "$M" 2>/dev/null || echo false)"
+  story_glob="$(jq -r '.user_story_glob // ""' "$M" 2>/dev/null || echo "")"
+
+  if [ "$exempt" = true ]; then
+    # Inherits the guard that already exists rather than adding a second one: this gate already
+    # requires a journal `SKIP:` line when the flag is true, and naming it here keeps the
+    # exemption from being silent.
+    ok "ac-oracle-binding SKIPPED — manifest sets exempt_user_story:true; the journal must carry the matching \`SKIP: user-story.md — <reason>\` line"
+    return
+  fi
+  if [ -z "$story_glob" ]; then
+    echo "⊘ user_story_glob not configured in manifest — ac-oracle-binding skipped"
+    return
+  fi
+  if [ ! -r "$ac_sh" ]; then
+    bad "ac-oracle-binding: $ac_sh is missing — the gate declares a check it cannot run (copy it from the section below)"
+    return
+  fi
+  if [ -z "$PHASE" ]; then
+    # HARD failure, deliberately. This branch is only reachable once the project has DECLARED the
+    # check (a non-empty `user_story_glob` and no exemption), and at that point "I could not resolve
+    # a criterion set" is a gate that has checked nothing while reporting a task complete.
+    # A warning that returned 0 here would let a task close having checked nothing.
+    # If your `make task-done` does not pass
+    # PHASE, that is the thing to fix; see the `task-done` target below.
+    bad "ac-oracle-binding: no PHASE argument — the check is configured but nothing was checked. Pass one (\`close-gate.sh $mode <PHASE>\`, or \`make task-done PHASE=X.Y\`)"
+    return
+  fi
+
+  pat="$(printf '%s' "$story_glob" | sed "s/{PHASE}/$PHASE/g")"
+  # shellcheck disable=SC2086
+  set -- $pat
+  if [ "$#" -gt 1 ]; then
+    bad "ac-oracle-binding: user_story_glob matched $# files for phase $PHASE — exactly one is required, never a silent pick"
+    return
+  fi
+  if [ ! -f "${1:-}" ]; then
+    # Deliberately a FAIL, not a pass over an empty set: passing here hands a green row to every
+    # phase that never wrote a story.
+    bad "ac-oracle-binding: no user story resolves for phase $PHASE via \`$pat\` — set exempt_user_story:true if this phase legitimately has none"
+    return
+  fi
+  story="$1"; args=""; ids=""
+  base_file="$(jq -r '.ac_baseline // ""' "$M" 2>/dev/null || echo "")"
+  [ -n "$base_file" ] && [ -r "$base_file" ] && args="--baseline $base_file"
+
+  if [ "$mode" = phase ]; then
+    # Baseline removal is automatic, and happens HERE at phase close — never in the pre-push hook,
+    # where writing a tracked file leaves the pushed commit without it, the remote stale, and the
+    # operator holding a dirty tree.
+    if [ -n "$base_file" ] && [ -r "$base_file" ] && [ -r "$(jq -r '.ac_evidence // ""' "$M")" ] && [ -r "$ac_bl" ]; then
+      bash "$ac_bl" prune --file "$base_file" --evidence "$(jq -r '.ac_evidence' "$M")" || true
+    fi
+  else
+    ids="$(mktemp)"
+    # The base is the DEFAULT branch, never `@{u}`. Measured: on a phase branch `@{u}` is that
+    # branch's own remote, so merge-base(@{u}, HEAD) is HEAD, the scope comes back empty, and the
+    # row goes green having checked nothing at all.
+    base="$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)"
+    mb="$(git merge-base "$base" HEAD 2>/dev/null || echo unknown)"; export AC_MERGE_BASE="$mb"
+    # A FAILURE and an EMPTY SCOPE are different facts. `|| : > "$ids"` collapsed them: an unset
+    # origin/HEAD, an absent merge-base or a malformed `Closes:` trailer all became "no criteria
+    # claimed by any commit on this branch" and a green row. Keep stderr and fail loudly.
+    if ! bash "$ac_sh" scope-from-trailers "$PHASE" --base "$base" > "$ids" 2>"$ids.err"; then
+      bad "ac-oracle-binding: could not determine what this branch claims to close — $(head -3 "$ids.err" | tr '\n' ' ')"
+      rm -f "$ids" "$ids.err"
+      return
+    fi
+    rm -f "$ids.err"
+  fi
+
+  # shellcheck disable=SC2086
+  if out="$(bash "$ac_sh" report "$story" "$PHASE" $args ${ids:+--ids "$ids"} 2>&1)"; then
+    ok "ac-oracle-binding ($mode): every criterion in scope has an oracle or a still-true exclusion — this proves each HAS one, never that the oracle is correct"
+    printf '%s\n' "$out" | sed 's/^/    /'
+  else
+    bad "ac-oracle-binding ($mode) FAILED — a criterion in scope has neither an oracle nor a still-true exclusion:"
+    printf '%s\n' "$out" | sed 's/^/    /'
+  fi
+  # NOT `[ -n "$ids" ] && rm -f "$ids"`. In phase mode `ids` is empty, so that AND-list returns 1 --
+  # and as the LAST statement of a function it becomes the FUNCTION's return value. The call site is
+  # a bare statement under `set -euo pipefail`, so a SUCCESSFUL phase run printed its ✓ row and then
+  # killed the gate before the PASS/FAIL banner. Measured, not reasoned: the same shape mid-script is
+  # exempt from `set -e` (the failing command is not the last in the list), which is why the
+  # identical line survives mid-script -- the bug exists only where the
+  # list is a function's tail. Explicit `return 0` rather than relying on `rm`'s status.
+  if [ -n "$ids" ]; then rm -f "$ids"; fi
+  return 0
 }
 
 if [ "$MODE" = task ]; then
@@ -346,8 +687,7 @@ if [ "$MODE" = task ]; then
   # coexisting within a milestone is the expected state. macOS sort has no -V; ls -t is portable.
   # Falls back to the manifest 'journal' monolith path (back-compat for non-fragment projects).
   JD="$(g retention.journal_dir 2>/dev/null)"; JD="${JD:-docs/journal.d}"
-  J="$(ls -t "$JD"/*.md 2>/dev/null | head -1 || true)"
-  [ -n "$J" ] || J="$(g journal)"
+  J="$(resolve_journal "$JD" "$PHASE" "$(g retention.archive_dir 2>/dev/null)" "$(g journal)")"
   # match the journal-schema canonical bold form (**Plan deviations** / **Plan deviations:**) AND an H2/H3 header form
   if grep -qE '\*\*Plan deviations:?\*\*|^#{1,4}[[:space:]]*Plan deviations' "$J" 2>/dev/null; then ok "journal Plan-deviations header"; else bad "journal missing 'Plan deviations' header"; fi
   check_evidence   # content fingerprint when test_evidence_inputs is declared, else legacy mtime
@@ -371,6 +711,7 @@ if [ "$MODE" = task ]; then
     elif grep -qE '^[[:space:]]*SWEEP-PERF:' "$(g journal)" 2>/dev/null; then ok "sweep diff not net-negative but SWEEP-PERF evidence logged"
     else bad "Archetype: sweep but diff not net-negative ($add added / $del deleted) and no 'SWEEP-PERF: <evidence>' in journal — a sweep must subtract or prove a perf win"; fi
   fi
+  ac_oracle_binding task
 elif [ "$MODE" = phase ]; then
   [ -n "$PHASE" ] || { echo "✗ phase mode needs PHASE arg"; exit 1; }
   RANGE="origin/main..HEAD"
@@ -380,13 +721,14 @@ elif [ "$MODE" = phase ]; then
   else req_glob "${PDG:+${PDG}*user-story*}" "user-story.md" "no user-story.md for phase $PHASE" "phase_docs_glob"; fi
   req_glob "$PDG" "spec doc"    "no spec doc for phase $PHASE"    "phase_docs_glob"
   req_glob "$PLG" "plan doc"    "no plan doc for phase $PHASE"    "plan_glob"
+  ac_oracle_binding phase
   # NOTE: no handoff-doc check here — the handoff file was retired; its one
   # non-derivable section (§7 findings/gotchas) is enforced by the journal-touched check
   # above instead (FACT schema, references/journal-schema.md). handoff-template.md is
   # retained for its §7 field definitions + PR-description appendix, but names no output
   # file any more, so there is nothing left for a glob-based artifact check to find.
-  # CHANGELOG-touched: accept a change under retention.changelog_dir (fragment convention
-  # ) OR CHANGELOG.md itself (back-compat / un-adopted projects) — capture-then-grep, no
+  # CHANGELOG-touched: accept a change under retention.changelog_dir (fragment convention)
+  # OR CHANGELOG.md itself (back-compat / un-adopted projects) — capture-then-grep, no
   # pipe into grep -q (mirrors the journal-touched union-grep below).
   CD="$(g retention.changelog_dir 2>/dev/null)"; CD="${CD:-changelog.d}"
   CL_DIFF="$(git diff --name-only $RANGE 2>/dev/null)"
@@ -406,8 +748,8 @@ elif [ "$MODE" = phase ]; then
   # TWO independent facts, both required. "Touched in range" proves this phase changed the
   # file; it does NOT prove the phase is IN it — a whitespace edit satisfies a touch check.
   # The row's claim is "the roadmap reflects this phase", and that is only observable in the
-  # text, so grep the phase identifier too. A sibling gate that checked only
-  # recency printed "✓ ROADMAP.md updated this phase" while the phase appeared nowhere in the
+  # text, so grep the phase identifier too. A gate that checks only
+  # recency can print "✓ ROADMAP.md updated this phase" while the phase appears nowhere in the
   # file. Touch and mtime are both proxies; the content is the thing.
   # The id match is ANCHORED. `grep -F` disables regex; it does NOT make the match whole-token,
   # so a bare `-F "$PHASE"` lets phase `1.2` be satisfied by a row that only says `1.20`, and
@@ -439,25 +781,21 @@ elif [ "$MODE" = phase ]; then
   if grep -qE "$JOURNAL_PATTERN" <<<"$DIFF_FILES"; then ok "journal touched this phase"; else bad "journal not touched in $RANGE"; fi
   # FACT-entry enforcement: the retired handoff file's one non-derivable section (§7
   # findings/gotchas) survives only in the journal's FACT entry (references/journal-schema.md
-  # §"The FACT entry") — until now nothing checked it existed, had a Why, or had a Rejected, so
-  # close-gate.md's "is enforced" claim was a cache with no mechanism behind it. Canonical field
-  # form is the markdown-bullet style journal entries actually use under this schema
-  # journal ("- **Decision:** ..."), not the bare "Decision:" form journal-schema.md used to
-  # show — journal-schema.md was corrected to match reality instead of the other way around.
+  # §"The FACT entry"), and this loop is what backs the checklist's "is enforced" claim.
+  # Canonical field form is the markdown-bullet style journal entries use under this
+  # schema ("- **Decision:** ..."), not a bare "Decision:" line.
   # $J = newest fragment under $JD (mtime, not filename — same rationale as task mode's $J,
   # same $JN monolith fallback the journal-touched check above already resolved).
   #
-  # `Backing` is the evidence slot. It exists because its absence was measured: an acceptance
-  # test distilled its spec into a FACT entry and compared them field by field: `Rejected` carried
-  # 7/7, `Why` lost most of its substance — because the schema had a slot for the CONCLUSION and
-  # none for the EVIDENCE it rested on, so every argument silently degraded into an assertion. The
-  # single statistic the entire spec turned on, and a corollary the spec
-  # itself marked load-bearing both vanished. A missing field cannot be patched by writing more
+  # `Backing` is the evidence slot. A schema with a slot for the CONCLUSION and none for the
+  # EVIDENCE it rests on lets every argument silently degrade into an assertion, and the one
+  # statistic an argument turns on is the first thing a distilled `Why` drops.
+  # A missing field cannot be patched by writing more
   # prose into an adjacent one: with no slot that says "the number you must not drop," the writer
-  # drops it. The schema was derived from `references-log`, whose entries carry `Backing` PRECISELY
-  # so a claim cannot be stated without its support — and journal-schema.md said so, two lines below
-  # a schema block that had copied `Date` and dropped `Backing`. This row is that gap, closed.
-  J="$(ls -t "$JD"/*.md 2>/dev/null | head -1 || true)"; [ -n "$J" ] || J="$JN"
+  # drops it. Hence a slot of its own,
+  # so a claim cannot be stated without its support.
+  J="$(resolve_journal "$JD" "$PHASE" "$(g retention.archive_dir 2>/dev/null)" "$JN")"
+  [ -n "${JFENCED:-}" ] && [ -z "${JARCHIVE:-}" ] && warn "a line naming phase $PHASE exists in $JFENCED but sits inside a code fence, so it is not read as a fragment boundary — either it is a quoted example, or an unterminated fence earlier in that file is hiding a real one"
   MISSING_FACT=""
   for field in Date Decision Why Backing Rejected Source; do
     grep -qE "^-[[:space:]]*\*\*${field}:\*\*" "$J" 2>/dev/null || MISSING_FACT="$MISSING_FACT $field"
@@ -468,22 +806,24 @@ elif [ "$MODE" = phase ]; then
     ok "journal FACT entry has all required fields"
   fi
   # test-evidence at phase close. check_evidence runs in BOTH task and phase mode, and the
-  # pre-push hook runs task mode on every push, so tests are forced on every pushed task,
-  # not only at phase close. Skipped only when the project has no test_command. (Was missing
-  # here originally — tests fell through every hooked gate.)
+  # pre-push hook runs task mode on every push, so the evidence row is checked on every
+  # pushed task, not only at phase close. Skipped only when the project has no test_command.
+  # (Was missing here originally — tests fell through every hooked gate.)
+  #
+  # Say "the evidence row is checked", NOT "tests are forced". The row proves that an evidence
+  # artifact exists and that the DECLARED inputs have not changed since it was produced. It is
+  # blind to every path outside test_evidence_inputs, and it cannot tell a real run from a
+  # hand-written file. Both blind spots are recoverable by declaring honestly; neither is
+  # recoverable by wording the ✓ as though the mechanism were stronger.
   if [ -n "$(g test_command)" ]; then
     check_evidence   # content fingerprint when test_evidence_inputs is declared, else legacy mtime
   fi
-  # context-floor arming check — WARN-ONLY (never flips $fail): the floor is a
-  # machine-local user-settings hook, so a project gate must not fail on it; but
-  # an un-armed floor silently costs 2-3x per late-session turn.
-  # ${HOME:-}: under set -u a stripped hook/CI environment without HOME would abort
-  # the whole gate on the bare expansion — the one thing a warn-only row must not do.
-  if grep -qs 'context-floor' "${HOME:-}/.claude/settings.json" .claude/settings.json .claude/settings.local.json 2>/dev/null; then
-    ok "context-floor hook wired (settings reference context-floor.sh)"
-  else
-    echo "⚠ context-floor hook not wired in ~/.claude/settings.json or project .claude/settings*.json — sessions can silently run to very large per-turn contexts. Fix: /init-harness --refresh (references/harness-primitives.md §9)"
-  fi
+  # context-floor arming row — WARN-ONLY (not wired · wired · wired but inert: jq missing).
+  # A fourth real state — wired, jq present, shared floor library unusable — is NOT
+  # distinguished here and reads as plain `wired`. Defined with the helpers above, where its
+  # full rationale, the PATH blind spot the ✓ must not outrun, the unreported fourth state,
+  # and the jq bootstrap wrinkle are written out.
+  floor_arming_row
   # retention hot-cap rows — WARN-ONLY (never flips $fail). See references/retention.md §"Hot-doc caps"
   # cap_val: read retention.hot_caps.<key>[0|1] from the manifest, default when absent (jq's
   # null-safe chaining means a missing 'retention' block never errors — runs with zero config).
@@ -671,13 +1011,723 @@ fi
 `make` wiring:
 
 ```make
-task-done:      ; @bash scripts/close-gate.sh task
+task-done:      ; @bash scripts/close-gate.sh task $(PHASE)
 phase-done:     ; @bash scripts/close-gate.sh phase $(PHASE)
 milestone-done: ; @bash scripts/close-gate.sh milestone $(PHASE)
 test-gate:      ; @bash scripts/test-close-gate.sh $(PHASE)
 ```
 
 ---
+
+## Evidence runner — `scripts/gen-test-evidence.sh`
+
+Generates the test-evidence file. **Use this instead of writing the pipeline by hand.** The
+manual incantation documented above — `{ close-gate.sh evidence-header; <test_command>; } | tee
+<file>` — ends in a bare `tee`, and `tee` exits with **its own** status: a failing test command,
+or a failing `evidence-header` step, still leaves `tee` returning 0 and a green-looking evidence
+file written over whatever was there before. This runner closes that: it runs under `pipefail`
+so the real exit status survives the pipe, writes to a temp file in the evidence file's own
+directory, and replaces the real file **only on success** — so a failing run leaves a
+pre-existing good evidence file completely untouched rather than truncated.
+
+It is also the piece that resolves the two placeholders a declared `test_command` may carry,
+`{EVIDENCE_FILE}` and `{SET}`, which is what lets one manifest entry serve both `task` and
+`phase` evidence without a second key. Substitution is bash parameter expansion, never `sed` —
+a path substituted through `sed` collides with its delimiter and backreference syntax.
+
+`/init-harness` scaffolds this file and wires the manifest's `test_command` to match; an adopter
+retrofitting an existing repo copies it in and switches their `test_command` to the placeholder
+form shown under §Project manifest.
+
+```bash
+#!/usr/bin/env bash
+# gen-test-evidence.sh — safe runner for the project's test-evidence file.
+# Usage: gen-test-evidence.sh <task|phase>   (run from the repo root)
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+GATE="$HERE/close-gate.sh"
+M=".claude/close-gate.json"
+
+SET_MODE="${1:?usage: gen-test-evidence.sh <task|phase>}"
+case "$SET_MODE" in
+  task|phase) ;;
+  *) echo "✗ set mode must be 'task' or 'phase' — got '$SET_MODE'"; exit 1 ;;
+esac
+
+[ -f "$M" ] || { echo "✗ missing manifest $M"; exit 1; }
+EV="$(jq -r '.test_evidence // empty' "$M" 2>/dev/null)"
+[ -n "$EV" ] || { echo "✗ manifest has no test_evidence path declared"; exit 1; }
+
+# TEST-ONLY hook: run a different command instead of the manifest's declared one, so the
+# refusal-on-failure behaviour can be demonstrated with a deliberately failing command without
+# mutating the manifest. Never set this for a real evidence run.
+if [ -n "${PLC_GEN_TEST_EVIDENCE_CMD_OVERRIDE:-}" ]; then
+  EVCMD_TMPL="$PLC_GEN_TEST_EVIDENCE_CMD_OVERRIDE"
+else
+  EVCMD_TMPL="$(/bin/bash "$GATE" test-command)"
+fi
+[ -n "$EVCMD_TMPL" ] || { echo "✗ no test_command to run (declared value is empty)"; exit 1; }
+
+# Report a genuine mkdir failure at its real cause rather than deferring to a less informative
+# downstream error several steps later (a `tee` that cannot open a file in a missing directory).
+EV_DIR="$(dirname "$EV")"
+if ! MKDIR_ERR="$(mkdir -p "$EV_DIR" 2>&1)"; then
+  echo "✗ could not create evidence directory $EV_DIR: ${MKDIR_ERR:-mkdir failed (permissions or quota?)}"
+  exit 1
+fi
+
+# Same directory as the real evidence file, so the final `mv` is a same-filesystem rename —
+# atomic, and never leaves the destination half-written.
+TMP="$(mktemp "${EV}.XXXXXX")"
+trap 'rm -f "$TMP"' EXIT
+
+EVCMD="${EVCMD_TMPL//\{EVIDENCE_FILE\}/$TMP}"
+EVCMD="${EVCMD//\{SET\}/$SET_MODE}"
+
+# `-o pipefail` on the inner shell too: a fresh `bash -c` child does not inherit the parent's
+# shell options, so without it the pipeline's status would again be the last command's.
+set +e
+/bin/bash -o pipefail -c "$EVCMD"
+RC=$?
+set -e
+
+if [ "$RC" -eq 0 ]; then
+  # A zero exit status is not the same claim as "an artifact the gate could accept". Both guards
+  # below destroy VALID state while printing a ✓; neither can buy a green (the gate's test-evidence
+  # row rejects both afterwards), so what is at stake is the last good evidence file plus a success
+  # message that means its opposite.
+  #
+  # Read the first line with `read`, not `head -n1 | grep`: under `-o pipefail` a `grep -q` that
+  # matches exits before `head` finishes writing, `head` takes SIGPIPE, and the pipeline's status
+  # is 141. `case` needs no external command and no regex dialect.
+  if [ ! -s "$TMP" ]; then
+    echo "✗ gen-test-evidence: the command exited 0 but wrote nothing to {EVIDENCE_FILE} — $EV left unchanged. The declared test_command must write THROUGH the {EVIDENCE_FILE} placeholder (a runner that writes to its own report file instead produces exactly this)."
+    exit 1
+  fi
+  IFS= read -r FIRSTLINE < "$TMP" || FIRSTLINE=""
+  case "$FIRSTLINE" in
+    '# plc-gate-evidence inputs=EMPTY-'*)
+      # `evidence-header` emits an EMPTY-* sentinel INSTEAD of a digest, and exits 0, when
+      # test_evidence_inputs matched no tracked file — deliberately, so the gate can reject it
+      # loudly instead of fingerprinting nothing. The producer needs the matching refusal, or the
+      # first run in a repo whose source is not committed yet (or whose layout is not `src/`
+      # + `tests/`) overwrites good evidence with a file that cannot pass. Scoped to this sentinel
+      # prefix, NOT to "the header is missing": an adopter who never opted into fingerprint mode
+      # declares no test_evidence_inputs, calls no evidence-header, and their headerless evidence
+      # must keep working.
+      echo "✗ gen-test-evidence: the evidence header fingerprints nothing — the manifest's test_evidence_inputs matched no tracked files, so the gate will reject this file. $EV left unchanged. Fix the globs in $M (or \`git add\` the paths they name), then re-run."
+      exit 1
+      ;;
+  esac
+  mv -f "$TMP" "$EV"
+  trap - EXIT
+  echo "✓ evidence written: $EV (set=$SET_MODE)"
+  exit 0
+else
+  echo "✗ gen-test-evidence: command exited $RC — evidence NOT written; $EV left unchanged"
+  exit "$RC"
+fi
+```
+
+## AC-oracle binding — `scripts/ac-evidence.sh`
+
+The check the `ac-oracle-binding` rows above name. It reads the phase user story for the criterion
+set, reads `.claude/ac-evidence.json` for what points at each one, and prints one line per
+criterion. It deliberately prints **no ratio and no total** — a coverage number invites the reader
+to treat 15/16 as nearly-done, when the one criterion nobody pointed at is the entire finding.
+
+Copy it verbatim. The copy below is byte-identical to the one this skill ships and is held that
+way by an invariant; if you edit it, you are forking it and the next skill update will not reach
+your copy.
+
+````bash
+#!/bin/bash
+# scripts/ac-evidence.sh — every acceptance criterion owns an oracle, or a written-down exclusion.
+#
+# This proves each criterion HAS an oracle. It never proves the oracle is correct, and an exclusion
+# self-destructs only when its condition fails, never when its reasoning was wrong.
+#
+# Envelope: bash + jq + git ONLY. No python3, and no `shasum` either -- it is a perl
+# script on macOS and would widen that envelope.
+# Hashing, where this file needs it, goes through `git hash-object`.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MANIFEST="${AC_MANIFEST:-$HERE/../.claude/close-gate.json}"
+
+die() { printf '%s\n' "$*" >&2; exit 1; }
+
+# The heading set is declared in the manifest so an adopter can extend it without editing the gate.
+# Real user stories differ in this heading: `## Acceptance criteria`
+# (lowercase c), a CJK heading (U+9A8C U+6536 U+6807 U+51C6), and
+# `## Acceptance Criteria` all occur. A single literal would be blind to most of them.
+heading_set() {
+  if [ -r "$MANIFEST" ] && jq -e '.ac_heading_set' "$MANIFEST" >/dev/null 2>&1; then
+    jq -r '.ac_heading_set[]' "$MANIFEST"
+  else
+    # The CJK heading is emitted as octal UTF-8, not as a literal, so this file carries no CJK bytes.
+    # Verified byte-identical to the literal. `$'\uXXXX'` is NOT an option --
+    # macOS /bin/bash is 3.2 and that syntax needs 4.2+.
+    printf '%s\n' 'acceptance criteria' "$(printf '\351\252\214\346\224\266\346\240\207\345\207\206')"
+  fi
+}
+
+# Print "<start-line> <end-line>" for the acceptance-criteria section, or die naming the heading set.
+section_range() {
+  local file="$1" h start level end
+  start=""
+  while IFS= read -r h; do
+    # DO NOT use awk's `==` here. On macOS awk (version 20200816) string equality returns TRUE for
+    # ANY two non-ASCII strings: comparing a story heading (U+6545 U+4E8B) with the
+    # acceptance heading (U+9A8C U+6536 U+6807 U+51C6) prints EQUAL, while "foo" == "bar" prints
+    # notequal. Under `==` this matcher locks onto the FIRST CJK heading in a file
+    # instead of the real acceptance section.
+    # `length()` plus `index()` compares bytes and is portable.
+    start="$(awk -v want="$(printf '%s' "$h" | tr '[:upper:]' '[:lower:]')" '
+      function same(a, b) { return (length(a) == length(b)) && (index(a, b) == 1) }
+      /^#+[[:space:]]/ {
+        line = tolower($0)
+        sub(/^#+[[:space:]]*/, "", line)
+        gsub(/[[:punct:]]+$/, "", line)
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+        if (same(line, want)) { print NR; exit }
+      }' "$file")"
+    [ -n "$start" ] && break
+  done < <(heading_set)
+
+  # Section ABSENT is its own failure, distinct from section-empty. A missing section must never
+  # read as "this phase has no criteria".
+  [ -n "$start" ] || die "no acceptance-criteria section found in $file -- the heading set is: $(heading_set | tr '\n' '/')"
+
+  level="$(awk -v n="$start" 'NR==n { match($0, /^#+/); print RLENGTH }' "$file")"
+  end="$(awk -v n="$start" -v L="$level" '
+    NR > n && /^#+[[:space:]]/ { match($0, /^#+/); if (RLENGTH <= L) { print NR; exit } }' "$file")"
+  [ -n "$end" ] || end="$(( $(wc -l < "$file") + 1 ))"
+  printf '%s %s\n' "$start" "$end"
+}
+
+# Closed section grammar: inside the acceptance-criteria section every line must be a recognised
+# declaration, an indented continuation, a blank line, a fenced block or a blockquote. Anything else
+# is a hard failure naming the line -- which turns `### AC3` and a table row from a SILENT
+# under-count into a red, without the checker ever deciding what they mean.
+parse_criteria() {
+  local file="$1" phase="$2" range start end
+  [ -r "$file" ] || die "story file is unreadable: $file"
+  range="$(section_range "$file")"
+  read -r start end <<<"$range"
+
+  awk -v start="$start" -v end="$end" -v phase="$phase" '
+    function emit(id, ln,   tok) {
+      tok = id; sub(/:.*$/, "", tok)
+      if (tok != phase) {
+        printf "declaration at line %d carries phase token %s, expected %s\n", ln, tok, phase > "/dev/stderr"
+        bad = 1; return
+      }
+      if (id in seen) {
+        printf "duplicate id %s at lines %d and %d\n", id, seen[id], ln > "/dev/stderr"
+        bad = 1; return
+      }
+      seen[id] = ln
+      order[++n] = id
+    }
+    NR <= start || NR >= end { next }
+    /^```/            { fence = !fence; next }
+    fence             { next }
+    /^[[:space:]]*>/  { next }   # blockquote
+    /^[[:space:]]*$/  { next }   # blank
+    /^[[:space:]]+/   { next }   # indented continuation of a declaration
+    {
+      line = $0
+      # long form:  - **<phase>:AC3**:   or   - **<phase>:AC3** —
+      if (match(line, /^- \*\*[A-Za-z0-9_.-]+:AC[0-9]+(\.[0-9]+)?[a-z]?\*\*[[:space:]]*([:—–])/)) {
+        id = line; sub(/^- \*\*/, "", id); sub(/\*\*.*$/, "", id)
+        emit(id, NR); next
+      }
+      # short form: - **AC3** {#<phase>:AC3}:   -- the human label, plus the
+      # machine-visible scoped anchor.
+      if (match(line, /^- \*\*AC[0-9]+(\.[0-9]+)?[a-z]?\*\*[[:space:]]*\{#[A-Za-z0-9_.-]+:AC[0-9]+(\.[0-9]+)?[a-z]?\}[[:space:]]*([:—–])/)) {
+        label = line; sub(/^- \*\*/, "", label); sub(/\*\*.*$/, "", label)
+        anchor = line; sub(/^[^{]*\{#/, "", anchor); sub(/\}.*$/, "", anchor)
+        bare = anchor; sub(/^[^:]*:/, "", bare)
+        if (bare != label) {
+          printf "label/anchor mismatch at line %d: **%s** vs {#%s}\n", NR, label, anchor > "/dev/stderr"
+          bad = 1; next
+        }
+        emit(anchor, NR); next
+      }
+      printf "unrecognised construct in the acceptance-criteria section, line %d: %s\n", NR, line > "/dev/stderr"
+      bad = 1
+    }
+    END {
+      if (bad) exit 1
+      if (n == 0) { print "no declarations parsed from the acceptance-criteria section" > "/dev/stderr"; exit 1 }
+      for (i = 1; i <= n; i++) print order[i]
+    }
+  ' "$file"
+}
+
+# The declaration line for one id plus every following indented continuation, whitespace-normalised.
+# This is the digest preimage for the baseline (scripts/ac-baseline.sh). Full declaration, not the
+# first line: criteria in real stories wrap across three and four lines, and hashing only
+# the `- **id**:` line would let a one-word semantic inversion inside a continuation pass while a
+# pure rewrap reds.
+declaration_text() {
+  local file="$1" id="$2" range start end
+  [ -r "$file" ] || die "story file is unreadable: $file"
+  range="$(section_range "$file")"
+  read -r start end <<<"$range"
+  awk -v start="$start" -v end="$end" -v id="$id" '
+    NR <= start || NR >= end { next }
+    /^- \*\*/ {
+      want = (index($0, id) > 0)
+      if (want) { inside = 1; buf = $0; next }
+      if (inside) { exit }
+      inside = 0; next
+    }
+    inside && /^[[:space:]]+/ { buf = buf " " $0; next }
+    inside && /^[[:space:]]*$/ { next }
+    inside { exit }
+    END { if (buf != "") { gsub(/[[:space:]]+/, " ", buf); sub(/^ /, "", buf); sub(/ $/, "", buf); print buf } }
+  ' "$file"
+}
+
+# Walk a covered_by_oracle chain. Returns 0 only when it terminates on a row whose status is
+# `oracle` -- a chain that merely leaves the exclusion graph proves nothing. `seen` carries the path
+# so a cycle is reported with its members instead of recursing forever.
+#
+# What this CANNOT see, stated because the neighbouring comment would otherwise over-claim: whether
+# the terminal carrier actually asserts anything. That is a stated bound, not a hole to patch.
+chain_terminates() {
+  local id="$1" ev="$2" seen="${3:-}" row status next
+  case " $seen " in *" $id "*) printf '%s -> %s\n' "${seen# }" "$id"; return 1 ;; esac
+  row="$(jq -c --arg id "$id" '.criteria[]? | select(.id == $id)' "$ev")"
+  [ -n "$row" ] || return 1
+  status="$(jq -r '.status // ""' <<<"$row")"
+  [ "$status" = "oracle" ] && return 0
+  [ "$status" = "excluded" ] || return 1
+  [ "$(jq -r '.exclusion.type // ""' <<<"$row")" = "covered_by_oracle" ] || return 1
+  while IFS= read -r next; do
+    [ -n "$next" ] || continue
+    chain_terminates "$next" "$ev" "$seen $id" || return 1
+  done < <(jq -r '.exclusion.condition.criteria_still_naming[]?' <<<"$row")
+  return 0
+}
+
+# Validate one `status: excluded` row. Two types are BUILT; `certified_once` is specified in the
+# format and deliberately not implemented (no criterion has needed that shape yet), and a row
+# declaring it is routed to UNMAPPED rather than silently accepted or mis-reported as unknown.
+# Everything malformed fails CLOSED -- explicitly against Snyk's precedent of honouring a malformed
+# expiry forever.
+exclusion_row() {
+  local id="$1" row="$2" ev="$3" type names n path cyc
+  type="$(jq -r '.exclusion.type // ""' <<<"$row")"
+  case "$type" in
+    covered_by_oracle)
+      names="$(jq -r '.exclusion.condition.criteria_still_naming[]?' <<<"$row")"
+      if [ -z "$names" ]; then
+        printf '  %-12s UNMAPPED  malformed: covered_by_oracle with an empty criteria_still_naming\n' "$id"
+        return 1
+      fi
+      while IFS= read -r n; do
+        [ -n "$n" ] || continue
+        if ! cyc="$(chain_terminates "$n" "$ev" "$id")"; then
+          if [ -n "$cyc" ]; then
+            printf '  %-12s UNMAPPED  cycle in covered_by_oracle: %s\n' "$id" "$cyc"
+          else
+            printf '  %-12s UNMAPPED  condition no longer holds: %s is not (or no longer reaches) an oracle\n' "$id" "$n"
+          fi
+          return 1
+        fi
+      done <<<"$names"
+      printf '  %-12s excluded  %-14s condition holds\n' "$id" "$type"
+      ;;
+    ci_unreachable_carrier)
+      path="$(jq -r '.exclusion.condition.path // ""' <<<"$row")"
+      if [ -z "$path" ]; then
+        printf '  %-12s UNMAPPED  malformed: ci_unreachable_carrier with no path\n' "$id"; return 1
+      fi
+      if [ ! -e "${AC_CARRIER_ROOT:-$HERE/..}/$path" ]; then
+        # Environment-determined, and said so rather than blamed on the author: in CI a gitignored
+        # path usually does not exist at all, so this condition can only be evaluated where the
+        # tree is complete. Fail closed, but name the environment.
+        printf '  %-12s UNMAPPED  condition unevaluable here (path absent): %s\n' "$id" "$path"; return 1
+      fi
+      if ! git -C "${AC_CARRIER_ROOT:-$HERE/..}" check-ignore -q "$path"; then
+        printf '  %-12s UNMAPPED  condition no longer holds: %s is no longer gitignored, so a real carrier is possible\n' "$id" "$path"
+        return 1
+      fi
+      printf '  %-12s excluded  %-14s condition holds\n' "$id" "$type"
+      ;;
+    certified_once)
+      printf "  %-12s UNMAPPED  exclusion type 'certified_once' is specified but not implemented; this criterion is unmapped\n" "$id"
+      return 1
+      ;;
+    *)
+      printf '  %-12s UNMAPPED  malformed: unknown exclusion type %s\n' "$id" "${type:-<absent>}"
+      return 1
+      ;;
+  esac
+  return 0
+}
+
+# Reference discipline over the artifacts THIS PHASE creates.
+#
+# STAGED, and saying so is the point: four kinds of artifact carry criterion links -- test name, journal,
+# review finding, evidence row. This checks ONE of them, and leaves two questions open:
+# where the authority to grandfather REFERENCES comes from (the baseline grandfathers
+# criteria, not references), and how a checker tells a claim from a quotation in an
+# append-only record. A green row here does NOT mean a repo's test files are clean: they can
+# still carry bare AC ids.
+#
+# A qualifier is `<token>:` only. `<token>-` would make ordinary prose qualify -- "the pre-AC10
+# behaviour" reads as phase `pre`, and every hyphenated word becomes a namespace.
+scan_refs() {
+  local phase="$1" declared="$2" fail=0 file label val stripped tok
+  shift 2
+  while [ $# -gt 0 ]; do
+    file="$1"; label="$2"; shift 2
+    [ -n "$file" ] && [ -r "$file" ] || continue
+    while IFS= read -r val; do
+      [ -n "$val" ] || continue
+      # Delete every QUALIFIED id first; anything of the shape AC<n> still standing is bare.
+      stripped="$(printf '%s' "$val" | sed -E 's/[A-Za-z0-9_.-]+:AC[0-9]+(\.[0-9]+)?[a-z]?//g')"
+      if printf '%s' "$stripped" | grep -qE '(^|[^A-Za-z0-9_])AC[0-9]'; then
+        printf '  REFERENCE  bare AC id in %s (%s): %s\n' "$label" "$file" "$val"
+        fail=1
+      fi
+      # A this-phase id the story does not declare is an ORPHAN, distinct from "unmapped".
+      for tok in $(printf '%s' "$val" | grep -oE "$phase:AC[0-9]+(\.[0-9]+)?[a-z]?" || true); do
+        if ! printf '%s\n' "$declared" | grep -qFx "$tok"; then
+          printf '  %-12s ORPHAN    referenced in %s, but the current story declares no such criterion\n' "$tok" "$label"
+          fail=1
+        fi
+      done
+    done < <(jq -r '.criteria[]? | .id, (.why // empty), (.exclusion.why // empty)' "$file" 2>/dev/null || true)
+  done
+  return "$fail"
+}
+
+# Task-mode scope: the union of `Closes:` trailers on this branch. Branch-cumulative, because the
+# gate is handed a PHASE and never a task id.
+# Nothing unclaimed ever enters scope, which is the guarantee this scope gives.
+#
+# Two properties this carrier does NOT have, stated so nobody relies on them: trailers do not
+# survive squash-merge, and the scope moves when the merge-base moves. The second is mitigated by
+# disclosure only -- the computed merge-base is printed on every run.
+scope_from_trailers() {
+  local phase="$1" base="" mb raw tok out=""
+  shift
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --base) base="$2"; shift 2 ;;
+      *) die "scope-from-trailers: unknown option $1" ;;
+    esac
+  done
+  if [ -z "$base" ]; then
+    base="$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || true)"
+    [ -n "$base" ] || die "cannot determine the default branch: origin/HEAD is unset (a --single-branch clone or a fork remote does this). Pass --base <ref>, or run: git remote set-head origin -a"
+  fi
+  mb="$(git merge-base "$base" HEAD 2>/dev/null)" || die "no merge-base between $base and HEAD"
+  printf 'scope computed from merge-base %s\n' "$mb" >&2
+
+  raw="$(git log --format='%(trailers:key=Closes,valueonly)' "$mb..HEAD" | tr ' ' '\n' | sed '/^$/d')"
+  [ -n "$raw" ] || return 0
+  while IFS= read -r tok; do
+    [ -n "$tok" ] || continue
+    case "$tok" in
+      *:AC*) out="$out$tok"$'\n' ;;
+      '#'*)  die "a \`Closes:\` trailer names an issue ($tok), not an acceptance criterion. Use \`Refs:\` for issues." ;;
+      *)     die "unparseable \`Closes:\` value: $tok" ;;
+    esac
+  done <<<"$raw"
+  printf '%s' "$out" | sort -u
+}
+
+DISCLAIMER_1="this proves each criterion HAS an oracle. It never proves the oracle is correct,"
+DISCLAIMER_2="and an exclusion self-destructs only when its condition fails, never when its reasoning was wrong."
+
+# Validate one `status: oracle` row. Prints its line; returns non-zero when the row is unmapped.
+oracle_row() {
+  local id="$1" row="$2" klass carrier path sym root
+  klass="$(jq -r '.class // ""' <<<"$row")"
+  case "$klass" in
+    mutant-killed|tracked-suite|local-only|pin) ;;
+    *) printf '  %-12s UNMAPPED  malformed: class %s\n' "$id" "${klass:-<absent>}"; return 1 ;;
+  esac
+  carrier="$(jq -r '.carrier // ""' <<<"$row")"
+  path="${carrier%%::*}"
+  sym=""
+  case "$carrier" in *::*) sym="${carrier#*::}" ;; esac
+  root="${AC_CARRIER_ROOT:-$HERE/..}"
+  if [ -z "$path" ] || [ ! -e "$root/$path" ]; then
+    printf '  %-12s UNMAPPED  carrier path does not exist: %s\n' "$id" "${path:-<absent>}"; return 1
+  fi
+  # Dangling-pointer check, NOT a quality judgement: a carrier naming a symbol that is no longer in
+  # the file points at nothing. Without it, removing a guard cannot change any verdict and
+  # a guard-removal test can never go red. Known false green: a mention in a comment satisfies
+  # a plain string match. Still strictly stronger than path-existence.
+  if [ -n "$sym" ] && ! grep -qF -- "$sym" "$root/$path"; then
+    printf '  %-12s UNMAPPED  carrier names %s, which is not in %s\n' "$id" "$sym" "$path"; return 1
+  fi
+  printf '  %-12s oracle    %-14s %s\n' "$id" "$klass" "$carrier"
+  return 0
+}
+
+# One row per criterion in scope. Exit 0 only when every one of them is mapped.
+report() {
+  local story="" phase="" ev="" ids_file="" baseline="" fail=0 declared scope id row status why
+  story="${1:?report: <story> <phase>}"; phase="${2:?report: <story> <phase>}"; shift 2
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --evidence) ev="$2"; shift 2 ;;
+      --ids)      ids_file="$2"; shift 2 ;;
+      --baseline) baseline="$2"; shift 2 ;;
+      *) die "report: unknown option $1" ;;
+    esac
+  done
+  [ -n "$ev" ] || ev="$(jq -r '.ac_evidence // ".claude/ac-evidence.json"' "$MANIFEST")"
+
+  # A top-level parse failure is reported ONCE as a broken file. Reporting it as "every criterion is
+  # unmapped" reads as catastrophe and sends the reader to write evidence instead of fix a comma.
+  jq -e . "$ev" >/dev/null 2>&1 || die "evidence file is unreadable or not valid JSON: $ev -- nothing about individual criteria can be concluded from this"
+
+  declared="$(parse_criteria "$story" "$phase")"
+
+  printf 'ac-oracle-binding  phase %s\n' "$phase"
+  # The scope line names WHERE the scope came from, never how big it is, and it differs
+  # per mode: saying "the declared set" while checking a trailer-derived set would be misleading,
+  # and printing nothing for an empty task scope is the empty-set-guard shape.
+  if [ -n "$ids_file" ]; then
+    if [ -s "$ids_file" ]; then
+      printf '  scope: the criteria this branch declares it closes (merge-base %s)\n' "${AC_MERGE_BASE:-unknown}"
+    else
+      printf '  scope: no criteria claimed by any commit on this branch\n'
+    fi
+    # An id a commit CLAIMS that the story does not declare must be reported. The intersection
+    # below would silently drop it, and an unclaimed id must be reported distinctly.
+    while IFS= read -r id; do
+      [ -n "$id" ] || continue
+      case "$id" in "$phase":AC*) ;; *) continue ;; esac
+      if ! grep -qFx "$id" <<<"$declared"; then
+        printf '  %-12s ORPHAN    claimed by a `Closes:` trailer, but the current story declares no such criterion\n' "$id"
+        fail=1
+      fi
+    done < "$ids_file"
+    scope="$(grep -Fxf "$ids_file" <<<"$declared" || true)"
+  else
+    printf '  scope: the declared set of %s\n' "$story"
+    scope="$declared"
+  fi
+
+  # Reference discipline across the artifacts this phase creates: bare ids fail, this-phase ids the
+  # story does not declare are ORPHANS (distinct from "unmapped" -- two mistakes, two messages).
+  scan_refs "$phase" "$declared" "$ev" "evidence row" ${baseline:+"$baseline" "baseline entry"} || fail=1
+
+  while IFS= read -r id; do
+    [ -n "$id" ] || continue
+    row="$(jq -c --arg id "$id" '.criteria[]? | select(.id == $id)' "$ev")"
+    if [ -z "$row" ]; then
+      baselined_row "$id" "$baseline" "$story" || fail=1
+      continue
+    fi
+    why="$(jq -r '.why // .exclusion.why // ""' <<<"$row")"
+    if [ -z "$why" ]; then
+      printf '  %-12s UNMAPPED  malformed: row has no `why`\n' "$id"; fail=1; continue
+    fi
+    status="$(jq -r '.status // ""' <<<"$row")"
+    case "$status" in
+      oracle)   oracle_row "$id" "$row" || fail=1 ;;
+      excluded) exclusion_row "$id" "$row" "$ev" || fail=1 ;;
+      *)        printf '  %-12s UNMAPPED  malformed: status %s\n' "$id" "${status:-<absent>}"; fail=1 ;;
+    esac
+  done <<<"$scope"
+
+  baseline_rows "$baseline" || true
+  printf '  %s\n  %s\n' "$DISCLAIMER_1" "$DISCLAIMER_2"
+  return "$fail"
+}
+
+# The dispatcher lists every arm, so a new arm adds a FUNCTION above it and never
+# has to touch this block. An un-implemented arm dies with a clear message.
+not_yet() { die "$1: not implemented until its task lands"; }
+# A criterion with no evidence row is UNMAPPED unless the baseline grandfathers it -- and a
+# grandfathered entry loses its protection the moment its declaration TEXT changes, which is what
+# makes the scoping "new-or-CHANGED" rather than merely "new". Cross-phase entries carry a null
+# digest (their story is unreadable here), so change detection is current-phase-only; that hole is
+# real and is stated here.
+baselined_row() {
+  local id="$1" baseline="$2" story="$3" entry want have
+  if [ -z "$baseline" ] || [ ! -r "$baseline" ]; then
+    printf '  %-12s UNMAPPED  no evidence row\n' "$id"; return 1
+  fi
+  entry="$(jq -c --arg id "$id" '.criteria[]? | select(.id == $id)' "$baseline")"
+  if [ -z "$entry" ]; then
+    printf '  %-12s UNMAPPED  no evidence row\n' "$id"; return 1
+  fi
+  want="$(jq -r '.digest // ""' <<<"$entry")"
+  if [ -n "$want" ]; then
+    # Byte-for-byte the same preimage as scripts/ac-baseline.sh's declaration_digest: `printf %s`,
+    # no trailing newline. Measured: the pipeline form appends one and the two digests then never
+    # match, so a freshly-added entry reads as CHANGED on the very next run. Two code paths
+    # computing "the same" digest differently is the encoder-divergence class.
+    have="$(printf '%s' "$(declaration_text "$story" "$id" 2>/dev/null)" | git hash-object --stdin)"
+    if [ "$want" != "$have" ]; then
+      printf '  %-12s UNMAPPED  baselined, but its declaration has CHANGED since it was grandfathered -- it needs an oracle now\n' "$id"
+      return 1
+    fi
+  fi
+  printf '  %-12s baselined grandfathered   %s\n' "$id" "$(jq -r '.why' <<<"$entry")"
+  return 0
+}
+
+# Nothing forces the baseline to shrink. Printing what remains on every run is the whole mitigation.
+baseline_rows() {
+  local baseline="$1" id
+  [ -n "$baseline" ] && [ -r "$baseline" ] || return 0
+  while IFS= read -r id; do
+    [ -n "$id" ] || continue
+    printf '  baseline: %s (explicit action required to add; removals automatic at phase close)\n' "$id"
+  done < <(jq -r '.criteria[]?.id // empty' "$baseline")
+  return 0
+}
+
+case "${1:-}" in
+  parse-criteria)      shift; parse_criteria "$@" ;;
+  declaration-text)    shift; declaration_text "$@" ;;
+  report)              shift; report "$@" ;;
+  scope-from-trailers) shift; scope_from_trailers "$@" ;;
+  scan-refs)           shift; scan_refs "$@" ;;
+  *) die "usage: ac-evidence.sh <parse-criteria|declaration-text|report|scope-from-trailers|scan-refs> ..." ;;
+esac
+````
+
+## AC baseline — `scripts/ac-baseline.sh`
+
+Grandfathering, so adopting the check on an existing project is not a wall of red. The asymmetry
+is the point: an entry leaves the baseline **automatically** the moment its criterion gets an
+oracle, and entering it is a **named, deliberate act**. Nothing forces the baseline to shrink; it
+is printed every run and that is all.
+
+Byte-identical to the shipped script, same as above.
+
+````bash
+#!/bin/bash
+# scripts/ac-baseline.sh -- the two named actions on the AC baseline, and its guard digest.
+#
+# Asymmetry is the point: REMOVAL is automatic and happens at phase close, ADDITION
+# requires this tool. A hand-edited entry leaves the guard stale and the gate fails naming it.
+#
+# The guard is a DIGEST, not a signature. There is no secret, so anyone can recompute it by hand and
+# bless new debt as old debt. That is the intended design -- adding must be an explicit, named
+# ACTION, not impossible -- and this tool never claims to be tamper-proof. What a reviewer cannot
+# tell from a green gate is `ac-baseline.sh add` from a hand-edit plus a recompute; that residual is
+# stated here rather than papered over.
+#
+# Envelope: bash + jq + git ONLY. Hashing is `git hash-object`, NOT `shasum` -- shasum is a perl
+# script on macOS and would widen that envelope; `git hash-object` is content-addressed and
+# already inside it.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+die() { printf '%s\n' "$*" >&2; exit 1; }
+
+sha() { git hash-object --stdin; }
+guard_of() { jq -S -c '.criteria' "$1" | sha; }
+
+# Digest of a criterion's FULL declaration, or empty when this story does not declare it (which is
+# the normal case for a cross-phase id). The empty case is guarded EXPLICITLY: piping nothing into a
+# hasher yields the hash of the empty string, which is non-empty, so a cross-phase entry would get a
+# bogus digest instead of null and then lose its baseline protection on the next run for no reason.
+declaration_digest() {
+  local story="$1" id="$2" text
+  [ -n "$story" ] && [ -r "$story" ] || return 1
+  text="$("$HERE/ac-evidence.sh" declaration-text "$story" "$id" 2>/dev/null)" || return 1
+  [ -n "$text" ] || return 1
+  printf '%s' "$text" | sha
+}
+
+cmd_init() {
+  local f="$1"
+  [ -e "$f" ] && die "refusing to overwrite an existing baseline: $f"
+  printf '{\n  "criteria": [],\n  "guard": ""\n}\n' > "$f"
+  jq --arg g "$(guard_of "$f")" '.guard = $g' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+}
+
+cmd_verify() {
+  local f="$1" want have
+  jq -e . "$f" >/dev/null 2>&1 || die "baseline is unreadable or not valid JSON: $f"
+  want="$(jq -r '.guard // ""' "$f")"
+  have="$(guard_of "$f")"
+  [ "$want" = "$have" ] && return 0
+  printf 'baseline guard is STALE -- an entry was added or edited without `ac-baseline.sh add`.\n' >&2
+  jq -r '.criteria[] | select(.action != "scripts/ac-baseline.sh add") | "  suspect entry: \(.id) (action: \(.action))"' "$f" >&2
+  printf '  expected guard %s, the file says %s\n' "$have" "$want" >&2
+  return 1
+}
+
+cmd_add() {
+  local f="$1" id="$2" why="$3" story="${4:-}" digest d
+  # Verify BEFORE mutating. The other order would recompute the guard over a set that also holds a
+  # hand-added entry, laundering it in the same run.
+  cmd_verify "$f" || die "refusing to add on top of a stale guard -- resolve that first"
+  digest="null"
+  if [ -n "$story" ] && d="$(declaration_digest "$story" "$id")" && [ -n "$d" ]; then
+    digest="\"$d\""
+  fi
+  jq --arg id "$id" --arg why "$why" --arg d "$(date -u +%Y-%m-%d)" --argjson dg "$digest" \
+     '.criteria += [{id: $id, digest: $dg, added: $d, action: "scripts/ac-baseline.sh add", why: $why}]' \
+     "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+  jq --arg g "$(guard_of "$f")" '.guard = $g' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+}
+
+cmd_prune() {
+  local f="$1" ev="$2" id removed=0
+  cmd_verify "$f" || die "refusing to prune on a stale guard -- that would launder a hand-added entry"
+  jq -e . "$ev" >/dev/null 2>&1 || die "evidence file is unreadable: $ev"
+  while IFS= read -r id; do
+    [ -n "$id" ] || continue
+    if jq -e --arg id "$id" '.criteria[]? | select(.id == $id)' "$ev" >/dev/null 2>&1; then
+      printf 'baseline: removed %s -- it now has an evidence row\n' "$id"
+      jq --arg id "$id" '.criteria |= map(select(.id != $id))' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+      removed=1
+    fi
+  done < <(jq -r '.criteria[].id' "$f")
+  if [ "$removed" = 1 ]; then
+    jq --arg g "$(guard_of "$f")" '.guard = $g' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+  fi
+  return 0
+}
+
+FILE=".claude/ac-baseline.json"; STORY=""; EV=""; WHY=""; HAVE_WHY=0
+SUB="${1:-}"; shift || true
+POS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --file)     FILE="$2"; shift 2 ;;
+    --story)    STORY="$2"; shift 2 ;;
+    --evidence) EV="$2"; shift 2 ;;
+    --why)      WHY="$2"; HAVE_WHY=1; shift 2 ;;
+    -*)         die "unknown option $1" ;;
+    *)          POS[${#POS[@]}]="$1"; shift ;;
+  esac
+done
+
+case "$SUB" in
+  init)   cmd_init "$FILE" ;;
+  verify) cmd_verify "$FILE" ;;
+  add)
+    [ "${#POS[@]}" -ge 1 ] || die "add requires a criterion id"
+    [ "$HAVE_WHY" = 1 ] && [ -n "$WHY" ] || die "add requires --why <reason>: an entry with no stated reason is the rot this baseline exists to make visible"
+    cmd_add "$FILE" "${POS[0]}" "$WHY" "$STORY"
+    ;;
+  prune)
+    [ -n "$EV" ] || die "prune requires --evidence <path>"
+    cmd_prune "$FILE" "$EV"
+    ;;
+  *) die "usage: ac-baseline.sh init|verify|add <id> --why <reason>|prune --evidence <path> [--file F] [--story S]" ;;
+esac
+````
 
 ## Self-test — `scripts/test-close-gate.sh`
 
@@ -773,17 +1823,46 @@ tmp=$(mktemp); jq '.exempt_changelog=true' "$M" > "$tmp" && mv "$tmp" .claude/cl
 neg "exempt_changelog=true + no SKIP line"  "exempt_changelog=true but no 'SKIP:'"  phase "$PHASE"
 restore
 
-echo "── context-floor arming row (warn-only — must NEVER fail the gate) ──"
+echo "── context-floor arming row (warn-only — THREE states, must NEVER fail the gate) ──"
+# The three states' discriminators. No marker may be a substring of another state's row: the old
+# predicate here was a bare `context-floor hook wired`, which ALSO matches the inert row
+# (`…wired but inert…`) — a check that cannot tell two states apart while looking like one that
+# can, which is the blur the three-state contract forbids. So the wired marker carries its parenthetical and the
+# inert marker carries `but inert`, and each state is asserted to exclude the other two rather
+# than merely to contain its own.
+FLOOR_NOT_WIRED='context-floor hook not wired'
+FLOOR_WIRED='context-floor hook wired (settings reference context-floor.sh)'
+FLOOR_INERT='context-floor hook wired but inert'
+FLOOR_SETTINGS='{"hooks":{"PreToolUse":[{"matcher":"Edit|Write","hooks":[{"type":"command","command":"/path/to/context-floor.sh"}]}]}}'
 FH="$TMP/fakehome"; mkdir -p "$FH"   # isolate from the real ~/.claude/settings.json
 o="$(HOME="$FH" bash scripts/close-gate.sh phase "$PHASE" 2>&1)"; rc=$?
-if grep -q 'context-floor hook not wired' <<<"$o" && [ "$rc" -eq 0 ]; then echo "  ✓ NEG  un-armed floor warns without failing the gate"; pass=$((pass+1)); else echo "  ✗ NEG  un-armed floor warn row (rc=$rc)"; failc=$((failc+1)); fi
-printf '{"hooks":{"PreToolUse":[{"matcher":"Edit|Write","hooks":[{"type":"command","command":"/path/to/context-floor.sh"}]}]}}\n' > .claude/settings.json
+if grep -qF "$FLOOR_NOT_WIRED" <<<"$o" && ! grep -qF "$FLOOR_WIRED" <<<"$o" && ! grep -qF "$FLOOR_INERT" <<<"$o" && [ "$rc" -eq 0 ]; then echo "  ✓ NEG  un-armed floor warns (state 1 alone) without failing the gate"; pass=$((pass+1)); else echo "  ✗ NEG  un-armed floor warn row (rc=$rc)"; failc=$((failc+1)); fi
+printf '%s\n' "$FLOOR_SETTINGS" > .claude/settings.json
 # capture-then-grep, herestring not a pipe: piping the gate straight into grep -q
 # makes grep's early exit SIGPIPE the still-writing gate (exit 141), and pipefail
 # surfaces 141 over grep's 0 — the direct-pipe assertion failed 100% of the time.
 o="$(HOME="$FH" bash scripts/close-gate.sh phase "$PHASE" 2>&1 || true)"
-grep -q 'context-floor hook wired' <<<"$o" && { echo "  ✓ POS  armed floor prints wired row"; pass=$((pass+1)); } || { echo "  ✗ POS  armed floor wired row"; failc=$((failc+1)); }
+if grep -qF "$FLOOR_WIRED" <<<"$o" && ! grep -qF "$FLOOR_NOT_WIRED" <<<"$o" && ! grep -qF "$FLOOR_INERT" <<<"$o"; then echo "  ✓ POS  armed floor prints the wired row and no other state"; pass=$((pass+1)); else echo "  ✗ POS  armed floor wired row"; failc=$((failc+1)); fi
 rm -f .claude/settings.json; restore
+# State 3 (wired but inert) is NOT reachable by running the gate, and that is a fact about the
+# gate rather than a limitation of this harness: the gate reads its manifest through `jq` long
+# before this row runs, so a machine where `command -v jq` fails kills it at the first `g` call
+# with rc 127 and no row prints at all. (Nor does the other direction help: the stripped-PATH GUI
+# client this warning is ABOUT leaves the gate itself able to resolve jq, so that world prints the
+# ✓ wired row and the HOOK is the inert one.) The branch is a contract for gates that CAN reach
+# it, so the only honest way to exercise it is to run the row's OWN BYTES, extracted from the
+# gate and never re-typed, under a PATH that has grep and no jq. A hand-written copy of the row
+# here would be a second implementation certifying itself.
+FR="$TMP/floor-row.sh"
+{ echo 'set -euo pipefail'; grep -E '^(ok|warn)\(\)' scripts/close-gate.sh
+  sed -n '/^floor_arming_row() {/,/^}/p' scripts/close-gate.sh; echo 'floor_arming_row'; } > "$FR"
+FB="$TMP/floor-bin"; mkdir -p "$FB"; ln -sf "$(command -v grep)" "$FB/grep"
+# bash resolved BEFORE the PATH is narrowed: `PATH=… bash …` searches the NEW PATH for bash
+# itself, and $FB deliberately holds nothing but grep.
+FBASH="$(command -v bash)"
+FW="$TMP/floor-wt"; mkdir -p "$FW/.claude"; printf '%s\n' "$FLOOR_SETTINGS" > "$FW/.claude/settings.json"
+o="$(cd "$FW" && HOME="$FH" PATH="$FB" "$FBASH" "$FR" 2>&1)"; rc=$?
+if grep -qF "$FLOOR_INERT" <<<"$o" && ! grep -qF "$FLOOR_WIRED" <<<"$o" && ! grep -qF "$FLOOR_NOT_WIRED" <<<"$o" && [ "$rc" -eq 0 ]; then echo "  ✓ NEG  wired-but-inert floor warns (state 3 alone) without failing"; pass=$((pass+1)); else echo "  ✗ NEG  wired-but-inert floor row (rc=$rc) — got: $o"; failc=$((failc+1)); fi
 
 echo "── retention hot-cap rows (warn-only — must NEVER fail the gate) ──"
 # NEG: over-cap RESUME warns without failing (first close — also seeds retention-state.json)
@@ -792,7 +1871,7 @@ o="$(bash scripts/close-gate.sh phase "$PHASE" 2>&1)"; rc=$?
 grep -q 'RESUME.md over hot cap' <<<"$o" && [ "$rc" -eq 0 ] \
   && { echo "  ✓ NEG  over-cap doc warns without failing"; pass=$((pass+1)); } \
   || { echo "  ✗ NEG  over-cap doc warn row (rc=$rc)"; failc=$((failc+1)); }
-# AC3: the SAME doc still over-cap at the second consecutive close escalates the wording
+# The SAME doc still over-cap at the second consecutive close escalates the wording
 o="$(bash scripts/close-gate.sh phase "$PHASE" 2>&1)"; rc=$?
 grep -q 'SECOND consecutive over-cap close' <<<"$o" && [ "$rc" -eq 0 ] \
   && { echo "  ✓ NEG  second consecutive close escalates wording"; pass=$((pass+1)); } \
@@ -942,10 +2021,10 @@ grep -q 'CHANGELOG \[Unreleased\] touched' <<<"$o" \
 git reset --quiet --hard HEAD~1; restore
 # NEG (case c, neither touched): already exercised above by the empty-range WT2 diff-range
 # test ("CHANGELOG not touched (empty range)") — that assertion's message text is unchanged
-# by this task, and it now runs the union-grep path (changelog.d/ nor CHANGELOG.md touched at
+# by the changelog.d support, and it now runs the union-grep path (changelog.d/ nor CHANGELOG.md touched at
 # an empty range → still 'CHANGELOG.md not touched'), so no separate case-c test is added here.
 
-echo "── AC3 invariant: two branches adding different fragments merge conflict-free ──"
+echo "── invariant: two branches adding different fragments merge conflict-free ──"
 # The machine-checkable proof this invariant rests on: the fragment layout means two parallel branches each
 # writing their OWN <date>-<branch-slug>.md fragment touch DIFFERENT files, so a merge cannot conflict.
 # Built in an ISOLATED throwaway repo (never the worktree) so branch churn is contained. Detection
@@ -954,8 +2033,8 @@ echo "── AC3 invariant: two branches adding different fragments merge confli
 # lines ('+<<<<<<<'), so a '^<<<<<<<' grep silently misses them (a false pass). A real merge's rc
 # has teeth by construction — a genuine shared-tail append (the pre-fragment layout) returns non-zero.
 # docs/journal.d runs through this same loop alongside the other fragment dirs (changelog.d, docs/qa-log.d):
-# journal is the doc that HAD the collision risk before AC7's retroactive branch-slug rename (it
-# was first shipped as a monthly monolith; AC7 retrofitted the <date>-<branch-slug>.md naming onto
+# journal is the doc that HAD the collision risk before its retroactive branch-slug rename (it
+# was first shipped as a monthly monolith; the <date>-<branch-slug>.md naming was retrofitted onto
 # it) — so this loop is that retrofit's machine-checkable proof too, not just its own two dirs.
 for D in changelog.d docs/qa-log.d docs/journal.d; do
   INV="$TMP/inv-$(echo "$D" | tr / -)"; rm -rf "$INV"; mkdir -p "$INV"
@@ -993,6 +2072,98 @@ J="$(g journal)"; sedi 's/\*\*Plan deviations/\*\*Plan XXXXX/g' "$J"; neg "journ
 J="$(g journal)"; sedi 's/\*\*Plan deviations/\*\*Plan XXXXX/g' "$J"; neg "journal missing Plan-deviations (2nd, order-independence guard)" "missing 'Plan deviations'" task; restore
 rm -f "$(g test_evidence)" ; neg "stale/missing test-evidence" 'stale/missing test-evidence' task; restore
 printf '' > "$(g test_evidence)" ; neg "empty-but-fresh test-evidence rejected (-s)" 'stale/missing test-evidence' task; restore
+
+# --- what row 7's ✓ is ALLOWED to claim ---------------------------------------------------------
+# Deliberately adjacent to the test-evidence fail-paths above: those pin what the row DOES, these
+# pin what its ✓ may SAY: never more than the mechanism behind it (no "fresh", no "since it ran",
+# only the caller-owned detail string) --
+# the gate reads a FILE and no branch of it observes a process.
+#
+# The same assertion also lives in `scripts/test_close_gate.py` in the project-life-cycle
+# repo. The two intentionally cover the SAME locked contract in different execution contexts --
+# this harness is what an adopter materializes and runs against their own gate, and the pytest
+# copy is the only layer whose red path can be observed there. Neither replaces the other.
+# ROW7_CONTRACT_PHRASE and ROW7_FORBIDDEN_TOKENS below are BYTE-IDENTICAL to that file's constants
+# of the same names; a change to either literal must be made in BOTH places, and a
+# cross-file check in that file reddens on divergence.
+ROW7_CONTRACT_PHRASE='this row may only claim fingerprint/evidence agreement, not test execution'
+# GUIDANCE, NOT ENFORCEMENT. These four wordings each overclaim what this row can know;
+# matching one is a tripwire for that specific phrasing, NOT a proof that the row is
+# honest. An unlisted synonym ("verified", "confirmed", "attests") passes this list. What stops
+# that is a human reading ROW7_CONTRACT_PHRASE when rewording -- which is why the phrase is in the
+# failure message rather than a bare "assertion failed".
+ROW7_FORBIDDEN_TOKENS=("fresh" "since it ran" "proves" "proving")
+# The basis nouns are deliberately NOT part of the mirrored pair: the two evidence modes carry
+# different nouns, an adopter may legitimately re-word the sentence around them, and the pytest
+# copy holds the full required-token tuples. Kept here to the load-bearing halves of each mode's
+# claim, as INDEPENDENT tokens rather than one contiguous phrase -- a contiguous
+# 'unchanged since this file was generated' reddens on an added comma or a re-ordered clause,
+# which is the false red this looser check exists to avoid (the pytest home uses four
+# independent tokens for the same reason).
+if [ "$(jq -r '.test_evidence_inputs | type' "$M" 2>/dev/null || echo null)" = array ]; then
+  R7_BASIS_TOKENS=("unchanged" "generated"); R7_DISCLAIM='not proof'
+  # fingerprint mode needs a real header, and it must come from the gate's own subcommand rather
+  # than a hand-written line -- the digest is the gate's to compute. The set arg is accepted by
+  # gates that require one and ignored by gates that do not, so this call is portable.
+  #
+  # temp-then-move, NOT `{ header; body; } > "$EV"`: the redirect truncates the destination before
+  # the header step can fail, so a failing header still leaves a body-only file behind. That is the
+  # same shape gen-test-evidence.sh exists to avoid, and reproducing it here would make this
+  # fixture write the very artifact its assertions then judge.
+  R7EVTMP="$(mktemp)"
+  if bash scripts/close-gate.sh evidence-header task > "$R7EVTMP" 2>/dev/null && [ -s "$R7EVTMP" ]; then
+    echo "test-run output" >> "$R7EVTMP"
+    mv -f "$R7EVTMP" "$(g test_evidence)"
+  else
+    rm -f "$R7EVTMP"
+    echo "  ✗ SETUP row-7 fixture: 'close-gate.sh evidence-header task' produced no header; the"
+    echo "         two row-7 assertions below judge whatever evidence file was already present"
+  fi
+else
+  R7_BASIS_TOKENS=("mtime"); R7_DISCLAIM='not evidence'
+fi
+# Taken from a REAL gate run, not from the gate's source text: a source grep cannot tell a row
+# that is printed from one that is unreachable. PHASE is passed because task mode requires it on
+# some gates and ignores it on others; passing it works against both.
+R7OUT="$(bash scripts/close-gate.sh task "$PHASE" 2>&1 || true)"
+R7ROW="$(grep '^✓' <<<"$R7OUT" | grep 'test-evidence' || true)"
+# ASCII whitespace collapse + case fold, with the locale PINNED. This mirrors the MATCHING
+# SEMANTICS of _normalised() in scripts/test_close_gate.py, and the pin is what makes that true:
+# measured on macOS, BSD `tr -s '[:space:]'` under a UTF-8 locale IS multibyte-aware and collapses
+# U+00A0, while the Python side (an explicit ASCII character class) is not -- so without LC_ALL=C
+# a row separated by non-breaking spaces was caught HERE and missed THERE, and the byte-identity
+# check above cannot see a divergence in matching semantics. ASCII-only Python plus a C-locale
+# `tr` are what agree; neither alone does. Named limitation, stated rather than implied: with the
+# locale pinned, BOTH homes now miss a banned wording split by non-ASCII whitespace.
+R7NORM="$(printf '%s' "$R7ROW" | LC_ALL=C tr -s '[:space:]' ' ' | LC_ALL=C tr '[:upper:]' '[:lower:]')"
+# (i) presence + names its evidence basis. A banned-claims assertion alone is structurally blind
+# to the row DISAPPEARING: deleting it removes the offending words too, and a negative-only test
+# goes green on an empty screen.
+R7MISSING=""
+for t7 in "${R7_BASIS_TOKENS[@]}" "$R7_DISCLAIM"; do
+  case "$R7NORM" in *"$t7"*) ;; *) R7MISSING="$R7MISSING '$t7'" ;; esac
+done
+if [ -n "$R7ROW" ] && [ -z "$R7MISSING" ]; then
+  echo "  ✓ POS  row 7's ✓ is printed and names its evidence basis"; pass=$((pass+1))
+else
+  echo "  ✗ POS  row 7's ✓ missing or no longer names its evidence basis (missing$R7MISSING) — $ROW7_CONTRACT_PHRASE, and it has to say which basis it means; row: ${R7ROW:-<none printed>}"; failc=$((failc+1))
+fi
+# (ii) banned claims. Reported by token, so the message says WHICH wording came back.
+R7BANNED=""
+for t in "${ROW7_FORBIDDEN_TOKENS[@]}"; do
+  case "$R7NORM" in *"$t"*) R7BANNED="$R7BANNED '$t'" ;; esac
+done
+if [ -z "$R7ROW" ]; then
+  # An absent row must not be reported as a clean banned-list scan: with nothing to read this
+  # check has no opinion, and printing one would be the vacuous pass it exists to prevent.
+  echo "  ✗ NEG  row 7's ✓ was not printed at all, so the banned-claims scan read nothing — $ROW7_CONTRACT_PHRASE"; failc=$((failc+1))
+elif [ -z "$R7BANNED" ]; then
+  echo "  ✓ NEG  row 7's ✓ makes no execution/freshness claim"; pass=$((pass+1))
+else
+  echo "  ✗ NEG  row 7's ✓ makes an execution/freshness claim$R7BANNED — $ROW7_CONTRACT_PHRASE; row: $R7ROW"; failc=$((failc+1))
+fi
+restore
+
 # test_runs_required neg/pos
 tmp=$(mktemp); jq '.test_runs_required=3' "$M" > "$tmp" && mv "$tmp" .claude/close-gate.json
 echo "test-run output" > "$(g test_evidence)"  # fresh but no RUNS= marker
@@ -1010,7 +2181,7 @@ git add .close-gate-probe.py && git -c user.email=t@t -c user.name=t commit --qu
 neg "orphan [DEBUG- in diff (large-diff SIGPIPE guard)"  'orphan \[DEBUG- logs'  task
 git reset --quiet --hard HEAD~1; restore
 git -c user.email=t@t -c user.name=t commit --quiet --allow-empty -m "chore: not a cadence task"
-# check #1 is path-based when the manifest declares product_paths (an empty commit touches no
+# Check #1 is path-based when the manifest declares product_paths (an empty commit touches no
 # product path → 'no product-tree path') and the legacy verb check otherwise ('no feat/fix commit').
 # An empty chore commit fails BOTH branches, so accept either message — the NEG stays correct whether
 # the manifest under test predates product_paths or ships it (the manifest example now does).
@@ -1055,9 +2226,9 @@ Note: the orphan-`[DEBUG-` check in `close-gate.sh` excludes both `scripts/close
 
 ## Wiring — three layers, the hook is NOT optional
 
-The gate only forces anything if something *runs* it. The three layers are defense-in-depth, not a menu — **layer 1 is the default and must be active; 2 and 3 are additional cover.** Shipping only layer 3 is the trap that produces the exact symptom this gate exists to kill: the model is *supposed* to run `make phase-done`, finishes the code, feels done, and never runs it. A gate that depends on the model remembering to invoke it is the unreliable layer the skill warns about — make the un-bypassable layer carry the weight.
+The gate only forces anything if something *runs* it. The three layers are defense-in-depth, not a menu — **layer 1 is the default and must be active; 2 and 3 are additional cover.** Shipping only layer 3 is the trap that produces the exact symptom this gate exists to kill: the model is *supposed* to run `make phase-done`, finishes the code, feels done, and never runs it. A gate that depends on the model remembering to invoke it is the unreliable layer the skill warns about — make the automatic layers carry the weight.
 
-1. **git pre-push hook — DEFAULT, un-bypassable, installed at bootstrap.** On a `feat/phase-*` branch it runs the **`task`** gate: a phase's first completed task is pushable the moment it exists (product-tree change + this task's journal FACT + fresh evidence), reconciling push-immediate with a gate that used to demand phase-close artifacts on commit one. It rejects an incomplete *task* push physically, regardless of model behaviour. This is the layer that actually works for per-task discipline. Script below. Never `--no-verify`. **Enforcement-shift note:** the heavier `phase` gate is no longer run by pre-push, so phase-close completeness (CHANGELOG / spec / plan / ROADMAP) is enforced at the **merge boundary** by layers 2 + 3 below — un-bypassable on repos with a required-status CI check (layer 2), and model-discipline + the human merge gate on CI-less repos. This is a deliberate trade: intermediate pushes become possible (they were structurally impossible before) at the cost of moving phase-done off the per-push hard block.
+1. **git pre-push hook — DEFAULT, automatic, installed at bootstrap.** (Automatic, *not* un-bypassable: `git push --no-verify` skips every pre-push hook. That is a fact about git, and the layer is strong because skipping it is a deliberate visible act rather than a forgotten step — not because it cannot be skipped. Only layer 2's server-side check is genuinely un-bypassable.) On a `feat/phase-*` branch it runs the **`task`** gate: a phase's first completed task is pushable the moment it exists (product-tree change + this task's journal FACT + fresh evidence), reconciling push-immediate with a gate that used to demand phase-close artifacts on commit one. It rejects an incomplete *task* push physically, regardless of model behaviour. This is the layer that actually works for per-task discipline. Script below. Never `--no-verify`. **Enforcement-shift note:** the heavier `phase` gate is no longer run by pre-push, so phase-close completeness (CHANGELOG / spec / plan / ROADMAP) is enforced at the **merge boundary** by layers 2 + 3 below — un-bypassable on repos with a required-status CI check (layer 2), and model-discipline + the human merge gate on CI-less repos. This is a deliberate trade: intermediate pushes become possible (they were structurally impossible before) at the cost of moving phase-done off the per-push hard block.
 2. **CI job (the un-bypassable `phase-done` for shared repos).** A `close-gate` job in PR-time CI that runs `phase-done`. With branch protection requiring it, this is the hard, un-bypassable phase-close gate for shared repos — it is where phase-done's teeth moved. Also catches a task push whose phase was never completed. Slower loop (push-then-fail) but covers shared repos.
 3. **Model-run discipline (additional, always).** The AI MUST run `make task-done` after each cadence task and `make phase-done` before opening the PR, and **paste the gate output**. "I ran it, it passed" without pasted output is an unverified claim — treat as not-run. On a CI-less repo this plus the human merge gate is what enforces phase-done, so it is not optional there.
 
@@ -1069,7 +2240,7 @@ Committed to the repo (so teammates + fresh clones get it) and activated with on
 #!/usr/bin/env bash
 # close-gate pre-push hook — installed by /init-harness (idempotent).
 # Rejects pushing a feat/phase-* branch whose TASK close-gate fails: each pushed task must
-# carry its product-tree change + journal FACT + fresh evidence. Phase-close artifacts (CHANGELOG /
+# carry its product-tree change + journal FACT + evidence unchanged since generated. Phase-close artifacts (CHANGELOG /
 # spec / plan / ROADMAP) are enforced by `phase` mode at the merge boundary (CI + human), not here.
 # Bypass is NOT allowed — fix the missing artifact. Never --no-verify.
 set -uo pipefail
@@ -1101,13 +2272,13 @@ chmod +x .githooks/pre-push
 git config core.hooksPath .githooks   # activates it for this clone
 ```
 
-> `core.hooksPath` relocates the hooks dir, so put any *other* project hooks under `.githooks/` too. If the project already uses husky / lefthook, add the `close-gate.sh phase` call to that tool's pre-push stage instead — same effect, don't fight the existing manager.
+> `core.hooksPath` relocates the hooks dir, so put any *other* project hooks under `.githooks/` too. If the project already uses husky / lefthook, add the `close-gate.sh task` call to that tool's pre-push stage instead — same effect, don't fight the existing manager.
 
 ### Retrofit an existing project (one block, idempotent)
 
 A project that has the gate scripts but no active hook (the common gap) is fixed by running the activation block above, then proving it: `git config core.hooksPath` should print `.githooks`, and `make test-gate PHASE=X.Y` should show every check flips.
 
-`/init-harness` scaffolds the gate script + self-test + manifest + `make` targets (`task-done` / `phase-done` / `test-gate`) AND installs+activates this pre-push hook by default (not a stub). Existing projects: copy `scripts/close-gate.sh` + `scripts/test-close-gate.sh`, run `/init-harness --refresh` (which writes `.githooks/pre-push` + sets `core.hooksPath` if missing), then `make test-gate PHASE=X.Y` once to confirm every check flips.
+`/init-harness` scaffolds the gate script + self-test + manifest + `make` targets (`task-done` / `phase-done` / `test-gate`) AND installs+activates this pre-push hook by default (not a stub). Existing projects: materialize `scripts/close-gate.sh` + `scripts/test-close-gate.sh` from §"Portable gate script" and §"Self-test" above, run `/init-harness --refresh` (which writes `.githooks/pre-push` + sets `core.hooksPath` if missing), then `make test-gate PHASE=X.Y` once to confirm every check flips.
 
 ---
 
@@ -1148,10 +2319,10 @@ close-gate: per-task | pr-boundary
 
 ### The attack surface — read this before flipping to `pr-boundary`
 
-The per-task human gate exists for one reason beyond diff confidence: **any approval the AI can write itself is not an approval.** Two real incidents shaped the current design:
+The per-task human gate exists for one reason beyond diff confidence: **any approval the AI can write itself is not an approval.** Two failure modes shaped the current design:
 
-1. An AI treated a prose-only ("soft") close gate as optional and bypassed it. The fix was structural — a hard hook the model cannot talk past — not more prose.
-2. An AI fabricated the user's approval: it wrote "user approved" into the record when the user had said nothing.
+1. An AI can treat a prose-only ("soft") close gate as optional and bypass it. The fix was structural — a hard hook the model cannot talk past — not more prose.
+2. An AI can fabricate the user's approval: write "user approved" into the record when the user has said nothing.
 
 `pr-boundary` widens the window in which the AI works with no human reading anything. That is acceptable ONLY while the merge boundary keeps a **human-written approval marker the AI physically cannot author**: the user themself performs the approving act (clicks merge, writes the approving PR comment/reply, runs the merge command), and wherever a hook checks for an approval marker, the marker's semantics must be "human typed this" — never a file or string the AI can produce on the user's behalf. If the project's merge approval can be generated by the AI, the self-certification hole is open and `pr-boundary` is NOT safe to enable.
 
@@ -1168,12 +2339,12 @@ Flipping to `pr-boundary` is a falsifiable experiment, not a permanent setting:
 ## Anti-patterns — STOP
 
 - **Claiming "done" without running the gate / without pasting its output** → not done; run it, paste it.
-- **Hand-writing the test-evidence file** instead of letting the runner emit it → defeats freshness check; the runner writes it, mtime proves tests actually ran.
+- **Hand-writing the test-evidence file** instead of letting the runner emit it → defeats the freshness check; the runner writes it, and even then the gate only checks the file is unchanged since it was generated, never that tests ran.
 - **`--no-verify` to push past the pre-push gate** → blocked; fix the missing artifact, never bypass.
 - **Marking a `task-done` ✗ as "fine, I'll do it later"** then opening the PR → `phase-done` will re-block; the debt compounds. Close each task fully.
 - **Editing `exempt_*` to silence a check you just don't want to do** → only legitimate when the phase truly has no observable behavior; the `SKIP:` reason is reviewed at PR.
 - **Gate passing treated as "quality approved"** → no. Gate proves ceremony happened. Correctness is the validator; craft is the code-quality reviewer. All three are separate.
-- **`phase-done` doesn't check fresh test-evidence** → the original gap that let the test pile slip: the pre-push hook runs `phase-done`, but if `phase-done` omits the evidence check, a phase ships with tests never run (`.claude/.last-test-run` never written, yet the gate PASSes). `task-done` checks evidence but has no hook; `phase-done` is hooked but skipped the check. Tests = the one artifact with no live gate. Fix: `phase-done` checks fresh `test_evidence` (mtime > HEAD) whenever `test_command` is set. Confirm the gate output shows a `fresh test-evidence` line.
+- **`phase-done` doesn't check fresh test-evidence** → the gap that lets the test pile slip: if the gate mode a hook or CI job runs omits the evidence check, a phase ships with tests never run (`.claude/.last-test-run` never written, yet the gate PASSes). Fix: `phase-done` checks `test_evidence` whenever `test_command` is set — by declared-input fingerprint when `test_evidence_inputs` is set, else by mtime > HEAD. Confirm the gate output shows a `test-evidence` line. (It used to say "confirm a **`fresh test-evidence`** line": that adjective was removed from every branch of `evidence_runs_ok`, because neither mode can support it — so an adopter looking for the old string would find nothing and wrongly conclude the check is unwired.)
 - **Gate scripts + manifest + `make` targets present, but NO active pre-push hook** (`git config core.hooksPath` empty AND no husky/lefthook stage) → only the weakest layer (model-discipline) is live, and the model skips wrap-up as predicted. This is NOT "the gate is installed." Run the retrofit block (write `.githooks/pre-push` + `git config core.hooksPath .githooks`); confirm with `git config core.hooksPath`.
 - **Treating the pre-push hook as one option among three** ("I'll just run `make phase-done` myself") → the hook is the default and must be active; model-discipline is additional, not a substitute. The whole point is to not depend on the model remembering.
 - **Tagging a task `Archetype: sweep` then adding net surface** → the diff-direction teeth block it. If the add is a real perf win, log `SWEEP-PERF: <evidence>` (human-written, audited at PR); if it is not a cleanup, it was the wrong archetype — re-tag it `build`/`maintain` and run the chain that shape demands. Do NOT add a hollow `SWEEP-PERF:` line to dodge the check; the reviewer reads it.

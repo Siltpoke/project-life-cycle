@@ -28,7 +28,7 @@ Do NOT use for bare actions (fix, rename, clean up) — that is noise.
    quotes, backticks, or `$()` in the user's own words get re-evaluated by a shell.
 4. If stderr prints `related prior intent […]`, show it to the user and ask whether
    this supersedes it. If yes, re-run passing `--supersedes <prior-id>` and
-   `--status firm`; Phase-1 leaves the old entry in place (additive).
+   `--status firm`; the old entry is left in place (additive).
 5. Confirm back: "Captured [<id>] <subject> — I'll recall this when it's relevant."
    (Closing the Grudin loop: the recorder must see the payoff.)
 
@@ -39,3 +39,4 @@ held — rather than a fresh intent; the measurement instrument counts these ent
 
 See `skills/project-lifecycle/references/cognition.md` for the schema, signals, and the
 ADR-vs-intent-vs-noise line.
+

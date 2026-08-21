@@ -5,10 +5,6 @@ drift and surfaces it on the welcome-back card; reconcile *lands* the drifted de
 `docs/ROADMAP.md` + the project's read-first status doc (RESUME.md by default; STATUS.md where present),
 staged and human-approved. Human-invoked; never auto-commits the SSOT.
 
-> First designed elsewhere, then adopted into PLC because reconciling
-> roadmap/status drift is lifecycle management — PLC's remit, not the other tool's. The original design doc lives in
-> that other project as historical provenance.
-
 ## Two arms of drift
 
 - **git-drift** — decisions that shipped in merged PRs since the last checkpoint but never landed in the
@@ -37,7 +33,7 @@ in-the-moment discipline is slipping — not a score to accumulate, just a per-r
 - **Never auto-commit the SSOT** — the human approves each staged edit individually; apply only approved ones.
 - **Human-invoked only** — never run reconcile's writes from an automated hook.
 - **Structure-preserving** — whichever ROADMAP layout the project uses stays intact: milestone-table columns
-  + status-legend glyphs (PLC's own `docs/ROADMAP.md`), or emoji section headers + 4-column mainline/backlog
+  + status-legend glyphs (the default layout in `references/roadmap.md`), or emoji section headers + 4-column mainline/backlog
   tables (the sectioned/fisheye shape). Either way the `/catchup` fisheye parser keys off it. See
   `references/roadmap.md`.
 - **Archive-never-delete** — removals go through the status-file ring / `docs/archive` (`references/roadmap.md`

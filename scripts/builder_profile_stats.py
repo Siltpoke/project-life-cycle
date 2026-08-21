@@ -27,11 +27,35 @@ from datetime import datetime, timedelta, timezone, tzinfo
 from pathlib import Path
 from statistics import median as _median
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # 2: plan_mode gained `signal` + a nullable `ratio`
 WORD_RE = re.compile(r"[a-z0-9]+")
 NIGHT_HOURS = set(range(18, 24)) | set(range(0, 6))  # 18:00–05:59 local
 DAY_HOURS = set(range(9, 18))  # 09:00–17:59 local
 TOP_NGRAMS = 10
+
+# Keys a permission-mode event is known to carry the mode under. Read as a
+# field-presence assertion, not just a lookup: if a real permission-mode event
+# carries none of these, the transcript schema moved and the plan-mode number is
+# unknown rather than zero.
+PERMISSION_MODE_KEYS = ("permissionMode", "mode")
+
+PLAN_SIGNAL_NOTES = {
+    "present": (
+        "permission-mode events carrying a known mode key were found, so the "
+        "ratio is a real measurement."
+    ),
+    "schema-drift": (
+        "permission-mode events exist but NONE carries a known mode key "
+        f"({', '.join(PERMISSION_MODE_KEYS)}) — the transcript field was "
+        "renamed. ratio is unknown, NOT zero: re-verify the field against a raw "
+        "transcript and update PERMISSION_MODE_KEYS before citing plan mode."
+    ),
+    "absent": (
+        "no permission-mode event of any mode appears in the window, so "
+        "'plan mode genuinely unused' and 'the event type was renamed' are "
+        "indistinguishable. ratio is unknown, NOT zero."
+    ),
+}
 
 
 # --------------------------------------------------------------------------- #
@@ -137,6 +161,25 @@ def is_sidechain(event: dict) -> bool:
     return event.get("isSidechain") is True
 
 
+def is_permission_mode_event(event: dict) -> bool:
+    """True for a permission-mode switch event, whatever mode it carries.
+
+    This is the *channel* plan-mode detection rides on. Counted separately from
+    plan itself so a vanished channel is distinguishable from a real zero — see
+    ``PLAN_SIGNAL_NOTES``.
+    """
+    return event.get("type") == "permission-mode"
+
+
+def permission_mode_value(event: dict) -> str | None:
+    """The mode a permission-mode event carries, or None if it uses no known key."""
+    for key in PERMISSION_MODE_KEYS:
+        value = event.get(key)
+        if value is not None:
+            return str(value)
+    return None
+
+
 def is_plan_event(event: dict) -> bool:
     """A ``permission-mode`` event switching into plan mode.
 
@@ -145,9 +188,9 @@ def is_plan_event(event: dict) -> bool:
     field is ``permissionMode``, and the event carries no timestamp) — *not*
     as an ``ExitPlanMode`` tool_use (which never appears in practice).
     """
-    if event.get("type") != "permission-mode":
+    if not is_permission_mode_event(event):
         return False
-    return (event.get("permissionMode") or event.get("mode")) == "plan"
+    return permission_mode_value(event) == "plan"
 
 
 def _reduce_session(events: list[dict], index: int, tz: tzinfo | None) -> dict:
@@ -161,11 +204,19 @@ def _reduce_session(events: list[dict], index: int, tz: tzinfo | None) -> dict:
     ngram_lines: list[list[str]] = []
     user_prompts = 0
     plan = False
+    pm_events = 0
+    pm_keyed = 0
 
     for ev in events:
         # Skip sub-agent turns — the profile is about how the *user* drives.
         if is_sidechain(ev):
             continue
+        if is_permission_mode_event(ev):
+            # Counted for every mode, before the plan check: this is the
+            # field-presence evidence that tells a real zero from a dead parser.
+            pm_events += 1
+            if permission_mode_value(ev) is not None:
+                pm_keyed += 1
         if is_plan_event(ev):
             plan = True
             continue
@@ -196,6 +247,8 @@ def _reduce_session(events: list[dict], index: int, tz: tzinfo | None) -> dict:
         "start": min(timestamps) if timestamps else None,
         "end": max(timestamps) if timestamps else None,
         "plan": plan,
+        "pm_events": pm_events,
+        "pm_keyed": pm_keyed,
         "user_prompts": user_prompts,
         "word_lengths": word_lengths,
         "char_lengths": char_lengths,
@@ -209,18 +262,20 @@ def _reduce_session(events: list[dict], index: int, tz: tzinfo | None) -> dict:
 # --------------------------------------------------------------------------- #
 # trajectory                                                                  #
 # --------------------------------------------------------------------------- #
-def _subset_metrics(subset: list[dict]) -> dict:
+def _subset_metrics(subset: list[dict], plan_signal: str) -> dict:
     sessions = len(subset)
     planned = sum(1 for s in subset if s["plan"])
     words = [w for s in subset for w in s["word_lengths"]]
     return {
         "sessions": sessions,
-        "plan_ratio": _ratio(planned, sessions),
+        # Same rule as the top-level block: without a live signal channel this is
+        # unknown, not 0.0 — otherwise a dead parser reads as "stopped planning".
+        "plan_ratio": _ratio(planned, sessions) if plan_signal == "present" else None,
         "prompt_len_median": int(_median(words)) if words else 0,
     }
 
 
-def _trajectory(reduced: list[dict]) -> dict:
+def _trajectory(reduced: list[dict], plan_signal: str) -> dict:
     dated = [s for s in reduced if s["start"] is not None]
     if len(dated) < 3:
         return {"status": "insufficient"}
@@ -228,8 +283,8 @@ def _trajectory(reduced: list[dict]) -> dict:
     third = len(dated) // 3  # guard above guarantees third >= 1
     return {
         "status": "ok",
-        "first_third": _subset_metrics(dated[:third]),
-        "last_third": _subset_metrics(dated[-third:]),
+        "first_third": _subset_metrics(dated[:third], plan_signal),
+        "last_third": _subset_metrics(dated[-third:], plan_signal),
         # honest-metrics: the middle band is intentionally not in either third;
         # name it so a reader doesn't assume the two thirds exhaust the data.
         "middle_sessions_excluded": len(dated) - 2 * third,
@@ -256,6 +311,8 @@ def compute_stats(
     char_lengths: list[int] = []
     ngram_counters = {n: Counter() for n in (2, 3, 4)}
     planned_sessions = 0
+    pm_events = 0
+    pm_keyed = 0
 
     for s in reduced:
         models.update(s["models"])
@@ -264,6 +321,8 @@ def compute_stats(
         word_lengths.extend(s["word_lengths"])
         char_lengths.extend(s["char_lengths"])
         planned_sessions += 1 if s["plan"] else 0
+        pm_events += s["pm_events"]
+        pm_keyed += s["pm_keyed"]
         for tokens in s["ngram_lines"]:
             for n in (2, 3, 4):
                 ngram_counters[n].update(_ngrams(tokens, n))
@@ -282,6 +341,16 @@ def compute_stats(
         verdict = "mixed"
 
     longest = _longest_session(reduced)
+
+    # Field-presence assertion, tri-state. A bare `ratio: 0.0` cannot tell
+    # "never used plan mode" from "the transcript field moved and the detector
+    # now matches nothing", so the channel is measured alongside the value.
+    if pm_keyed > 0:
+        plan_signal = "present"
+    elif pm_events > 0:
+        plan_signal = "schema-drift"
+    else:
+        plan_signal = "absent"
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -315,8 +384,15 @@ def compute_stats(
             "n": len(word_lengths),
         },
         "plan_mode": {
+            "signal": plan_signal,
             "sessions_with_plan": planned_sessions,
-            "ratio": _ratio(planned_sessions, len(sessions)),
+            "ratio": _ratio(planned_sessions, len(sessions))
+            if plan_signal == "present"
+            else None,
+            "permission_mode_events": pm_events,
+            "permission_mode_events_with_known_key": pm_keyed,
+            "known_keys": list(PERMISSION_MODE_KEYS),
+            "note": PLAN_SIGNAL_NOTES[plan_signal],
         },
         "tools": {
             "ranking": [[name, c] for name, c in tools.most_common()],
@@ -334,7 +410,7 @@ def compute_stats(
             str(n): [[phrase, c] for phrase, c in ngram_counters[n].most_common(TOP_NGRAMS)]
             for n in (2, 3, 4)
         },
-        "trajectory": _trajectory(reduced),
+        "trajectory": _trajectory(reduced, plan_signal),
     }
 
 

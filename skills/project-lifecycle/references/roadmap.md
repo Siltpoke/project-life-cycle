@@ -109,8 +109,8 @@ parser is language-agnostic — CJK labels are fine):
 | vision   | 1st `**bold**` line at column 0, before the first `## ` header         | breadcrumb top line          |
 | current  | 2nd such `**bold**` line                                               | "you are here"               |
 | done      | body of `## ✅ …`, a `·`-separated category line (truncated at `---`/`***`) | collapsed count + categories |
-| doing    | `**bold**` lines inside `## 🔄 …`                                      | focal row (▶)                |
-| mainline | first 4-col table in `## 🛣 …` — `name \| what \| weight \| eta`        | Future table                 |
+| doing    | rows of the `## 🛣 …` table whose **name cell LEADS with `▶` / `◐`**    | focal row (▶)                |
+| mainline | first 4-col table in `## 🛣 …` — `name \| what \| weight \| eta`, minus the doing rows | Future table |
 | backlog  | first 4-col table in `## 🗂 …` — same four columns                     | Backlog table                |
 
 Rules for this layout:
@@ -120,7 +120,36 @@ Rules for this layout:
   label, so a label alone on its line with the value on the next line mis-parses.
 - `## 🛣` and `## 🗂` are markdown tables with exactly four columns; weight uses a compact glyph
   (🟢 light · 🟡 medium · 🔴 heavy) and eta a short phrase (`~1 session` / `several sessions`).
+  The column count is read from **your header row**, so a table that genuinely declares five columns
+  is understood as five — it simply has no four-field shape for the card to render.
+- **Escape a pipe you mean as text: write `\|`, including inside backticks.** That is GFM's rule
+  (`| a \| b |` is one cell), and a backticked span earns no exemption from it. What happens if you
+  forget is deliberately not silence: a row carrying MORE cells than your header declares is
+  recovered by anchoring on the ends — first cell is the name, last two are weight and eta, and
+  everything between rejoins into `what` — because the free-text column is the only one that
+  realistically carries a stray pipe, and this layout puts it neither first nor last. A row with
+  **fewer** cells than declared is not recovered, because it is not an over-split and guessing at it
+  would read `what` as `weight`; it is counted instead, and `/catchup` renders that count. Recovery
+  is a safety net, not a licence: a stray pipe in the LAST column still lands wrong, and only the
+  escape prevents that.
 - Keep each row's milestone id in the name cell — the close-gate greps the file for the phase id.
+- **The station you are on is marked where the parser looks: a `▶` (or `◐`) leading its name cell.**
+  Markup around the glyph is fine — `▶ **Name**`, `**▶ Name**` and `` `▶ Name` `` are all read the
+  same way, because the cell is stripped of bold and backticks BEFORE the glyph is looked for.
+  What must not happen is a glyph sitting mid-cell: that is prose, not a status — the same rule the
+  flat-Milestones layout applies to its status cell.
+  Such a row becomes the card's focal row and is removed from the Future table, so it is never
+  listed as both. **Zero, one, or several such rows are all legal**: none is the normal state
+  between phases and renders a breadcrumb with no focal segment rather than an invented one; one is
+  the usual case; and if there are several, the first is the focal row and the rest are named on a
+  single collapsed line (the card's own rules cover this — only the FIRST carries the `▶` focus
+  marker). A cell holding a glyph and no name is not a station and is skipped.
+- **`## 🔄` is prose for a human; the parser does not read it.** It used to be the `doing` source,
+  and that is exactly why it stopped being one: the rule was "a bold span at the start of a
+  line is an item", and a prose section whose paragraphs open with bold topic sentences satisfies
+  it on every paragraph. Run against a real ROADMAP, the rule
+  returned mostly prose sentences rather than stations. A station has to be marked by
+  structure, not by how a paragraph happened to be typeset.
 - Done-history rows still fold **verbatim** into a `<details>` (anti-bloat), placed AFTER a `---`
   rule inside `## ✅` (the `·`-list parser truncates at the rule, so the table never pollutes the
   category line) or under a separate non-scanned `## ` header.
@@ -152,7 +181,7 @@ Applies to the project's **read-first status doc** (RESUME.md in this skill's de
 
 > The ring is the SPECIAL CASE (for the read-first status doc) of the generalized milestone-close archival drain in `references/retention.md` §"The drain algorithm" — same window (active + 2 closed), same verbatim-move + pointer-stub rules, applied there to every known append-only doc.
 
-The structural bug this fixes: an append-forever close protocol grows the read-first file until a single Read can't load it (observed on a real project: 634 lines / 76k+ tokens — "read first every session" physically degraded). Closing paragraphs are write-once-read-rarely; the active section is read every session. Separate them.
+The structural bug this fixes: an append-forever close protocol grows the read-first file until a single Read can't load it, and "read first every session" physically degrades. Closing paragraphs are write-once-read-rarely; the active section is read every session. Separate them.
 
 **The ring (capacity 2).** The status file's active section ("Now" / current phase) holds the active entry + the **2 most recent closed entries** only. At every milestone/track close, in ONE edit:
 
@@ -162,7 +191,7 @@ The structural bug this fixes: an append-forever close protocol grows the read-f
 
 O(1) per close, rides the existing close step — no new gate, no periodic chore.
 
-**Rules that came out of the first live run:**
+**Rules of the ring:**
 
 - **Destination is a dedicated archive file — never RESUME-as-verbose-history or any other living doc with its own job.** Stuffing closed paragraphs into a doc that has a different responsibility is the same disease in a different organ. (And this protocol never merges the ROADMAP map anywhere — the milestone TABLE stays; see the anti-pattern below.)
 - **Verbatim means verbatim.** Zero edits at move time — every archived segment is byte-identical to its original (git history is the second copy; a byte-count balance check proves nothing was dropped).
@@ -170,7 +199,7 @@ O(1) per close, rides the existing close step — no new gate, no periodic chore
 - **Sidecar / doc-only entries don't occupy ring slots** (see `parallel-work.md`) — only code-track closes rotate the ring.
 - **Deliberately ungated.** No close-gate check, no tripwire: forgetting just makes the status file fat again, which is loud and self-healing. Re-evaluate after 2-3 closes.
 
-**Honest boundary:** the ring fixes the close protocol's append path only. Other append-forever sections (icebox / decisions-log style) keep growing on their own — that is a capture-discipline problem (entries must stay capped at a few lines, not grow into diagnoses), not something the ring solves. In practice: ring landed the structural goal (zero written-once-stays-forever in the active section) but the file still missed its single-Read token target because of exactly those sections.
+**Honest boundary:** the ring fixes the close protocol's append path only. Other append-forever sections (icebox / decisions-log style) keep growing on their own — that is a capture-discipline problem (entries must stay capped at a few lines, not grow into diagnoses), not something the ring solves. So the ring can reach its structural goal (zero written-once-stays-forever in the active section) while the file still misses a single-Read size target because of exactly those sections.
 
 ## Anti-patterns
 

@@ -34,7 +34,7 @@ from transcript_util import (
 REPO = Path(__file__).resolve().parent.parent
 REGISTRY = REPO / "docs" / "agent-chats-index.md"
 
-# Codex rollout envelope types — mirror src/router/codex-transcript.ts.
+# Codex rollout envelope types.
 _CODEX_ENVELOPE_TYPES = frozenset(
     {"session_meta", "turn_context", "response_item", "event_msg"}
 )
@@ -189,10 +189,47 @@ def _cmd_upsert(args: argparse.Namespace) -> int:
     # command exists for. Trigger A is scoped by its caller (the skill's
     # main-thread handoff step); the empty-id check below is the only guard.
     tags = [t.strip() for t in args.tags.split(",") if t.strip()]
+
+    # When a transcript is supplied it, not the caller, decides identity. The
+    # failure this closes: a human
+    # reading uuids off rollout FILENAMES gets the wrong one, because a subagent rollout's filename
+    # carries the subagent's uuid rather than the conversation's. Correcting
+    # here makes that path impossible rather than discouraged.
+    resume_id = args.resume_id.strip()
+    tpath = (args.transcript_path or "").strip()
+    if tpath and Path(tpath).exists():
+        try:
+            text = Path(tpath).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = ""
+        if text:
+            # ORDER IS LOAD-BEARING: the subagent check runs BEFORE id derivation
+            # and returns, so a subagent rollout never reaches the registry even
+            # when the caller hand-passed an id for it. Deriving first happens to
+            # produce the same outcome today only because the skip below also
+            # returns; insert anything between the two and a hand-passed guardian
+            # id starts landing again. Keep the check first.
+            kind = rollout_subagent_kind(text)
+            if kind:
+                print(
+                    f"agent_chats: {tpath} is a codex {kind} subagent rollout, "
+                    "not a conversation — skipping.",
+                    file=sys.stderr,
+                )
+                return 0
+            derived = rollout_conversation_id(text)
+            if derived and derived != resume_id:
+                print(
+                    f"agent_chats: resume id from transcript ({derived}) "
+                    f"overrides the passed id ({resume_id or '<empty>'}).",
+                    file=sys.stderr,
+                )
+                resume_id = derived
+
     git = resolve_git_fields(args.cwd)
     now = args.now or _now()
     rec = ChatRecord(
-        resume_id=args.resume_id.strip(),
+        resume_id=resume_id,
         family=(args.family or "claude").strip(),
         model=args.model,
         intensity=args.intensity,
@@ -272,6 +309,68 @@ def detect_family(text: str) -> str:
     return "claude"
 
 
+def rollout_conversation_id(text: str) -> str:
+    """The conversation a codex rollout belongs to, read from its own envelope.
+
+    Reads ``session_meta.payload.session_id`` and deliberately NOT ``id``. For a
+    subagent rollout the two differ: ``session_id`` is the parent conversation's
+    and ``id`` is the subagent transcript's own. ``session_id`` is therefore the
+    field that names a conversation, and ``id`` names a file.
+
+    The filename is not an input. That is the point: the rollout filename embeds
+    a uuid which for a subagent is the *subagent's*, and reading identity off the
+    filename is the mistake this function exists to remove.
+
+    Returns "" for a transcript with no codex ``session_meta`` envelope.
+    """
+    for obj in _iter_events(text):
+        if obj.get("type") == "session_meta":
+            payload = obj.get("payload")
+            if isinstance(payload, dict):
+                sid = payload.get("session_id")
+                if isinstance(sid, str) and sid.strip():
+                    return sid.strip()
+    return ""
+
+
+def rollout_subagent_kind(text: str) -> str:
+    """Label this rollout as a subagent transcript, or "" if it is a conversation.
+
+    Codex marks an ordinary conversation with a string ``source`` (observed:
+    ``"exec"``) and a subagent transcript with an object carrying a ``subagent``
+    key (observed: ``{"subagent": {"other": "guardian"}}``).
+
+    The predicate is "``source`` is an object with a ``subagent`` key" — wider
+    than the single observed value, narrower than a guess about codex's full
+    taxonomy. If codex marks a subagent some other way, this misses it; that
+    limit is stated here rather than left to be discovered.
+
+    Returns a human-readable label for the message the caller prints, never a
+    bare bool — a skip has to be able to say what it skipped.
+    """
+    for obj in _iter_events(text):
+        if obj.get("type") != "session_meta":
+            continue
+        payload = obj.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        source = payload.get("source")
+        if not isinstance(source, dict):
+            return ""  # a conversation: `source` is a plain string like "exec"
+        sub = source.get("subagent")
+        if sub is None:
+            return ""
+        if isinstance(sub, dict):
+            for value in sub.values():
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+            return "subagent"
+        if isinstance(sub, str) and sub.strip():
+            return sub.strip()
+        return "subagent"
+    return ""
+
+
 def extract_model(text: str, family: str) -> str:
     if family == "codex":
         for obj in _iter_events(text):
@@ -312,6 +411,18 @@ def _cmd_capture_hook(args: argparse.Namespace) -> int:
     except OSError:
         print("agent_chats: cannot read transcript — skipping.", file=sys.stderr)
         return 0
+    kind = rollout_subagent_kind(text)
+    if kind:
+        # Not a conversation — a subagent transcript that happens to live in the
+        # same directory. Named rather than dropped quietly: a silent skip is the
+        # classic silent-degrade failure.
+        print(
+            f"agent_chats: {tpath} is a codex {kind} subagent rollout, "
+            "not a conversation — skipping.",
+            file=sys.stderr,
+        )
+        return 0
+
     if not passes_substance(text, args.min_msgs):
         print("agent_chats: trivial session — skipping.", file=sys.stderr)
         return 0

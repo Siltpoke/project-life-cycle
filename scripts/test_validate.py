@@ -1,9 +1,9 @@
 """Tests for scripts/validate.py's input surface.
 
 Check 9 ("all .md are valid UTF-8") used to walk the filesystem with
-``REPO.rglob("*.md")``. On this repo that reached orders of magnitude more files than are
+``REPO.rglob("*.md")``. In a working copy that can reach orders of magnitude more files than are
 tracked — the remainder being a co-located tool's cache directory,
-the gitignored ``docs/`` tree, and other dot-directories. Two consequences:
+a gitignored notes tree, and other dot-directories. Two consequences:
 
 1. The validator's verdict depended on unrelated local state it never intended
    to own.
@@ -50,8 +50,8 @@ def test_tracked_md_is_checked(repo: Path) -> None:
 
 
 def test_gitignored_md_is_not_checked(repo: Path) -> None:
-    """The live case: docs/ is kept out of version control here, and another
-    tool's cache lands a large number of .md files in a co-located dot-directory. Neither is a deliverable."""
+    """The live case: a notes tree kept out of version control, or another
+    tool's cache landing a large number of .md files in a co-located dot-directory. Neither is a deliverable."""
     (repo / "ignored").mkdir()
     (repo / "ignored/cache.md").write_text("someone else's file\n", encoding="utf-8")
 
@@ -101,7 +101,7 @@ def test_dot_git_is_never_walked(tmp_path: Path) -> None:
 
 
 def test_tracked_but_deleted_md_does_not_crash(repo: Path) -> None:
-    """Regression (independent review, MEDIUM): `git ls-files` lists a tracked file
+    """Regression: `git ls-files` lists a tracked file
     even after it's deleted in the working tree but not staged. The UTF-8 check must
     not raise FileNotFoundError on it — mid-refactor `rm` of a tracked .md would
     otherwise crash the validator (and dump a traceback into the evidence file)."""

@@ -12,32 +12,84 @@ node_modules/
 __pycache__/
 .pytest_cache/
 
-docs/
-
 # the tasklist-first guard's portable satisfier — per-phase working state, not a
 # deliverable, and it carries a nonce that is meaningless outside its session
+#
+# THE LEADING SLASH IS CORRECT AND MUST STAY. "Un-anchoring" this line would be wrong:
+# per git's own documentation, a pattern
+# containing a slash anywhere other than the trailing position is ALREADY anchored to the
+# .gitignore's directory — so the leading `/` is redundant here, and `**/.claude/tasklist.md`
+# would be strictly LOOSER, not tighter. The real concern is that this
+# path is not the only place a tasklist can live: the writer honours `PLC_TASKLIST_FILE` and will
+# put one anywhere. A static pattern cannot follow an override, so the answer is an invariant
+# that RESOLVES the configured path — scripts/invariants/tasklist-never-tracked.sh — not a
+# looser glob.
 /.claude/tasklist.md
+
+# The CI state a producer puts on record for the welcome-back card. MACHINE-LOCAL by
+# construction — it says what ONE machine observed about ONE commit at ONE moment, so committing it
+# would publish a fact about somebody else's clone. Worse, a checkout of an older branch would then
+# hand the card a green recorded against a commit nobody is standing on.
+#
+# Leading slash for the same reason as the line above — a pattern with an interior slash is already
+# anchored, so `/` is the correct spelling and `**/` would be strictly looser. Unlike the tasklist,
+# this path has NO environment override to follow: scripts/session_card.py resolves
+# `<root>/.claude/ci-status.json` and nothing else. Enforced by
+# scripts/invariants/ci-status-never-tracked.sh, which checks TRACKED before IGNORED because git's
+# ignore rules do not apply to tracked files.
+/.claude/ci-status.json
+
+# the marker vocabulary the ROADMAP progress detectors match against. It is
+# per-user ON PURPOSE: for a ROADMAP not written in English, a detector for "this
+# paragraph restates progress" needs tokens in that language, and those belong to the user's own
+# documents, not to the tracked scripts. Externalising the vocabulary keeps them out of the
+# deliverable. The scripts read it when present; PLC_ROADMAP_MARKERS overrides the path.
+/.claude/roadmap-progress-markers.txt
+
+# Downloaded model caches from semantic-search tooling (e.g. an ONNX sentence-transformer).
+# UNANCHORED on purpose: the directory lands wherever the calling tool's cwd happened to be, not
+# at the repo root, so a tool run from a subdirectory leaves it in that subdirectory.
+# Tens of MB of binary weights,
+# zero relationship to this repo's deliverable, and one `git add -A` away from the history.
+**/local_cache/
 # machine-local hook state. The fixed hooks write these to ~/.claude/plc-state/<repo>/
 # instead, so on a current plugin build these paths are never created — but a session running an
 # OLDER cached build still writes them here, and an unignored file dirties the tree, which is one
-# of close-gate-nudge.sh's own trigger conditions. Observed live minutes after the fix commit:
-# both stamps reappeared as `??` and the hook then warned about "uncommitted changes" that were
-# its own two writes. Kept as a permanent floor rather than removed once everyone upgrades — two
+# of close-gate-nudge.sh's own trigger conditions.
+# Kept as a permanent floor rather than removed once everyone upgrades — two
 # lines, against a failure that is silent.
-/.claude/.close-gate-nudge-last
-/.claude/.clear-nudge-last
-/.claude/.gate-runs/
+#
+# UNANCHORED on purpose. These were `/.claude/...`, i.e. repo-root only — but the old
+# build writes to `<cwd>/.claude/...`, and `cwd` is wherever the shell happens to be standing, not
+# the repo root. A stamp written while a shell sits in a subdirectory lands in that
+# subdirectory's `.claude/`, is NOT covered by an anchored rule, and a `git add -A` would
+# track it into the product tree — where it ships to every adopter and churns on every run. The
+# net has to be as deep as the thing it is catching. `scripts/invariants/no-hook-state-tracked.sh`
+# is the backstop for the same class at any path this list has not thought of.
+**/.claude/.close-gate-nudge-last
+**/.claude/.clear-nudge-last
+**/.claude/.gate-runs/
 
 # session-local resume artifact (never publish)
 # NB: anchor to root so only the top-level RESUME.md is ignored — an unanchored
 # `RESUME.md` matches any nested path of that name on case-insensitive filesystems
-# (macOS APFS) and could wrongly ignore a shipped file. (Historically this collided
-# with the old `commands/resume.md`, since renamed to `commands/recall.md`.)
+# (macOS APFS) and could wrongly ignore a shipped file.
 /RESUME.md
 # cold sibling written by /handoff (archive-before-overwrite) — holds verbatim
-# outgoing snapshots incl. cross-project identifiers; never publish.
+# outgoing snapshots of session state; never publish.
 /RESUME-archive.md
 
 # local embedding-model cache (ONNX weights etc.) pulled by dev tooling — a large
 # binary blob, never part of the skill deliverable; keep it out of history.
 /local_cache/
+
+# transient mutation-run artifact: test-hooks.sh AC5 copies the hook next to the real one to
+# prove sibling resolution, and an interrupted run can outlive its cleanup trap. Never committed.
+**/context-floor.AC5-mutant.sh
+
+# Codex-host harness artifacts: per-machine instructions and hook wiring for a Codex CLI session,
+# not authored here. Ignored rather than
+# committed: they are per-machine host wiring, and an untracked file no rule covers is
+# one `git add -A` away from entering history unreviewed.
+/.codex/
+/AGENTS.md

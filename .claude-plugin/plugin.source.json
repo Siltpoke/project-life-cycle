@@ -1,0 +1,49 @@
+{
+  "_comment": "SINGLE SOURCE OF TRUTH for every host plugin manifest. Edit THIS file, then run `python3 scripts/gen_plugin_manifests.py`. Never hand-edit .*-plugin/*.json — they are generated and CI re-checks them.",
+  "name": "project-lifecycle",
+  "marketplaceName": "project-life-cycle",
+  "version": "4.0.0",
+  "_hostVersionOverrides_comment": "Hosts whose version is DELIBERATELY not part of the synced set, per scripts/invariants/manifest-version-sync.sh: that invariant syncs exactly .claude-plugin, .qoder-plugin and .codebuddy-plugin, and excludes codex on the stated grounds that it carries its own X.Y.Z+codex.<stamp> scheme. Antigravity is excluded differently — its schema has no version field at all. Setting a host here means 'this host's version is independent by design', NOT 'this host is behind'.",
+  "hostVersionOverrides": {
+    "codex": "0.11.0+codex.20260707001844"
+  },
+  "author": {
+    "name": "Jiaqi Duan",
+    "url": "https://github.com/Victoriakaey"
+  },
+  "repository": "https://github.com/Victoriakaey/project-life-cycle",
+  "license": "PolyForm-Perimeter-1.0.1",
+  "keywords": [
+    "project-lifecycle",
+    "workflow",
+    "planning",
+    "handoff",
+    "software-development"
+  ],
+  "skills": "./skills/",
+  "descriptions": {
+    "detailed": "Doc-first per-phase workflow skill: brainstorm → spec → plan → execute → dual-track smoke → handoff → PR → milestone-done. Includes cost-aware behaviors (offset+limit reads, compact output flags, codemap pattern, RTK/token-savior adoption guidance).",
+    "short": "End-to-end coordinator for traceable, multi-phase software project execution.",
+    "marketplace": "End-to-end coordinator skill for traceable, multi-phase software project execution. Spec → plan → execute → smoke → handoff → PR discipline with built-in cost-aware behaviors.",
+    "marketplaceEntry": "Skill that enforces a doc-first per-phase workflow: brainstorm with research gate, planned execution with per-task cadence, dual-track smoke (manual + Playwright), phase delivery handoff, and milestone-done gate. Designed to be the same workflow across all your projects."
+  },
+  "marketplaceEntry": {
+    "source": "./",
+    "category": "workflow"
+  },
+  "interface": {
+    "displayName": "Project Life Cycle",
+    "shortDescription": "Traceable planning and delivery workflow",
+    "longDescription": "Coordinate software projects through intent clarification, research-backed planning, per-task execution, smoke testing, handoff notes, and PR-ready delivery discipline.",
+    "developerName": "Jiaqi Duan",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Use $project-lifecycle to plan and deliver this project phase."
+    ],
+    "brandColor": "#2563EB"
+  }
+}

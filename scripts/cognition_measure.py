@@ -96,13 +96,13 @@ def _decision_hint(rows: list[dict]) -> str:
     loaded = [r for r in rows if r.get("cognition_loaded")]
     if len(loaded) < 5:
         return (f"decision: KEEP MEASURING — {len(loaded)}/5+ milestones with cognition loaded "
-                "(need ~5-8 before deciding Phase 2).")
+                "(need ~5-8 before deciding on the heavier machinery).")
     reex = _trend([r.get("reexplain_count") for r in loaded])
     turns = _trend([r.get("turns") for r in loaded])
     tokens = _trend([r.get("tokens_est") for r in loaded])
     if reex == "down" and turns != "up" and tokens != "up":
-        return "decision: Phase 2 JUSTIFIED (data) — reexplain trend down, efficiency not inflated."
-    return ("decision: STOP / do not build Phase 2 — reexplain not falling or efficiency inflated "
+        return "decision: heavier machinery JUSTIFIED (data) — reexplain trend down, efficiency not inflated."
+    return ("decision: STOP / do not build the heavier machinery — reexplain not falling or efficiency inflated "
             "(Markus Sandelin: memory is overhead when it doesn't pay).")
 
 

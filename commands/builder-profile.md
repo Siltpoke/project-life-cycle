@@ -46,3 +46,4 @@ The agent reading your transcripts already runs locally. There is no remote step
 ## Mechanism
 
 Full pipeline prompt, JSONL parser schema, framing-safety rules (incl. the synthesis spine + provenance + PASS-4 verification), and report shape: `skills/project-lifecycle/references/builder-profile.md`.
+

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# potency-runner.sh — out-of-envelope producer of potency-result.json (verify-gate AC3 / R4).
+# potency-runner.sh — out-of-envelope producer of potency-result.json (verify-gate potency proof).
 # For each guard-manifest.json entry that declares a firingFixture, prove the guard is POTENT:
 #   fixtureResult = run the fixture with the guard intact  (a potent guard → fixture passes)
 #   neuterResult  = neuter the guard, re-run the fixture    (a potent guard → fixture now FAILS)
@@ -57,10 +57,10 @@ trap cleanup EXIT
 # from the committed guard-manifest.json. This is the same trust level as "the PR's own test suite
 # runs in CI" — NOT a new injection surface — PROVIDED this runner only ever runs in an ephemeral
 # CI sandbox against a reviewed/mergeable branch, never a maintainer's persistent local checkout and
-# never auto-triggered on an unreviewed fork PR. any unattended runner MUST preserve that boundary.
+# never auto-triggered on an unreviewed fork PR. Any unattended runner MUST preserve that boundary.
 run_fixture() {
   local cmd="$1" rc=0
-  bash -c "$cmd" >/dev/null 2>&1 || rc=$?
+  /bin/bash -c "$cmd" >/dev/null 2>&1 || rc=$?
   if [ "$rc" -eq 0 ]; then echo passed
   elif [ "$rc" -eq 127 ]; then echo errored
   else echo failed; fi
@@ -88,7 +88,7 @@ while [ "$i" -lt "$COUNT" ]; do
   if [ -n "$FILE" ] && [ -f "$FILE" ]; then
     CUR_FILE="$FILE"; CUR_BAK="$(mktemp)"; cp "$FILE" "$CUR_BAK"   # trap now guards the restore
     if [ -n "$NEUTER" ]; then
-      bash -c "$NEUTER" >/dev/null 2>&1 || true
+      /bin/bash -c "$NEUTER" >/dev/null 2>&1 || true
     elif [ -n "$LINE" ]; then
       sed -i.sedbak "${LINE}s/.*//" "$FILE" && rm -f "$FILE.sedbak"
     fi

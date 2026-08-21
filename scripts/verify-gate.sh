@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# verify-gate.sh — per-PR "qualified?" artifact VALIDATOR (Half A). Envelope: bash + git + jq
-# + coreutils. NO non-jq interpreters (AC7). Reads artifacts other runtimes produce; never runs an
+# verify-gate.sh — per-PR "qualified?" artifact VALIDATOR. Envelope: bash + git + jq
+# + coreutils. NO non-jq interpreters. Reads artifacts other runtimes produce; never runs an
 # LLM or a test. Exit 0 = qualified-to-merge (deterministic conjunction); non-zero = block.
 #
-# TRUST BOUNDARY (AC9): this gate TRUSTS the CI-regenerated producer
+# TRUST BOUNDARY: this gate TRUSTS the CI-regenerated producer
 # artifacts it reads (report.json, potency-result.json, and, where a liveness layer is
 # built — quarantine.json / canary-result.json). It is STALENESS-resistant (SHA-binding defeats a
 # stale or copied artifact) but NOT forgery-resistant: a hand-crafted artifact (e.g. a fabricated
@@ -22,7 +22,7 @@ HEAD="${2:?usage: verify-gate.sh <BASE_SHA> <HEAD_SHA>}"
 PLCDIR="$REPO/.plc"
 REPORT="${PLC_REPORT:-$PLCDIR/report.json}"
 
-# --- override-only-diff bypass detection (AC1b, R2) ----------------------------------------
+# --- override-only-diff bypass detection -------------------------------------------------
 # Resolves the SHA-staleness paradox: a NOT_QUALIFIED report is bound (prHeadSha) to a
 # reviewed sha X. A human then pushes a commit that adds ONLY .plc/override-<X>.json — HEAD
 # moves to Y, but the report still says X (still correct: nothing about the reviewed code
@@ -51,7 +51,7 @@ bad() { echo "✗ $1"; fail=1; }
 ok()  { echo "✓ $1"; }
 na()  { echo "◻ N/A — $1 (recorded)"; }   # explicit non-qualified-but-not-blocked path
 
-# --- report existence + schema + SHA binding (AC2, part) ----------------------------------
+# --- report existence + schema + SHA binding ------------------------------------------
 # REPORT_IS_OBJECT is computed once and reused by every later block that reads into the report
 # (requirements floor, per-AC verdicts, verdict-teeth) so a valid-JSON-but-wrong-type artifact
 # (e.g. a top-level array) can never reach an unguarded `.field` jq read downstream — it fails
@@ -81,7 +81,7 @@ else
   fi
 fi
 
-# --- requirements floor: report AC-ids == base spec AC-ids, else N/A (AC4, R1) ------------
+# --- requirements floor: report AC-ids == base spec AC-ids, else N/A -------------------
 if SPEC_JSON="$(git -C "$REPO" show "$BASE:.plc/spec.json" 2>/dev/null)"; then
   if ! printf '%s' "$SPEC_JSON" | jq -e 'type=="object"' >/dev/null 2>&1; then
     bad "base .plc/spec.json is not a JSON object"
@@ -105,7 +105,7 @@ else
   na "no .plc/spec.json on base — spec-introducing / process-only PR — gate N/A"
 fi
 
-# --- per-AC verdict + typed, existence-checked evidence (AC2, R3) --------------------------
+# --- per-AC verdict + typed, existence-checked evidence ---------------------------------
 if [ "$REPORT_IS_OBJECT" -eq 1 ]; then
   PATYPE="$(jq -r '.perAc | type' "$REPORT" 2>/dev/null || echo missing)"
   if [ "$PATYPE" != "array" ]; then
@@ -145,7 +145,7 @@ if [ "$REPORT_IS_OBJECT" -eq 1 ]; then
   fi
 fi
 
-# --- verdict-teeth: override-present-if-not-qualified (AC1, HARD CONSTRAINT) ---------------
+# --- verdict-teeth: override-present-if-not-qualified (HARD CONSTRAINT) ---------------------
 # Key off the human OVERRIDE ARTIFACT, never the LLM verdict value. The block is the ABSENCE
 # of the override, not the verdict's value or correctness — an LLM verdict alone can never
 # mechanically block a merge. Malformed/unsupported verdict values are treated conservatively
@@ -168,7 +168,7 @@ if [ "$REPORT_IS_OBJECT" -eq 1 ]; then
   fi
 fi
 
-# --- AC3: guard potency — a routed guard needs a manifest fixture-proof or an audited waiver --
+# --- guard potency — a routed guard needs a manifest fixture-proof or an audited waiver --
 # The gate READS diff-guards.json (routed guards, produced by diff-guards.sh out-of-envelope) +
 # guard-manifest.json (author bindings) + potency-result.json (produced by potency-runner.sh).
 # It does NOT re-derive "added" (that is the producer's job). Every routed guard must be

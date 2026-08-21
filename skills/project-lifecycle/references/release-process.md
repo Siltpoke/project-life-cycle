@@ -70,6 +70,14 @@ git commit -m "chore(release): vX.Y.Z
 
 The CHANGELOG section in the commit body lets `git log` carry the release notes without round-tripping to the GitHub Release page.
 
+**If the repo wires the close-gate pre-push hook, regenerate the test-evidence file here — after the release commit, before the push:**
+
+```bash
+bash scripts/gen-test-evidence.sh task
+```
+
+The release commit rewrites the plugin manifests and `CHANGELOG.md`, which are both declared `product_paths` (so the gate runs its diff-triggered checks on this push) and declared `test_evidence_inputs` (so the evidence fingerprint it compares against just went stale) — without this step the push is blocked. The position is load-bearing in both directions: *after* the bump commit, because the fingerprint covers the bumped manifests and regenerating earlier records the pre-bump tree; *before* the push, because that is what the gate stops. Use the generator, never the manifest's raw `test_command` — that pipeline ends in a bare `tee` and exits 0 even when the step writing the header fails, silently overwriting good evidence with broken evidence.
+
 ```bash
 git tag vX.Y.Z -m "vX.Y.Z — <one-line summary from the section's intro paragraph>"
 git push origin vX.Y.Z

@@ -6,11 +6,11 @@
 > absent — never counts as a PASS on its own. This doc is the *how-to* for the advisory Copilot
 > pass (useful where an adopter's Copilot works); it does not decide whether a phase may close.
 >
-> **Why it was demoted (measured, not assumed).** A review OBJECT being present is not evidence a
-> review was PERFORMED. In one sampled batch, **every** Copilot review objects across a sampled batch of PRs are
-> `state:COMMENTED` bodies reading *"Copilot was unable to review … quota limit"* — each has the
-> right author (`copilot-pull-request-reviewer[bot]`) and a fresh `submitted_at`, and each is a
-> non-review. Any terminator keyed on "a Copilot review object exists" would read all seven as a
+> **Why it was demoted.** A review OBJECT being present is not evidence a
+> review was PERFORMED. A Copilot review object can be a
+> `state:COMMENTED` body reading *"Copilot was unable to review … quota limit"* — with the
+> right author (`copilot-pull-request-reviewer[bot]`) and a fresh `submitted_at`, and still be a
+> non-review. Any terminator keyed on "a Copilot review object exists" would read it as a
 > clean pass. So a Copilot object of ANY shape (findings, "no issues", or a failure body) is only
 > advisory input; the gate is the independent reviewer's affirmative verdict + an empty coverage
 > window (`review-record.md`). Absence, silence, and failure bodies all map to **UNVERIFIED**.
@@ -51,7 +51,7 @@ digraph copilot_loop {
 
 > **The `"no — clean" → merge` edge above is the OLD, dishonest terminator — superseded.** Copilot
 > returning no findings does not license a merge: it is indistinguishable from Copilot failing to
-> review (the quota-failure case, 7/7 here). The merge gate is the independent reviewer's
+> review (the quota-failure case). The merge gate is the independent reviewer's
 > affirmative verdict with an empty coverage window (`review-record.md` §"Termination contract").
 > Read this graph as the *advisory* Copilot pass only.
 
@@ -126,7 +126,7 @@ clean verdict over a coverage window that reaches HEAD. A Copilot "no actionable
 useful signal to fold into the fixups, not a licence to merge; a Copilot failure body (quota/error)
 is **UNVERIFIED**, not "0 findings".
 
-**Hard round cap: 3 re-triggered rounds maximum.** The loop does not converge on its own — every fixup adds new text, and new text is fresh nitpick surface (observed: a prose PR ran 10 → 5 → 1 → 1 → 4 findings across five rounds; both real bugs surfaced by round 2). After round 3: remaining CRITICAL/IMPORTANT findings are fixed WITHOUT re-triggering another review; remaining minor findings are reply-deferred in-thread (`Deferred by round-cap: logged as S3 follow-up`) and the PR proceeds to the user's merge decision. This is a loop guard independent of reviewer judgment — never "just one more round."
+**Hard round cap: 3 re-triggered rounds maximum.** The loop does not converge on its own — every fixup adds new text, and new text is fresh nitpick surface. After round 3: remaining CRITICAL/IMPORTANT findings are fixed WITHOUT re-triggering another review; remaining minor findings are reply-deferred in-thread (`Deferred by round-cap: logged as S3 follow-up`) and the PR proceeds to the user's merge decision. This is a loop guard independent of reviewer judgment — never "just one more round."
 
 ## When to skip the loop
 
@@ -156,7 +156,7 @@ When that happens:
 
 The PR can merge once the stand-in's pass-2 findings list derives to APPROVED-CLEAN (zero open CRITICAL/IMPORTANT) AND the local test-evidence comment is posted on the PR (per `ci-cd-gates.md` §"Posting test evidence"). The Copilot loop closure rule ("clean OR user signs off") is satisfied because (a) 1st-pass findings are all addressed + (b) the pass-2 findings list is clean (the equivalent of Copilot's "no actionable issues" re-trigger reply).
 
-**Merge-readiness statement to include in the PR-comment evidence** (matches the format in `ci-cd-gates.md` §"Posting test evidence"): `Ready for merge: stand-in pass 1 → N findings → resolved in <SHA>; pass 2 → APPROVED-CLEAN; R5 green.`
+**Merge-readiness statement to include in the PR-comment evidence** (matches the format in `ci-cd-gates.md` §"Posting test evidence"): `Ready for merge: stand-in pass 1 → N findings → resolved in <SHA>; pass 2 → APPROVED-CLEAN; local 3×-green passed.`
 
 ## Stacked PR caveat
 
@@ -171,7 +171,7 @@ After base merges and the PR auto-retargets to `main`, **do not re-trigger** unl
 - ❌ Amending the fixup commit after Copilot reads it → review thread points at a dead SHA.
 - ❌ Marking a finding "won't fix" without a deferred-reason reply → reviewer can't tell if it was intentional or missed.
 - ❌ Skipping the loop on a stacked PR because "Copilot already reviewed the parent" — stacked PRs add NEW commits that the parent review never saw.
-- ❌ **Treating the presence of a Copilot review object as proof a review happened** — the headline defect described above. A `state:COMMENTED` object with the right author and a fresh `submitted_at` can be a "unable to review … quota limit" failure body (7/7 here). Presence ≠ performed. Only the independent reviewer's affirmative verdict gates.
+- ❌ **Treating the presence of a Copilot review object as proof a review happened** — the headline defect described above. A `state:COMMENTED` object with the right author and a fresh `submitted_at` can be a "unable to review … quota limit" failure body. Presence ≠ performed. Only the independent reviewer's affirmative verdict gates.
 - ❌ **Trusting the directive prompt (the "state explicitly if nothing actionable" line) to make silence safe** — that puts the mitigation in the *prompt*, asking Copilot to self-declare, when the fix belongs in the *assertion*: the gate must require an affirmative verdict from the independent reviewer, not hope Copilot speaks. A prompt cannot force a quota-blocked bot to answer.
 - ❌ Using the bare `@copilot review` trigger on a non-trivial PR — Copilot may finish silently. (Advisory only now; the independent reviewer gates regardless.)
 - ❌ Fabricating SHAs in per-finding replies — always paste a real `git log --oneline -1` SHA. Wrong SHAs leave the audit trail pointing at nothing and reviewers can't follow up.
@@ -183,7 +183,7 @@ After base merges and the PR auto-retargets to `main`, **do not re-trigger** unl
 gh pr comment <N> --body "@copilot review"
 
 # Trigger review — reviewer request via API (REQUIRED on personal repos: the
-# comment mention silently does nothing there; verified with a 20+ minute wait and no response)
+# comment mention silently does nothing there)
 gh api repos/{owner}/{repo}/pulls/<N>/requested_reviewers \
   -f 'reviewers[]=copilot-pull-request-reviewer[bot]'
 # Re-request after each fixup round with the same call.
@@ -225,6 +225,6 @@ Why a TIMESTAMP filter instead of polling for ANY Copilot comment: on PRs with m
 
 Why `state == "completed"` events alone are insufficient: Copilot sometimes "finishes work" without posting a comment (see the bare-trigger anti-pattern above). Watch for the COMMENT, not the EVENT.
 
-## Findings audit row in handoff doc
+## Findings audit row in the journal
 
-After the loop closes, the handoff doc's §6 "Findings + known limits" section gains a row tagged `Copilot review (N findings, all addressed)` so the post-merge audit shows the loop ran.
+After the loop closes, the phase's journal FACT entry gains a line tagged `Copilot review (N findings, all addressed)` so the post-merge audit shows the loop ran.

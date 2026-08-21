@@ -10,6 +10,13 @@ Checks:
 4. The top-level ``plugin.json`` (Antigravity native manifest) parses as JSON, has
    ``name`` + ``description``, and matches the Claude manifest ``name`` (its schema forbids
    a ``version`` field, so it is name-checked only).
+4b. Every manifest above is byte-identical to what ``.claude-plugin/plugin.source.json``
+   generates. Checks 3–4 compare only the fields they enumerate, and ``.codex-plugin/`` is on
+   neither their sibling list nor the synced set in
+   ``scripts/invariants/manifest-version-sync.sh`` (which excludes it deliberately — codex
+   carries its own ``X.Y.Z+codex.<stamp>`` scheme). A hand-edit to that file was therefore
+   caught by nothing at all. This check covers every host by construction, and every field
+   rather than only the version.
 5. Every ``skills/*/SKILL.md`` has valid frontmatter (``name`` + ``description``).
 6. Every reference mentioned in ``SKILL.md`` exists on disk.
 7. Every ``commands/*.md`` listed in ``scripts/commands-manifest.txt``
@@ -40,11 +47,11 @@ ERRORS: list[str] = []
 def md_files_to_check(repo: Path) -> tuple[list[Path], str]:
     """The ``.md`` files this repo is responsible for, plus HOW they were found.
 
-    Deliberately ``git ls-files``, not ``rglob``. A filesystem walk of this repo
-    reaches orders of magnitude more ``.md`` files than are tracked; the rest are a co-located
-    tool's cache directory, a gitignored ``docs/`` tree this project keeps out of version control,
-    and other dot-directories. Walking them made the validator's verdict depend on
-    unrelated local state, and — the load-bearing reason — left
+    Deliberately ``git ls-files``, not ``rglob``. A filesystem walk of a working copy
+    can reach far more ``.md`` files than are tracked -- tool cache directories, gitignored
+    local notes,
+    and other dot-directories. Walking them makes the validator's verdict depend on
+    unrelated local state, and — the load-bearing reason — leaves
     ``close-gate.sh``'s test-evidence freshness row unanswerable: freshness is
     "did a relevant path change since the recorded SHA", git can only see tracked
     paths, so a validator with nearly all of its inputs invisible to git has no checkable
@@ -215,6 +222,52 @@ def check_sibling_manifest(dir_name: str, ref_plugin: dict | None) -> None:
             )
 
 
+def _generated_host_summary() -> str:
+    """Host names for the success line, read from the generator's TARGETS so a newly declared
+    host appears here automatically instead of waiting for someone to update a literal."""
+    try:
+        import gen_plugin_manifests as gen
+    except ImportError:  # pragma: no cover - defensive
+        return "plugin"
+    return " + ".join(t["name"].capitalize() for t in gen.TARGETS)
+
+
+def check_manifests_generated() -> None:
+    """Every host manifest must equal what plugin.source.json generates (check 4b).
+
+    Imported lazily and failing soft on ImportError: validate.py is the close-gate's declared
+    input and must keep running even if the generator is absent (e.g. a partial checkout), but
+    a MISMATCH is a hard error — that is the drift this check exists to catch."""
+    try:
+        import gen_plugin_manifests as gen
+    except ImportError as exc:  # pragma: no cover - defensive
+        error(f"cannot import scripts/gen_plugin_manifests.py ({exc}) — manifest sync unchecked")
+        return
+
+    source_path = REPO / gen.SOURCE_FILE
+    if not source_path.is_file():
+        error(f"missing {gen.SOURCE_FILE} — the single source of truth for every host manifest")
+        return
+
+    try:
+        expected = gen.generate(json.loads(source_path.read_text(encoding="utf-8")))
+    except (KeyError, ValueError) as exc:
+        error(f"{gen.SOURCE_FILE} is unusable: {exc}")
+        return
+
+    for rel, want in sorted(expected.items()):
+        path = REPO / rel
+        have = path.read_text(encoding="utf-8") if path.is_file() else None
+        if have is None:
+            error(f"{rel} is missing — run `python3 scripts/gen_plugin_manifests.py`")
+        elif have != want:
+            error(
+                f"{rel} does not match {gen.SOURCE_FILE} — never hand-edit generated manifests; "
+                f"edit the source then run `python3 scripts/gen_plugin_manifests.py` "
+                f"(diff: `python3 scripts/gen_plugin_manifests.py --check`)"
+            )
+
+
 def main() -> int:
     # 1. marketplace.json
     mp = check_json(REPO / ".claude-plugin" / "marketplace.json", {"name", "owner", "plugins"})
@@ -247,6 +300,12 @@ def main() -> int:
             f"does not match plugin.json (Antigravity) name '{agy['name']}'"
         )
 
+    # 2d. Every manifest matches what plugin.source.json generates. Checks 2b/2c compare only
+    #     the fields they enumerate, so a host missing from that enumeration can drift
+    #     unnoticed. This one is total: any host in gen_plugin_manifests.TARGETS is
+    #     covered the moment it is declared.
+    check_manifests_generated()
+
     # 3. Per-skill checks
     skills_dir = REPO / "skills"
     if not skills_dir.is_dir():
@@ -269,7 +328,12 @@ def main() -> int:
     if ERRORS:
         print(f"\nFAILED: {len(ERRORS)} error(s)", file=sys.stderr)
         return 1
-    print("OK: Claude + Qoder + CodeBuddy + Antigravity manifests + skill references + commands + UTF-8 all valid")
+    # The host list is derived, not typed out: a hand-written list such as
+    # "Claude + Qoder + CodeBuddy + Antigravity" silently omits codex — the same omission
+    # that lets a host's version rot. A success message that enumerates by hand rots the same way.
+    print(
+        f"OK: {_generated_host_summary()} manifests + skill references + commands + UTF-8 all valid"
+    )
     return 0
 
 

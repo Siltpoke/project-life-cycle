@@ -151,7 +151,7 @@ The static handler set described above is the 2026 pattern. The next step (Tejas
 This skill is positioned for that step:
 - `references/builder-split.md` already lets the orchestrator pick which builder to dispatch based on phase shape.
 - `commands/ship.md` already chains researcher → story → spec → builders dynamically per the feature.
-- `/init-harness` generates the matching handler set (auth, lint, migration, etc.) from the project's `CLAUDE.md` + `folder-map` + recent failure patterns from `iteration-journal.md`.
+- `/init-harness` scaffolds a handler set (lint, secret guard, migration safety, tenant isolation) from the project's detected stack and risk markers, with the project-specific logic left as `TODO`.
 
 It runs once per project, at bootstrap — the handler set is derived from the project's detected risks, not from the feature being built. Deriving a handler set per feature, as a step inside `/ship`, is not built.
 

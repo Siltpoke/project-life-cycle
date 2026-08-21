@@ -10,6 +10,41 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 Nothing yet.
 
+## [4.0.0] - 2026-08-21
+
+### Added
+
+- Adds a `mode: fast | detailed` project setting that controls how often you are stopped for confirmation and how many review agents each task uses. Every behaviour it changes still has its own key, and `detailed` behaves exactly as before.
+- In `fast` mode, a change that touches a path you mark under `careful-paths:` (or a dependency manifest, migration, or deploy/CI config) is automatically reviewed at the full setting, and the run names the rule that triggered it.
+- Adds `/plc-status`, an append-only record of which process stages each phase actually ran, reported as observed, claimed, missing, not applicable, or unknown. It never blocks anything, and `PLC_LEDGER=0` turns it off.
+- `/catchup` can now warn you that your main branch's CI is red, read from a local CI-status file your own tooling writes, and says so when that result belongs to an older commit.
+- Adds an acceptance-criteria check to the close-gate: every criterion in a phase's user story needs a runnable check or a written exclusion that still holds (configured with `user_story_glob`, `ac_evidence`, `ac_baseline` and `ac_heading_set`).
+- Adds an opt-in close-gate check, `closure_declaration`, that makes a phase state which backlog entries it closed and verifies that against an append-only closure log. The backlog index generator, `scripts/backlog-toc.sh`, now ships too.
+- Adds a runner for code review by a second, different AI family, which keeps "the review did not happen" separate from "the review found nothing".
+- A retention drain can now be undone: every file a drain changes is saved first, and `retention-drain.sh restore <key>` puts them all back.
+- Adds `scripts/gen-test-evidence.sh`, which regenerates test evidence without ever replacing a good evidence file with a failed run. `/init-harness` now sets new projects up with it and with the content-fingerprint evidence check.
+
+### Changed
+
+- **BREAKING** — the close-gate adds a required `ac-oracle-binding` check. Task mode checks only the criteria a branch declares with `Closes:` commit trailers; phase mode checks them all. A project that sets neither `user_story_glob` nor `exempt_user_story` gets a skipped row and is not failed.
+- **BREAKING** — the cross-family review runner's exit code now says what happened: `0` a review came back, `3` no answer came back (a normal fallback), `2` the call was misconfigured, `1` a review came back but could not be saved. Its output no longer carries `fallback_reason` on success or the review payload on a fallback. Migration: a shell caller that chained on success should use `|| true` if a fallback is acceptable, or check for exit `3` if not; code that read either key should test whether the key exists.
+- **BREAKING** — the pre-push installer now puts the close-gate chain right after the hook's first line, so a hook ending in `exec` no longer skips it. It refuses a non-shell hook and a `core.hooksPath` pointing away from the default hooks folder, and a new standing check verifies the gate is reachable. Migration: in a clone wired by an earlier version, back up `.git/hooks/pre-push`, delete its three-line `# >>> close-gate wrap-up chain … <<<` block, then re-run `install-close-gate-hook.sh` — re-running alone leaves the old block where it is.
+- The pre-push gate now runs on any branch whose changes touch your declared product paths, not only on phase branches, and every run lists which checks ran, which were skipped, and why. `/release` regenerates test evidence so a release push still passes it.
+- `/catchup` now finds your current station from a `▶` (or `◐`) at the start of its name in the roadmap's stations table, instead of from bold text in the prose. Migration: mark your current station that way, or the card shows no current station.
+- The retention drain can be told which end of a document is oldest (`order`, e.g. `newest-first` for a changelog) and which headings are structure rather than entries (`non_entry_headings`). A document whose dates contradict the default order is now refused until you declare it, instead of having the wrong entries archived.
+- The context-floor and close-gate reminder hooks no longer need `python3`; `jq` is enough.
+- The skill's always-loaded reference index is much shorter, so every invocation uses noticeably less context.
+
+### Fixed
+
+- Fixes many context-floor bugs that could silently switch the guard off for a session or clear it without a real checkpoint — including unusual session ids, a single malformed transcript line, a stray file in its state folder, a directory or special file named `RESUME.md`, and a checkpoint made in another repository. It also no longer blocks on its first fire when your checkpoint is already up to date.
+- Fixes the close-gate reporting success for a run that aborted part-way, and asking for a journal entry that its own drain step had just archived.
+- Fixes retention-drain problems: a failed archive roll-over that reported success (and could duplicate or lose entries on retry), journal archives filed under the wrong month, an index left pointing at drained entries, and an archive table of contents that was never written.
+- `/recall` and `/catchup` no longer pick an empty session over your last real one; `/catchup` now finds a `RESUME.md` kept under `docs/`, and roadmap rows that contain a `|` or are already marked done no longer vanish or show as upcoming work.
+- The checklist guard now finds a checklist given by absolute path, and counts the in-progress mark it documents.
+- The Codex, Qoder and CodeBuddy plugin manifests now declare the same licence as `LICENSE` (PolyForm Perimeter 1.0.1) instead of MIT.
+- Corrects documentation that described enforcement the skill does not actually perform, and three command descriptions that strict YAML parsers rejected.
+
 ## [3.7.0] - 2026-07-25
 
 ### Added
@@ -264,7 +299,8 @@ Initial release.
 - Adds a research protocol for locking design decisions, backed by a second, independent reviewer check.
 - Adds Architectural Decision Records, a domain glossary convention, and delivery templates (issue breakdown, changelog, PR body).
 
-[Unreleased]: https://github.com/Victoriakaey/project-life-cycle/compare/v3.7.0...HEAD
+[Unreleased]: https://github.com/Victoriakaey/project-life-cycle/compare/v4.0.0...HEAD
+[4.0.0]: https://github.com/Victoriakaey/project-life-cycle/compare/v3.7.0...v4.0.0
 [3.7.0]: https://github.com/Victoriakaey/project-life-cycle/compare/v3.0.0...v3.7.0
 [3.0.0]: https://github.com/Victoriakaey/project-life-cycle/compare/v1.0.0...v3.0.0
 [1.0.0]: https://github.com/Victoriakaey/project-life-cycle/compare/v0.4.0...v1.0.0

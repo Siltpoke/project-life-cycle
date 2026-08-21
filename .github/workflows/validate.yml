@@ -11,6 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -20,10 +22,6 @@ jobs:
       - name: Validate manifests + skill references
         run: python3 scripts/validate.py
 
-      # These previously existed but ran nowhere: validate.py has no pytest reference and
-      # there is no Makefile, so the gate + hook test suites protected nothing unless a
-      # human remembered to run them. A test that never runs is the same shape as a guard
-      # that never checks.
       - name: Gate + hook unit tests
         run: |
           python -m pip install --quiet pytest pyyaml
@@ -38,16 +36,33 @@ jobs:
           # before `cat` ever runs, so a red suite printed nothing. Putting the suite on the
           # left of `||` puts it in a condition context, where -e does not fire.
           rc=0
-          bash skills/project-lifecycle/hooks/test-hooks.sh >suite.log 2>&1 || rc=$?
+          /bin/bash skills/project-lifecycle/hooks/test-hooks.sh >suite.log 2>&1 || rc=$?
           cat suite.log
           printf 'suite exit code: %s\n' "$rc"
           # The exit code is the whole judgement now: the suite keeps its results in a
           # file rather than a shell variable, so assertions inside its ( ) subshells reach
           # the tally, and it self-verifies that a failed assertion actually makes it exit
-          # non-zero. A later fix shipped a second grep-the-output check here because the code could
-          # not be trusted; that check is gone with the reason for it.
+          # non-zero.
           if [ "$rc" -ne 0 ]; then
             echo "::error::hook behaviour suite exited $rc (assertion failed, or it died part-way)"
+            exit 1
+          fi
+
+      # Same `|| rc=$?` idiom as the step above, for the same reason: `bash -e` fires on the first
+      # command of a `cmd; rc=$?` list and kills the step before `cat` runs, so a red suite prints
+      # nothing. Do not "simplify" it.
+      #
+      # The contract suite needs python3: it uses it as a PROBE, asserting the hook still blocks
+      # on a PATH where python3 is provably unreachable. The Python setup step above satisfies that;
+      # splitting this job away from it would break it silently.
+      - name: Context-floor contract suite
+        run: |
+          crc=0
+          /bin/bash skills/project-lifecycle/hooks/test-context-floor-contract.sh >contract.log 2>&1 || crc=$?
+          cat contract.log
+          printf 'contract suite exit code: %s\n' "$crc"
+          [ "$crc" -ne 0 ] && echo "::error::context-floor contract suite exited $crc (a FAIL, or an XPASS -- a known defect stopped reproducing)"
+          if [ "$crc" -ne 0 ]; then
             exit 1
           fi
 
@@ -60,7 +75,13 @@ jobs:
         continue-on-error: true
 
       - name: Check internal markdown links
-        uses: lycheeverse/lychee-action@v1
-        with:
-          args: --no-progress --offline --include-fragments **/*.md
-          fail: true
+        run: |
+          set -euo pipefail
+          . scripts/lib/lychee-pin.env
+          LYCHEE="$(/bin/bash scripts/lib/ensure-lychee.sh)"
+          # Quoted target: it reaches lychee's own glob engine instead of bash's, where
+          # globstar is off by default and `**` silently collapses to `*`. No eval.
+          # A second, separately quoted target: LYCHEE_TARGET's own glob engine skips
+          # dot-prefixed directories (measured, see lychee-pin.env next to LYCHEE_TARGET_HIDDEN)
+          # -- .claude/ is one, and it holds tracked .md files this scan must reach.
+          "$LYCHEE" $LYCHEE_ARGS_COMMON "$LYCHEE_TARGET" "$LYCHEE_TARGET_HIDDEN"

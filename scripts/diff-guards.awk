@@ -1,11 +1,11 @@
-# diff-guards.awk — stateful, full-file guard scanner (verify-gate AC3 / R5).
+# diff-guards.awk — stateful, full-file guard scanner (verify-gate guard routing).
 # Reads a file's FULL content at HEAD (via `git show`), so multi-line constructs — block
 # comments /* */, JS template literals ` `, Python triple-quoted strings """ / ''' — are
 # tracked with CROSS-LINE state. A unified=0 diff alone can't see a construct's opening
 # delimiter when only an interior line is added, which is why the earlier line-local strip
 # over-routed (routed a `throw` inside a docstring / block comment). Emits
 # `file<TAB>line<TAB>kind` ONLY for lines whose number is in `addlines` (the diff's added set)
-# AND that survive stripping as real code. Over-routing is the R5 failure (waiver-spam); when
+# AND that survive stripping as real code. Over-routing is a failure too (waiver-spam); when
 # state is ambiguous we prefer to swallow (under-route), never over-route.
 # Driven by diff-guards.sh:  awk -v file=<path> -v ext=<ext> -v addlines=<csv> -f this <content>
 BEGIN {

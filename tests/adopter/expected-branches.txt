@@ -1,0 +1,2 @@
+⊘ user_story_glob not configured in manifest — ac-oracle-binding skipped (declare the glob, or set exempt_user_story:true)
+✓ closure-declaration NOT ARMED — no `closure_declaration` key in .claude/close-gate.json, so this phase is not asked to declare what it closed (an adopter who has not configured it is not failed by it)

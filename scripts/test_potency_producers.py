@@ -1,6 +1,6 @@
-"""Unit tests for the two out-of-envelope AC3 producers:
-  - scripts/diff-guards.sh   → diff-guards.json   (R5, guard routing)
-  - scripts/potency-runner.sh → potency-result.json (R4, potency proof)
+"""Unit tests for the two out-of-envelope verify-gate producers:
+  - scripts/diff-guards.sh   → diff-guards.json   (guard routing)
+  - scripts/potency-runner.sh → potency-result.json (potency proof)
 
 python here is TEST tooling (subprocess-drives the bash producers against fixture git repos),
 NOT part of any gate envelope. The producers are themselves out-of-envelope (bash + jq + git +
@@ -61,7 +61,7 @@ def _diff_file(repo: Path, base: str, head: str) -> Path:
 
 
 def test_diff_guards_routes_real_guard_only(tmp_path: Path) -> None:
-    """AC3.2/AC3.3: a real added `throw` routes; a `throw` in a comment and one in a .md
+    """A real added `throw` routes; a `throw` in a comment and one in a .md
     file do NOT route."""
     repo = tmp_path / "r"
     _init(repo)
@@ -159,7 +159,7 @@ def _manifest_repo(tmp_path: Path, guard_line: str) -> tuple[Path, str]:
 
 
 def test_potency_intact_guard_is_potent(tmp_path: Path) -> None:
-    """AC3.5: intact guard → fixtureResult passed, neuterResult failed (potent)."""
+    """Intact guard → fixtureResult passed, neuterResult failed (potent)."""
     repo, head = _manifest_repo(tmp_path, "exit 1")
     out = repo / "potency-result.json"
     r = _run(POTENCY, "--head", head, "--manifest", ".plc/guard-manifest.json",
@@ -186,8 +186,8 @@ def test_potency_preneutered_guard_is_impotent(tmp_path: Path) -> None:
 
 
 def test_diff_guards_multiline_constructs_not_routed(tmp_path: Path) -> None:
-    """AC3.2 multi-line: guard tokens inside a multi-line /* */ block, a JS template literal,
-    and a Python triple-quoted docstring must NOT route (cross-line state, R5 no over-route)."""
+    """Multi-line: guard tokens inside a multi-line /* */ block, a JS template literal,
+    and a Python triple-quoted docstring must NOT route (cross-line state, no over-route)."""
     repo = tmp_path / "r"
     _init(repo)
     _write(repo, "src/a.js", "const x = 1\n")
@@ -218,7 +218,7 @@ def test_diff_guards_multiline_constructs_not_routed(tmp_path: Path) -> None:
 
 
 def test_diff_guards_two_block_comments_no_fail_open(tmp_path: Path) -> None:
-    """HIGH-1 regression: a greedy /* */ strip would swallow a live guard sitting BETWEEN two
+    """Regression: a greedy /* */ strip would swallow a live guard sitting BETWEEN two
     single-line block comments on one added line = fail-OPEN (real guard escapes). The
     non-greedy strip must still route the throw."""
     repo = tmp_path / "r"
@@ -238,7 +238,7 @@ def test_diff_guards_two_block_comments_no_fail_open(tmp_path: Path) -> None:
 
 
 def test_potency_no_residual_bak(tmp_path: Path) -> None:
-    """MED-3: a neuterCmd using `sed -i.bak` must leave NO .bak in the tree after the run, and the
+    """A neuterCmd using `sed -i.bak` must leave NO .bak in the tree after the run, and the
     guarded file is restored byte-identical."""
     repo, head = _manifest_repo(tmp_path, "exit 1")   # manifest neuterCmd uses sed -i.bak
     before = (repo / "src/guard.sh").read_bytes()

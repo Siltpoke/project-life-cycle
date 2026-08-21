@@ -6,7 +6,7 @@
 # invocation, before any work", but prose alone is model self-discipline — observed
 # skipping. This hook moves the rule to platform enforcement.
 #
-# jq-only: no python3 (repo CLAUDE.md "hooks jq-only" envelope). Uses jq to read
+# jq-only: no python3 (the hooks' dependency envelope). Uses jq to read
 # session_id / tool_name / payload fields from the PreToolUse stdin JSON; the
 # per-session task counter is bash arithmetic on a marker file.
 #
@@ -86,7 +86,35 @@ NUDGED="$DIR/$SID.nudged"
 NONCE="$DIR/$SID.nonce"
 
 CWD="$(jqget '.cwd // empty')"
-ART="${CWD:+$CWD/}$ART_REL"
+# Defensive: `CWD` is never empty and never relative past this point, decided
+# once, here, rather than by each consumer. `pwd -P` matches what a relative path would have resolved
+# against (the kernel's PHYSICAL cwd) instead of bash's logical `$PWD`.
+#
+# MEASURED, and worth stating rather than implying: on 10 sampled shapes these two lines change NO
+# observable outcome. The underlying symptom -- the guard answering differently depending on the
+# directory the hook process happens to sit in -- is REPRODUCED and still OPEN, because the backfill
+# below resolves against that same process cwd. This is hardening, not the fix; the fix has to anchor
+# the path on something in the event (e.g. `file_path`) and that is a design change with no
+# answer yet for Bash/Task events, which carry no `file_path` at all.
+PWD_PHYS="$(pwd -P 2>/dev/null)" || PWD_PHYS=""
+[ -n "$PWD_PHYS" ] || PWD_PHYS="$PWD"
+[ -n "$CWD" ] || CWD="$PWD_PHYS"
+case "$CWD" in /*) ;; *) CWD="$PWD_PHYS/$CWD" ;; esac
+# The two paths built from `$CWD` are NOT symmetric, which is why only one of them branches:
+#   * `$ART_REL` is `${PLC_TASKLIST_FILE:-…}` -- CALLER-CONFIGURABLE, so it can already be absolute.
+#     The old `"${CWD:+$CWD/}$ART_REL"` resolved an absolute override only when the event carried no
+#     cwd, i.e. never in real Claude Code, which always sends one: the documented escape hatch was
+#     inert and printed UNVERIFIED with a perfectly valid pinned list.
+#     An unconditional `"$CWD/$ART_REL"` does not fix that -- it prefixes the absolute path too.
+#   * `$GMARK` below is a FIXED literal, so it has nothing to branch on.
+# An ancestor walk or a git-root anchor applies to neither: both paths are named outright,
+# not discovered, and a git-root anchor would silently redefine which `.claude/tasklist.md` is
+# authoritative. If `$GMARK` ever becomes configurable, this reasoning stops holding -- it is resolved
+# by omission today, which is exactly why it is written down.
+case "$ART_REL" in
+  /*) ART="$ART_REL" ;;
+  *)  ART="$CWD/$ART_REL" ;;
+esac
 
 # Anti-stale defense is a NONCE CARRIED IN THE FILE'S TEXT, deliberately not an mtime.
 # An mtime check would be the very defect its sibling gate had to be fixed for. A
@@ -99,7 +127,13 @@ artifact_ok() {
   _n="$(cat "$NONCE" 2>/dev/null || true)"
   [ -n "$_n" ] || return 1
   grep -qF -- "$_n" "$ART" 2>/dev/null || return 1
-  _c="$(grep -cE '^[[:space:]]*- \[[ xX]\]' "$ART" 2>/dev/null || echo 0)"
+  # `/` belongs in the class because `- [/]` is part of the SAME contract
+  # this predicate counts. SKILL.md:102 defines three states -- `- [ ]` todo, `- [x]` done, and
+  # `- [/]` for the ONE task in progress -- and `scripts/tasklist-view.sh` already renders the
+  # third (it flags that leaf `<- here`). Only this guard did not count it, so the more faithfully
+  # a user followed the convention the LOWER their count: a complete list of N with one item in
+  # progress counted N-1 and failed to satisfy the guard that documents the convention.
+  _c="$(grep -cE '^[[:space:]]*- \[[ xX/]\]' "$ART" 2>/dev/null || echo 0)"
   case "$_c" in ''|*[!0-9]*) _c=0 ;; esac
   [ "$_c" -ge "$N" ]
 }
@@ -135,11 +169,11 @@ fi
 # never reset). Wipe markers -> the next gated edit re-forces a fresh list.
 # Must run even when SEEN exists — that's the whole point.
 #
-# this used to word-split the Bash command and re-arm on a bare `close-gate.sh` /
+# This used to word-split the Bash command and re-arm on a bare `close-gate.sh` /
 # `task-done` / `phase-done` TOKEN. That is a syntactic fact standing in for a semantic event,
 # and it fired on commands that only READ or STAGED the gate file — `wc -l scripts/…`,
-# `git add scripts/…` — four times during this phase alone, including while this very block was
-# being rewritten. The token scan is DELETED, not narrowed: no narrowing of "the name appears in
+# `git add scripts/…`.
+# The token scan is DELETED, not narrowed: no narrowing of "the name appears in
 # a string" ever becomes "the thing ran".
 #
 # The gate now writes its own marker on exit (see scripts/close-gate.sh §"the gate publishes its
@@ -155,7 +189,9 @@ fi
 #     keeps one gate run from re-arming more than once, and what stops last phase's marker from
 #     counting — the same anti-stale reasoning as the nonce above, and equally not an mtime.
 if [ "${PLC_TASKLIST_REARM:-1}" != "0" ]; then
-  GMARK="${CWD:+$CWD/}.claude/.gate-runs/last-run"
+  # Unconditional: a fixed relative literal, and `$CWD` is absolute by construction above. See the
+  # asymmetry note at the `ART` site for why this one does not need the absolute-path branch.
+  GMARK="$CWD/.claude/.gate-runs/last-run"
   GSEEN="$DIR/$SID.gateseen"
   if [ -f "$GMARK" ]; then
     _grun="$(sed -n 's/^run=//p' "$GMARK" 2>/dev/null | head -1)"

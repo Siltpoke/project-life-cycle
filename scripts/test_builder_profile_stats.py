@@ -130,6 +130,59 @@ def test_exitplanmode_tooluse_does_not_count_as_plan() -> None:
     assert stats["plan_mode"]["sessions_with_plan"] == 0
 
 
+# --- field-presence assertion (a dead detector must not read as a real zero) - #
+def test_plan_signal_present_when_channel_alive_but_plan_never_chosen() -> None:
+    # The honest zero: permission-mode events exist, none of them is plan.
+    sessions = [
+        [permission_mode("auto", "2026-01-01T10:00:00Z"),
+         user_prompt("go", "2026-01-01T10:00:01Z")],
+    ]
+    stats = bp.compute_stats(sessions, tz=UTC)["plan_mode"]
+    assert stats["signal"] == "present"
+    assert stats["sessions_with_plan"] == 0
+    assert stats["ratio"] == 0.0  # a measured zero stays a number
+    assert stats["permission_mode_events_with_known_key"] == 1
+
+
+def test_plan_signal_absent_reports_unknown_not_zero() -> None:
+    # No permission-mode event at all: "never used" and "event type renamed"
+    # are indistinguishable, so the ratio must not claim 0.0.
+    sessions = [[user_prompt("hi", "2026-01-01T10:00:00Z")]]
+    stats = bp.compute_stats(sessions, tz=UTC)["plan_mode"]
+    assert stats["signal"] == "absent"
+    assert stats["ratio"] is None
+    assert stats["permission_mode_events"] == 0
+
+
+def test_plan_signal_schema_drift_when_mode_key_renamed() -> None:
+    # The channel is alive but the mode moved to an unknown key — this is a
+    # parser break and must be surfaced, not silently counted as zero.
+    drifted = {
+        "type": "permission-mode",
+        "permission_mode": "plan",  # snake_case: not in PERMISSION_MODE_KEYS
+        "sessionId": "s1",
+    }
+    sessions = [[drifted, user_prompt("plan it", "2026-01-01T10:00:00Z")]]
+    stats = bp.compute_stats(sessions, tz=UTC)["plan_mode"]
+    assert stats["signal"] == "schema-drift"
+    assert stats["ratio"] is None
+    assert stats["permission_mode_events"] == 1
+    assert stats["permission_mode_events_with_known_key"] == 0
+    assert "renamed" in stats["note"]
+
+
+def test_trajectory_plan_ratio_unknown_when_signal_not_present() -> None:
+    # The same silent zero used to survive in the trajectory subsets.
+    sessions = [
+        [user_prompt("a", f"2026-01-0{d}T10:00:00Z", session=f"s{d}")]
+        for d in (1, 2, 3)
+    ]
+    traj = bp.compute_stats(sessions, tz=UTC)["trajectory"]
+    assert traj["status"] == "ok"
+    assert traj["first_third"]["plan_ratio"] is None
+    assert traj["last_third"]["plan_ratio"] is None
+
+
 # --------------------------------------------------------------------------- #
 # steering — deferred to PASS-2 (no honest deterministic signal)              #
 # --------------------------------------------------------------------------- #

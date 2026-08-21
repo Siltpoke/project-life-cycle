@@ -60,7 +60,7 @@ _CITED_ID_RE = re.compile(r"\[([0-9a-f]{8})\]")
 
 def active_entries(entries: list[dict]) -> list[dict]:
     """Entries that are current: not self-marked superseded, and not pointed to by a
-    later entry's `supersedes` (Phase 1 supersession is pointer-based — the old entry's
+    later entry's `supersedes` (capture-time supersession is pointer-based — the old entry's
     own `status` is left unchanged on disk, so status alone misses the pointer chain)."""
     superseded_ids = {e.get("supersedes") for e in entries if e.get("supersedes")}
     return [e for e in entries

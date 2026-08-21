@@ -4,7 +4,7 @@ Design reference for splitting a checkpoint-gated chain (like `/ship`'s outer ch
 Workflow-scriptable segments. Distilled from the checkpoint-FREE verification
 *tail*, `.claude/workflows/verify-tail.mjs`, while scoping the checkpoint-GATED
 *outer* chain that wraps it. No implementation lands with this doc; it is a design reference
-for the future segmented `/ship` script, same category as `cadence.md` and
+for anyone segmenting a checkpoint-gated chain such as `/ship`, same category as `cadence.md` and
 `builder-split.md`.
 
 ## Why a checkpoint cannot live inside a workflow

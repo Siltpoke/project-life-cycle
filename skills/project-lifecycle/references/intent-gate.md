@@ -120,7 +120,7 @@ The four non-Builder archetypes are mostly prose deltas (the model applies them,
 
 ### Recording the label — the seam for later consumers
 
-The chosen archetype is recorded inline, zero new files: a `Archetype: <tag>` trailer on the task's `feat(...)`/`fix(...)` commit **and** the same line in the journal entry header. This is deliberately the cheap half of the "mechanism + vocabulary" decision — the label is a greppable signal that downstream consumers (a future `builder-profile` archetype-mix readout; a future ROADMAP per-milestone archetype marker) read *without re-touching the gate*. Produce the signal here; consume it in a separate phase. Absent that downstream wiring, the trailer still earns its place: it makes `git log --grep='Archetype: sweep'` answer "what kind of work has this branch been."
+The chosen archetype is recorded inline, zero new files: a `Archetype: <tag>` trailer on the task's `feat(...)`/`fix(...)` commit **and** the same line in the journal entry header. This is deliberately the cheap half of the "mechanism + vocabulary" decision — the label is a greppable signal that downstream tools can read *without re-touching the gate*. Produce the signal here; consume it elsewhere. Absent that downstream wiring, the trailer still earns its place: it makes `git log --grep='Archetype: sweep'` answer "what kind of work has this branch been."
 
 ## Policy & escape
 
