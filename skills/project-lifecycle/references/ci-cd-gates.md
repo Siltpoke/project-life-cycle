@@ -124,7 +124,7 @@ AI agents tend to over-generate "fix" attempts when CI fails — try lint fix, r
 
 | Trigger | Signal | Action |
 |---|---|---|
-| CI workflow refuses to start | GitHub web UI shows red ✗ with body `The job was not started because recent GitHub Actions payments have failed or your spending limit needs to be increased` | switch workflow to `workflow_dispatch` dormant + run R5 locally |
+| CI workflow refuses to start | GitHub web UI shows red ✗ with body `The job was not started because recent GitHub Actions payments have failed or your spending limit needs to be increased` | switch workflow to `workflow_dispatch` dormant + run the 3×-green protocol locally |
 | Copilot review job aborts mid-run | PR conversation shows `Copilot stopped work ... due to an error` linking to the same billing message | drop Copilot loop + dispatch a general-purpose reviewer stand-in (per `references/reviewer-brief.md`) |
 | Self-hosted runner registration fails | `api.github.com/actions/runner-registration` returns `404` | Actions is disabled at the account; same fallback applies |
 
@@ -160,7 +160,7 @@ name: test
 #       pull_request:
 #   Commit + push. Auto-runs resume immediately on the next push/PR.
 #
-# **Until then — local R5 verification protocol:**
+# **Until then — local 3×-green verification protocol:**
 #   <type-check>                                       # 0 errors
 #   for i in 1 2 3; do <test runner> || exit 1; done   # 3/3 unit+integration green
 #   for i in 1 2 3; do <e2e runner> || exit 1; done    # 3/3 regression/e2e green
@@ -184,7 +184,7 @@ jobs:
 - **No PR pollution**: workflow_dispatch doesn't auto-trigger on push or PR, so there's no perpetually-red `test (pull_request)` check. PR status reads cleanly.
 - **Manual triggering still possible**: if billing returns intermittently, owner can click "Run workflow" in GH Actions UI to do a one-off validation without code changes.
 
-### Local R5 verify protocol (the substitute for CI runs)
+### Local 3×-green verify protocol (the substitute for CI runs)
 
 Document this in the workflow header comment itself (see the DORMANT block above) — that's the live, version-controlled copy; there is no separate handoff doc to mirror it into.
 
@@ -192,11 +192,11 @@ Document this in the workflow header comment itself (see the DORMANT block above
 
 ```bash
 <type-check>                                        # must be clean (e.g. `tsc --noEmit` / `mypy` / `cargo check`)
-for i in 1 2 3; do <unit test runner> || exit 1; done     # R5: 3 consecutive green runs (e.g. `bun test` / `pytest -q` / `go test ./...`)
-for i in 1 2 3; do <e2e runner> || exit 1; done           # R5: 3 consecutive green runs (e.g. `playwright test`)
+for i in 1 2 3; do <unit test runner> || exit 1; done     # 3 consecutive green runs (e.g. `bun test` / `pytest -q` / `go test ./...`)
+for i in 1 2 3; do <e2e runner> || exit 1; done           # 3 consecutive green runs (e.g. `playwright test`)
 ```
 
-**Skipping the e2e layer because "this phase is BE-only" is a Pattern E violation.** The R5 gate exists to prove the whole project still works after this phase's diff — that includes existing UI tests, not just the tests touched by this phase. A BE-only phase that breaks an existing e2e is exactly what R5 catches.
+**Skipping the e2e layer because "this phase is BE-only" is a Pattern E violation.** The 3×-green gate exists to prove the whole project still works after this phase's diff — that includes existing UI tests, not just the tests touched by this phase. A BE-only phase that breaks an existing e2e is exactly what the 3×-green gate catches.
 
 ## Posting test evidence — required as a PR comment (both paths)
 
@@ -255,13 +255,13 @@ The moment billing is restored:
 2. Push.
 3. Verify auto-runs resume on the next PR push.
 4. Remove the dormant comment block (or leave it as historical evidence — owner's choice).
-5. Remove the dormant workflow header comment's "local-only R5" language (or leave it as historical evidence per step 4) — the header comment is the only place that language lived.
+5. Remove the dormant workflow header comment's "local-only 3×-green" language (or leave it as historical evidence per step 4) — the header comment is the only place that language lived.
 
 The Pattern E commit + the restoration commit together form a clean audit trail of *why* CI was off during that interval — useful for retrospectives and for any phase whose merge was bottlenecked by the pause.
 
 ### Anti-patterns specific to Pattern E
 
 - **Switching back to `on: push/pull_request` without first verifying billing is actually restored** — auto-runs immediately re-fail with the same billing error, re-polluting PRs.
-- **Skipping the local R5 3× loop just because there's no CI gate** — the 3× is the flake-guard, not just CI ceremony. Run it locally.
+- **Skipping the local 3× loop just because there's no CI gate** — the 3× is the flake-guard, not just CI ceremony. Run it locally.
 - **Letting the workflow file rot** (out-of-sync with current build commands, test runner names) — when restored, the workflow will fail for *new* reasons. Treat it as living documentation; update it whenever the project's `package.json` scripts / test runner / e2e config changes.
-- **Documenting the local R5 protocol only in a chat session** — owner forgets the protocol three phases later. Bake it into the workflow header comment (the version-controlled, conventional-location copy).
+- **Documenting the local 3×-green protocol only in a chat session** — owner forgets the protocol three phases later. Bake it into the workflow header comment (the version-controlled, conventional-location copy).

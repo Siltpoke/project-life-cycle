@@ -145,7 +145,7 @@ archaeology: done YYYY-MM-DD | skipped
 
 ## Idempotent re-run
 
-Re-running `--archaeology` follows init-harness's existing merge-vs-create rules: create when absent, merge when generated-and-unedited, and **never overwrite human-edited content without an explicit `OVERWRITE` confirm**. Seed framing answers staleness — living docs stay current through the normal milestone flow, so there is nothing for a re-run to "refresh"; the dated policy key is merely the future hook for a (deferred) staleness reminder.
+Re-running `--archaeology` follows init-harness's existing merge-vs-create rules: create when absent, merge when generated-and-unedited, and **never overwrite human-edited content without an explicit `OVERWRITE` confirm**. Seed framing answers staleness — living docs stay current through the normal milestone flow, so there is nothing for a re-run to "refresh"; the date in the policy key only records when the seed ran.
 
 ## Anti-patterns
 

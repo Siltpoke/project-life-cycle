@@ -1,9 +1,9 @@
 # Skill Origin
 
-This skill was distilled from a personal-workflow requirements draft and validated against one pilot milestone before being formalized.
+This skill was distilled from a working practice and validated against one pilot milestone before being formalized.
 
-- **Pilot run:** one milestone of a real production project, executed 2026-04-24.
-- **Pilot evidence:** the five-step cadence was applied to every task of the milestone, and every plan deviation it surfaced was documented as it happened.
+- **Pilot run:** one milestone of a real production project.
+- **Pilot evidence:** the cadence as it stood at the pilot — five steps, before the acceptance-verifier step was added — was applied to every task of the milestone, and every plan deviation it surfaced was documented as it happened.
 
 ## What the pilot validated
 

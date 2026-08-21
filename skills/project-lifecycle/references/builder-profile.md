@@ -47,12 +47,28 @@ fields; do not re-eyeball the numbers. Window: last 90 days. stats.json holds
    event with `permissionMode=="plan"`. (Verified: plan lives in the
    permission-mode event's `permissionMode` field, which has no timestamp;
    `ExitPlanMode` tool_use is never observed — do not use it.)
+   **Read `plan_mode.signal` before citing the ratio.** This metric rides on a
+   vendor field that can be renamed or removed, and a detector matching nothing
+   would otherwise report a confident `0.0` — indistinguishable from a real "the user
+   never plans". So the parser asserts the *channel* alongside the value:
+   - `present` — permission-mode events carrying a known mode key were found;
+     `ratio` is a real number and a `0.0` is a genuine zero.
+   - `absent` — no permission-mode event of any mode in the window; "never used"
+     and "event type renamed" cannot be told apart → `ratio` is `null`.
+   - `schema-drift` — permission-mode events exist but none carries a known key
+     (`permissionMode` / `mode`) → the field moved; `ratio` is `null`.
+   `absent` / `schema-drift` are **parser alarms, not findings**: fix the
+   detector (`PERMISSION_MODE_KEYS` in `scripts/builder_profile_stats.py`)
+   against a raw transcript before the profile says anything about plan mode.
+   The same rule applies to `trajectory.*.plan_ratio`, which is `null` too
+   whenever the signal is not `present`.
 6. tool_use frequency ranking (top + diversity count)
 7. longest single session (by timestamp)
 8. top 2–4-gram phrases in user prompts
 9. trajectory: split the window into first third vs last third, compare
    plan-ratio / prompt length (reported only with ≥3 sessions, else
-   status=insufficient)
+   status=insufficient; `plan_ratio` is `null` unless `plan_mode.signal ==
+   "present"` — never narrate a null as "stopped planning")
 
 Data hygiene (the parser already does this): skip `isSidechain==true` events
 (sub-agent turns, not the user driving directly); a session = a file with ≥1
@@ -69,6 +85,12 @@ deterministic "interrupt" signal — steering is judged from samples in PASS 2
 For each dimension, count evidence instances first (from stats.json + sampled
 excerpts). < 3 instances → mark the dimension `insufficient signal`; PASS 2 may
 not narrate it.
+
+`insufficient signal` is not the same verdict as a broken detector, and the gate
+must not merge them: if a dimension is empty because its **signal channel** is
+missing (`plan_mode.signal != "present"`), report it as `detector unverified` and
+say which field to re-check. "No evidence" invites "so the user doesn't do this";
+"detector unverified" correctly says nothing was measured at all.
 
 ═══ PASS 2 — qualitative / cold read (read stats.json + a stratified raw sample) ═══
 Sampling (no cherry-picking): stratified — the longest N sessions + plan-mode
@@ -141,7 +163,7 @@ checks. Any fail → back to PASS-2/3 to rework and rewrite; not delivered:
     two things — this reference's full rules + the finished report. Do NOT give
     it the generation trace or the generator's self-defense (that would pollute
     the judgment). Have it emit pass/fail + one evidence line per rule, watching
-    the four historical failure points: (1) did the spine actually converge or
+    the four known failure points: (1) did the spine actually converge or
     just get a heading; (2) did any dimension use a measured surface to smuggle
     a conclusion about scope-excluded data (the engineering trap); (3) was
     measurement-confidence laundered into interpretation-confidence; (4) is a
@@ -153,8 +175,8 @@ conversation (not the raw markdown pasted back):
 - Lead with the spine: say the one disposition in plain words and how it runs
   through everything else.
 - Walk through the 1-2 modes and the key dimensions — especially the honest
-  ones: why engineering "can't be measured," why planning is two equally-strong
-  stories. Say in plain words what is real signal vs caveat (polluted prompt
+  ones: any dimension that could not be measured, any reading marked
+  `contested`. Say in plain words what is real signal vs caveat (polluted prompt
   counts, unmeasured delegation).
 - Ask the three co-discovery questions as real questions (curiosity, not a
   deficit checklist).
@@ -172,7 +194,7 @@ task got closed.
 
 Get these field names right or PASS 1 is fiction.
 
-All rows verified against a real `~/.claude/projects` corpus (1396 files), not assumed.
+All rows verified against a real `~/.claude/projects` corpus, not assumed.
 
 | Thing | Location | Note |
 |---|---|---|
@@ -182,7 +204,7 @@ All rows verified against a real `~/.claude/projects` corpus (1396 files), not a
 | tool call | `message.content[]` → `{type:"tool_use", name, id, input}` | `name` is the tool (Read/Edit/Bash/Task/…) |
 | user prompt vs tool echo | `type=="user"` + content **has a `text` block** → real prompt; content with only a `tool_result` block → tool echo, not the human | distinguishing these is load-bearing for prompt/hour/ngram counts |
 | thinking | `message.content[]` → `{type:"thinking", thinking:"…"}` | key is **`thinking`**, not `content` |
-| **plan mode** | `type=="permission-mode"` event, **`permissionMode == "plan"`** | verified: field is `permissionMode`; `ExitPlanMode` tool_use **never observed** in any transcript examined. No timestamp on these events. |
+| **plan mode** | `type=="permission-mode"` event, **`permissionMode == "plan"`** | verified: field is `permissionMode`; `ExitPlanMode` tool_use **never observed** in any transcript examined. No timestamp on these events. **This row is the one metric whose signal can vanish without any error**, so the parser also asserts the channel is alive — see `plan_mode.signal` in step 5. |
 | **sub-agent turns** | per-event **`isSidechain == true`** | interleaved in the file; **exclude** from all counts (sub-agent ≠ user driving). A file with no real non-sidechain prompt is not a session. |
 | token usage | `message.usage.{input_tokens, output_tokens, cache_read_input_tokens}` | optional; not used in v1 |
 
@@ -262,9 +284,9 @@ spine?"*
   `high spine-overlap, verify not forced`, or (b) the evidence is too thin to
   stand as its own dimension → downgrade or merge it, do **not** hang it on the
   spine to pad the list.
-- Concrete tell: in the first real run, `execution` collapsed to a single
-  "retention check" hung off the spine, when execution also has momentum / ship-
-  speed / wrap-up facets that have nothing to do with verification — that is the
+- Concrete tell: a dimension such as `execution` collapsing to a single
+  check hung off the spine, when execution also has momentum / ship-
+  speed / wrap-up facets that have nothing to do with the spine — that is the
   smell of the spine absorbing a weak dimension. Catch it here.
 
 The spine is right; this guard is its counterweight so synthesis doesn't
@@ -317,7 +339,7 @@ normalize non-spine material into the spine.
 
 Every rule above is self-assessed by the same agent that wrote the report — and
 judging whether the spine converged or the scope was black-boxed needs exactly
-the synthesis judgment that agent was just shown to fail at. Judge and contestant
+the synthesis judgment the generator is least able to apply to its own output. Judge and contestant
 are the same. So a **separate verification pass gates delivery**, and it does not
 trust the generator's self-report. Two parts:
 
@@ -333,18 +355,16 @@ also carries a scope token (`main-thread` / `excluded` / …). Tested in
 **fresh-context** critic agent fed only two things: this reference's rules + the
 finished report — **not** the generation trace, **not** the generator's
 self-defense (that defense is exactly what would pollute the judgment). It
-returns pass/fail + one evidence line per rule, watching the four historical
+returns pass/fail + one evidence line per rule, watching the four known
 failure points: (1) did the spine actually converge or just get a heading;
 (2) did any dimension use a measured surface to smuggle a conclusion about
 scope-excluded data (the `engineering` trap); (3) was measurement-confidence
 laundered onto interpretation; (4) is a band disguised as a verdict. Any fail →
 back to PASS-2/3, not delivered.
 
-**Why this is in the spine, not bolted on.** The report's own core finding is a
-disposition — *no trust before verification*. A generator that writes that rule
-down and then trusts its own output is violating the very discipline it is
-profiling. PASS 4 makes the builder-profile generator obey its own spine:
+**Why this is in the spine, not bolted on.** The profile's whole method is
+evidence before conclusion. A generator that demands that of every claim
+and then trusts its own output is violating the very discipline it is
+applying. PASS 4 makes the builder-profile generator obey its own rules:
 the system that says "verify before trusting" must verify *itself* before
-delivering. (An early report even noticed the spine was isomorphic to the
-critic loops the user builds — without noticing the report-generator needed the
-same loop. This is that loop.)
+delivering.

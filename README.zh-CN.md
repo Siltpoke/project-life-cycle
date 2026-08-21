@@ -20,7 +20,7 @@ claude plugin marketplace add Victoriakaey/project-life-cycle
 claude plugin install project-lifecycle@project-life-cycle
 ```
 
-重启 Claude Code。Skill 以 `project-lifecycle` 名注册；新项目启动 / 规划 milestone / 跑 per-phase 工作时自动触发。三个主命令 —— `/project-lifecycle:init-harness`（bootstrap 项目）、`/project-lifecycle:ship`（vertical-slice feature）、`/project-lifecycle:release`（切版）—— 驱动核心主线，外加 opt-in 的 `/project-lifecycle:builder-profile`（你实际怎么用 AI coding agent 的本机快照）。另有一组辅助命令补全工作流 —— `/catchup`、`/handoff`、`/reconcile`、`/review`、`/research`、`/capture`、`/recall`、`/cognition-distill`、`/tasklist` —— 各自作用见[指南](GUIDE.zh-CN.md)。本 README 通篇用的裸形式（`/init-harness`、`/ship`……）也能用，前提是没有别的已安装命令占用同名。
+重启 Claude Code。Skill 以 `project-lifecycle` 名注册；新项目启动 / 规划 milestone / 跑 per-phase 工作时自动触发。三个主命令 —— `/project-lifecycle:init-harness`（bootstrap 项目）、`/project-lifecycle:ship`（vertical-slice feature）、`/project-lifecycle:release`（切版）—— 驱动核心主线，外加 opt-in 的 `/project-lifecycle:builder-profile`（你实际怎么用 AI coding agent 的本机快照）。另有一组辅助命令补全工作流 —— `/catchup`、`/handoff`、`/reconcile`、`/review`、`/research`、`/capture`、`/recall`、`/cognition-distill`、`/tasklist`、`/plc-status` —— 各自作用见 [Guide](GUIDE.md)。本 README 通篇用的裸形式（`/init-harness`、`/ship`……）也能用，前提是没有别的已安装命令占用同名。
 
 升级：
 
@@ -71,7 +71,7 @@ python3 ~/.codex/skills/.system/plugin-creator/scripts/update_plugin_cachebuster
 codex plugin add project-lifecycle@<your-marketplace-name>
 ```
 
-然后开启新的 Codex thread。cachebuster 这一步会把 `.codex-plugin/plugin.json` 从 `0.11.0` 改成类似 `0.11.0+codex.YYYYMMDDHHMMSS` 的本地构建版本，用来强制 Codex 刷新已安装的 plugin cache。改了 `SKILL.md`、bundled references、Codex UI metadata 或 `.codex-plugin/plugin.json` 后，都走这套 update 流程。
+然后开启新的 Codex thread。cachebuster 这一步会给 `.codex-plugin/plugin.json` 的版本号打上新的本地构建后缀（形如 `X.Y.Z+codex.YYYYMMDDHHMMSS`），用来强制 Codex 刷新已安装的 plugin cache。改了 `SKILL.md`、bundled references、Codex UI metadata 或 `.codex-plugin/plugin.json` 后，都走这套 update 流程。
 
 ### Qoder 安装
 

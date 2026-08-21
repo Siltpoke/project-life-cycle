@@ -29,7 +29,7 @@ Every smoke finding / review concern / known limitation gets a tier. The tier dr
 - Stale client-side data cache requiring user refresh
 - Missing entity name in API response (causes blank UI text but data is correct)
 
-**Action:** log in the journal entry's findings section, open a follow-up issue with label like `polish-X.Y` or `post-mX.Y`, add to the next polish/maintenance phase backlog.
+**Action:** log in the journal's §7 findings (FACT entry), open a follow-up issue with label like `polish-X.Y` or `post-mX.Y`, add to the next polish/maintenance phase backlog.
 
 ### S3 — Deferrable, later phase or out of scope
 
@@ -41,7 +41,7 @@ Every smoke finding / review concern / known limitation gets a tier. The tier dr
 - "The audit log doesn't yet have a filter UI" (separate phase scope)
 - "Should this be cached in Redis?" (perf optimization, no current pain)
 
-**Action:** log in the journal entry's findings section and name the phase that should cover it — but do NOT open an issue yet. Will get picked up when relevant milestone planning happens.
+**Action:** log in the journal's §7 findings, noted as "next phase should cover" — but do NOT open an issue yet. Will get picked up when relevant milestone planning happens.
 
 ## Decision tree
 
@@ -61,7 +61,7 @@ A finding surfaces. Should I fix it now?
 
 If you can't decide between S1 and S2, treat it as S1 and ask the product owner. Better to fix something that wasn't needed than ship a regression.
 
-## Findings format (journal findings section + smoke checklist findings file)
+## Findings format (journal §7 findings + smoke checklist findings file)
 
 Stable IDs: `F1`, `F2`, ... per phase. Once assigned, the ID does NOT change even if the finding gets fixed and moved to a different tier.
 
@@ -89,12 +89,12 @@ Localized labels (e.g. translated S1/S2/S3 headers in any target language) can b
 - Marking everything S1 to be "safe" — slows shipping; reviewers stop trusting tier signal.
 - Marking S1 issues as S2 to ship faster — the regression hits production.
 - Filing S2 follow-up issues that never get scheduled — open a tracking project/milestone, not orphan issues.
-- Listing S3 items in handoff §7 without naming the phase that should cover them — guarantees they get lost.
+- Listing S3 items under the journal FACT entry's findings/gotchas without naming the phase that should cover them — guarantees they get lost.
 - Reusing finding IDs across phases — keep them per-phase (F1 in Phase X.Y ≠ F1 in Phase X.Z).
 
 ## Tier sanity check
 
-Before publishing the handoff doc, scan §7:
+Before opening the PR, scan the journal's §7 findings:
 - If S1 list is non-empty → don't open PR yet. Fix or escalate.
 - If S2 list is empty but there are known bugs you mentioned in chat → write them down, don't trust memory.
 - If S3 list has 10+ items → you may have been over-broadening the spec. Push back to spec author.

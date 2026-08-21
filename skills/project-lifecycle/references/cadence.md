@@ -1,6 +1,6 @@
 # Per-Task Cadence
 
-Six steps per task by default (was five; **step 1.5 acceptance verifier** added 2026-05-27). Each is a separate, observable artifact (subagent dispatch, commit, or both).
+Six steps per task by default (including **step 1.5, the acceptance verifier**). Each is a separate, observable artifact (subagent dispatch, commit, or both).
 
 For phases spanning backend + frontend, **step 1 splits into 1a (backend builder) + 1b (frontend builder)** per `builder-split.md`. Layer-pure phases use a single builder.
 
@@ -59,7 +59,7 @@ Controller (the orchestrating agent) prepares each implementer prompt:
   split-vs-continue decision — and (b) a proposed split of the remainder
   into vertical slices. Do not push through a 25-minute task silently.
   ```
-  Soft means report-back, not kill: the controller reviews the proposal and either dispatches the slices or explicitly authorizes continuing (recorded in the journal "Plan deviations"; the task then ends in its single `feat(...)` commit as usual — the invariant is never relaxed). On a split, the done-so-far work becomes the first slice's starting state, committed by that slice under the normal one-task-one-commit rule — and the slice-1 dispatch **names the inherited uncommitted diff as explicit input**: slice 1's pre-flight block must restate assumptions covering that inherited code (adopt-or-flag — a flag returns BLOCKED and routes back to the controller for a re-split decision, the same way an FE mismatch goes back to the BE builder) before adding its own work. The budget is a **best-effort heuristic, not a trusted control**: an LLM's elapsed-time introspection is unreliable even with the `date` proxy, so the pre-split rule below is the primary (static) control and this is only the runtime backstop. A SPLIT_PROPOSED return also holds the background verification tail — per §"Background-by-default" the tail fires only on the claimed-complete statuses (DONE / DONE_WITH_CONCERNS), so verifier/CQ dispatch only after the controller's decision produces such a return. Rationale: the top wall-clock offenders in measured runs were 26-30 minute opaque synchronous implementer calls (top-2 single ops: 29m40s, 26m08s) — the controller learns nothing until they return.
+  Soft means report-back, not kill: the controller reviews the proposal and either dispatches the slices or explicitly authorizes continuing (recorded in the journal "Plan deviations"; the task then ends in its single `feat(...)` commit as usual — the invariant is never relaxed). On a split, the done-so-far work becomes the first slice's starting state, committed by that slice under the normal one-task-one-commit rule — and the slice-1 dispatch **names the inherited uncommitted diff as explicit input**: slice 1's pre-flight block must restate assumptions covering that inherited code (adopt-or-flag — a flag returns BLOCKED and routes back to the controller for a re-split decision, the same way an FE mismatch goes back to the BE builder) before adding its own work. The budget is a **best-effort heuristic, not a trusted control**: an LLM's elapsed-time introspection is unreliable even with the `date` proxy, so the pre-split rule below is the primary (static) control and this is only the runtime backstop. A SPLIT_PROPOSED return also holds the background verification tail — per §"Background-by-default" the tail fires only on the claimed-complete statuses (DONE / DONE_WITH_CONCERNS), so verifier/CQ dispatch only after the controller's decision produces such a return. Rationale: long opaque synchronous implementer calls are the worst wall-clock offenders — the controller learns nothing until they return.
 - **Controller pre-split rule (before dispatch)** — when the task's plan text predicts more than one file-cluster (touches multiple unrelated modules/directories, or its description contains several independently-shippable verbs), pre-split it into vertical tracer-bullet slices and dispatch each as its own task (one slice = one commit; same invariant as ever). The soft budget above is the runtime backstop; this rule is the cheaper static catch. Risk: over-splitting adds dispatch overhead — when unsure, keep it one task and let the soft budget decide at runtime.
 - **Status reporting format** — DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT | SPLIT_PROPOSED (soft budget exceeded; carries the done-so-far list + proposed slices).
 - **Builder Summary on completion** — required on split-phase dispatches; recommended on single-implementer dispatches. Schema in `builder-split.md` §Builder Summary format. Frontend builder's input includes the Backend Summary; mismatch flags go BACK to backend builder, never silently massaged on the client.
@@ -131,7 +131,7 @@ Output (mandatory):
 
 - **AC fails because the code is wrong** → fix dispatch to the builder owning that layer (BE or FE).
 - **AC fails because the test is wrong** (verifier misread the AC) → re-dispatch verifier with the correction.
-- **AC marked UNTESTABLE because the system has no external observation** → spec gap; surface to user. Options: amend the spec to expose observation (add endpoint / emit event / log to capturable channel), or accept AC as "manual-only" + log in handoff §findings.
+- **AC marked UNTESTABLE because the system has no external observation** → spec gap; surface to user. Options: amend the spec to expose observation (add endpoint / emit event / log to capturable channel), or accept AC as "manual-only" + log it under findings/gotchas in the journal FACT entry (`references/journal-schema.md`).
 - **Verifier wants to modify source code to make a test pass** → REJECT. Verifier is read-only on `src/`. If the impl is wrong, route to builder.
 
 ### Acceptance tests live separately from unit tests
@@ -180,10 +180,9 @@ Acceptance verifier commits as `test(acceptance): phase X.Y AC1-N coverage` — 
 claimed-complete status (DONE / DONE_WITH_CONCERNS)** — a SPLIT_PROPOSED return is
 an intentionally-incomplete diff, so the tail holds until the controller's
 split-vs-continue decision produces a real return (reviewing a diff nobody claimed
-finished only manufactures noise); the controller does NOT sit idle watching them. Measured
-sessions ran validators sync + one-at-a-time (33m of one 4h19m session; 7 serial diff
-reviews = 24m in another) while the parallel primitive already existed and was already
-the habit for acceptance verifiers — the waste was pure default-habit, ~30-60m/phase.
+finished only manufactures noise); the controller does NOT sit idle watching them. Running
+validators sync and one at a time, while the parallel primitive already exists and is
+already the habit for acceptance verifiers, is pure default-habit waste.
 
 Dispatch timing follows the real data dependencies, nothing else:
 
@@ -391,11 +390,11 @@ If issues found, dispatch a fix subagent (typically the same implementer pattern
 
 If review found issues, the fixup is a **separate commit** on top of the original. Never amend the original `feat(...)`; never squash the review history away.
 
-**Between finding and fix, four rules** (full rationale + live incidents in `references/review-record.md`):
+**Between finding and fix, four rules** (full rationale in `references/review-record.md`):
 
 1. **Routing split** — mechanically verifiable findings (a RED test / deterministic check can prove them) → fix; judgment calls (design taste, semantics tie-breaks) → report-only, routed to the human via the PR's "Reviewer asks". Guard against "the reviewer was wrong and the code drifted to match it".
-2. **One review-fix = one commit**, referencing the finding — wrong premise = revert exactly one. This is a commit-time checklist item, not an intention (it was stated and then violated on its first live track).
-3. **The reviewer's suggested fix code is untrusted input.** Adopt the finding; derive the fix yourself from the surrounding code and ship it with a test. A pasted reviewer snippet has already caused a real silent-data-loss bug.
+2. **One review-fix = one commit**, referencing the finding — wrong premise = revert exactly one. This is a commit-time checklist item, not an intention.
+3. **The reviewer's suggested fix code is untrusted input.** Adopt the finding; derive the fix yourself from the surrounding code and ship it with a test. A pasted reviewer snippet can carry a silent-data-loss bug.
 4. **Review-fixes are unreviewed code** — after fixes (and any other post-review commits), a fresh **final-pass reviewer** covers everything earlier rounds did not see, before the task/PR closes.
 
 **If the fixup is a non-trivial bug** (root cause unclear, reproduces only sometimes, 3+ minutes to understand) → invoke `diagnose-loop.md` before patching. Iron Law: no fix without root cause. Don't substitute "review reviewer said fix X" for a real diagnosis when the bug isn't obvious.
@@ -481,7 +480,7 @@ Runs once per closed track (after merge), before the milestone-close drain (`ref
 
 1. **Distill.** Read the track's `docs/superpowers/specs/*` and `plans/*`. Extract ONLY what is **not derivable from a live source** — the reasoning of the day, the rejected options and why, the traps hit. Write it as a FACT entry (schema: `references/journal-schema.md` §"The FACT entry") into the current journal fragment (`docs/journal.d/<date>-<branch-slug>.md`, per the "Write path" note under Step 5). Length is unbounded; **tense is not** — every claim is about that day.
 
-   **Do not copy** anything derivable: file inventories (git has them), test results (the run has them), the PR body (GitHub has it), code blocks (the code has them, and it has since moved). Measured: 26.4% of the sampled corpus's spec bytes were literal code blocks — every one of them a copy that has since drifted.
+   **Do not copy** anything derivable: file inventories (git has them), test results (the run has them), the PR body (GitHub has it), code blocks (the code has them, and it has since moved). A copied code block starts drifting the moment the code moves.
 
 2. **Archive the working docs.** For each spec/plan of the closed track:
 
@@ -494,7 +493,7 @@ Runs once per closed track (after merge), before the milestone-close drain (`ref
 
 3. **Commit** as a `docs:` commit alongside the track's journal entry.
 
-**Why the spec/plan leave the hot path.** They are **working state**, not documentation — consumed by the cadence during the track and false the moment the track lands. Measured: **12 of 12** sampled plans described a future that had already shipped; a spec still named a rendering library the code had stopped using three months earlier. An agent reading them does not gain context — it is poisoned by a confident description of a system that no longer exists. This is the same MOMENT-vs-STATE law that governs journal tense (`references/journal-schema.md` §"Tense"): *a document that records a MOMENT does not rot; a document that claims a STATE always rots* — a spec/plan is written entirely in STATE claims ("the system does X"), so by definition it cannot outlive the track that produced it. The FACT entry is the MOMENT-shaped residue that survives; the spec/plan is the STATE-shaped scaffold that is archived once it has served its purpose.
+**Why the spec/plan leave the hot path.** They are **working state**, not documentation — consumed by the cadence during the track and false the moment the track lands. An agent reading them does not gain context — it is poisoned by a confident description of a system that no longer exists. This is the same MOMENT-vs-STATE law that governs journal tense (`references/journal-schema.md` §"Tense"): *a document that records a MOMENT does not rot; a document that claims a STATE always rots* — a spec/plan is written entirely in STATE claims ("the system does X"), so by definition it cannot outlive the track that produced it. The FACT entry is the MOMENT-shaped residue that survives; the spec/plan is the STATE-shaped scaffold that is archived once it has served its purpose.
 
 ## Controller Anti-Patterns
 
@@ -504,10 +503,10 @@ Runs once per closed track (after merge), before the milestone-close drain (`ref
 - Skipping the acceptance verifier (step 1.5) on a user-observable phase because "the unit tests pass" — different concern; unit tests verify the implementation's internals, acceptance tests verify the user-story ACs. Both required.
 - Skipping the validator (step 2) because "code-quality review will catch it" — different lens. Validator covers correctness-vs-promise (AC coverage, scope drift, security gaps relative to spec). Code-quality covers craftsmanship (design, naming, bloat). Combining them buries critical findings under nits.
 - Skipping code quality review (step 3) because validator passed — different bug class.
-- **Blocking the main loop on a synchronous validator / code-quality review when nothing needs the result yet** — the verification tail is background-by-default; the only sync point is the fixup step. Sitting idle through a 10-30 minute sync review call is the measured top waste. Dispatch background, keep working, wait at step 4.
+- **Blocking the main loop on a synchronous validator / code-quality review when nothing needs the result yet** — the verification tail is background-by-default; the only sync point is the fixup step. Sitting idle through a long sync review call is pure waste. Dispatch background, keep working, wait at step 4.
 - Marking task complete with open Important findings unaddressed — apply defer-vs-fix triage instead.
 - **Dispatching implementer without enforcing the pre-flight assumption block** — controller loses the chance to catch wrong assumptions before code is written; first surface of the assumption becomes the diff, by which point sunk-cost bias makes correction expensive.
-- **Dispatching a task whose plan text predicts multiple file-clusters as one implementer, or dispatching without the soft-budget line** — 26-30 minute opaque sync calls were the single worst measured UX offender; the pre-split rule is the static catch, the soft budget the runtime backstop. Both belong in every dispatch.
+- **Dispatching a task whose plan text predicts multiple file-clusters as one implementer, or dispatching without the soft-budget line** — long opaque sync calls are the worst UX offender; the pre-split rule is the static catch, the soft budget the runtime backstop. Both belong in every dispatch.
 - **Ignoring a SPLIT_PROPOSED return (telling the implementer "just finish it") without recording why** — the proposal is the budget doing its job; either dispatch the slices or note the authorization-to-continue in the journal "Plan deviations". Silently overriding it re-creates the opaque long call the budget exists to kill.
 - **Letting implementer skip the surgical-scope clause** — silent drive-by edits (reformatting / "improved" comments / dead-code purge orthogonal to task) pollute the diff and break review traceability. Every changed line must trace to the task text.
 - **Code reviewer skips the bloat-smell checklist because "design looks clean"** — clean design ≠ minimum design. Bloat smell is its own pass; run it explicitly.

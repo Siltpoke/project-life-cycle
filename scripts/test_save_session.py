@@ -47,7 +47,7 @@ def git() -> dict:
             "dirty": False}
 
 
-# --- extraction (AC2) --------------------------------------------------
+# --- extraction --------------------------------------------------------
 
 def test_extract_tasks_are_user_messages(sample, git):
     d = ss.extract_digest(sample, {"session_id": "sess12345678"}, git)
@@ -77,7 +77,7 @@ def test_extract_caps(git):
     assert d["tasks"][-1] == "m24"  # keeps the LAST N
 
 
-# --- session key + sanitize (AC3) --------------------------------------
+# --- session key + sanitize --------------------------------------------
 
 def test_session_key_uses_full_session_id(git):
     assert ss.session_key({"session_id": "abcdef1234567890"}, git) == "abcdef1234567890"
@@ -120,7 +120,7 @@ def test_render_empty_sections_say_none(git):
     assert "- (none)" in out and "Total user messages: 0" in out
 
 
-# --- atomic write + full run (AC1, AC3, AC4) ---------------------------
+# --- atomic write + full run ------------------------------------------
 
 def test_run_writes_named_digest(tmp_path, sample, monkeypatch):
     tp = tmp_path / "t.jsonl"
@@ -203,10 +203,17 @@ def test_prune_by_age(tmp_path):
 
 # --- select_digest: the /recall read side -----------------------------
 
-def _seed(directory, name, mtime, project="myproj"):
-    """Seed a digest whose **Project:** header (the authoritative scope) is `project`."""
+def _seed(directory, name, mtime, project="myproj", messages=None):
+    """Seed a digest whose **Project:** header (the authoritative scope) is `project`.
+
+    `messages=None` writes NO Stats section — the shape every pre-existing test
+    here relies on, and the shape `digest_is_empty` must read as non-empty.
+    """
     p = directory / name
-    p.write_text(f"# Session\n**Project:** {project}   **Branch:** b   **Session:** k\n")
+    body = f"# Session\n**Project:** {project}   **Branch:** b   **Session:** k\n"
+    if messages is not None:
+        body += f"\n## Stats\n- Total user messages: {messages}\n"
+    p.write_text(body)
     os.utime(p, (mtime, mtime))
     return p
 
@@ -221,7 +228,7 @@ def test_select_no_arg_picks_newest_for_repo(tmp_path):
 
 
 def test_select_scopes_by_project_header_not_filename(tmp_path):
-    """Regression (historical fix, CRITICAL): repo 'app' must NOT catch 'app-web' digests."""
+    """Regression: repo 'app' must NOT catch 'app-web' digests."""
     now = time.time()
     app = _seed(tmp_path, "2026-07-15-app-abc.md", now - 100, project="app")
     _seed(tmp_path, "2026-07-16-app-web-xyz.md", now, project="app-web")  # newer, prefix
@@ -283,6 +290,65 @@ def test_select_date_arg_global_fallback_flagged(tmp_path):
 def test_select_empty_dir_returns_none(tmp_path):
     assert ss.select_digest(tmp_path / "nope", "myproj") is None
     assert ss.select_digest(tmp_path, "myproj") is None
+
+
+# --- empty digests must not shadow real ones --------------------------------
+
+def test_select_skips_a_newer_empty_digest(tmp_path):
+    """A session opened and closed without a word still gets a digest written.
+
+    Being newest, it used to win the sort outright and brief the reader from the
+    emptiest file on disk. Several empty digests in a row
+    can sit at the top of a repo's list while the digest holding the real
+    work is several places down.
+    """
+    now = time.time()
+    real = _seed(tmp_path, "2026-08-14-myproj-aaa.md", now - 3600, messages=36)
+    _seed(tmp_path, "2026-08-15-myproj-bbb.md", now - 10, messages=0)
+    pick = ss.select_digest(tmp_path, "myproj", now=now)
+    assert pick.path == real and pick.cross_project is False
+
+
+def test_select_returns_an_empty_digest_when_that_is_all_there_is(tmp_path):
+    """Reordering only — never a reason to return fewer results than before."""
+    now = time.time()
+    _seed(tmp_path, "2026-08-14-myproj-aaa.md", now - 3600, messages=0)
+    newest_empty = _seed(tmp_path, "2026-08-15-myproj-bbb.md", now - 10, messages=0)
+    pick = ss.select_digest(tmp_path, "myproj", now=now)
+    assert pick is not None and pick.path == newest_empty
+
+
+def test_select_skips_empty_on_the_global_fallback_too(tmp_path):
+    """The cross-project branch sorts by the same rule, or half the fix is dead."""
+    now = time.time()
+    real = _seed(tmp_path, "2026-08-14-other-aaa.md", now - 3600,
+                 project="other", messages=12)
+    _seed(tmp_path, "2026-08-15-other-bbb.md", now - 10, project="other", messages=0)
+    pick = ss.select_digest(tmp_path, "myproj", now=now)
+    assert pick.path == real and pick.cross_project is True
+
+
+def test_select_path_arg_hands_back_an_empty_digest_unchanged(tmp_path):
+    """An explicitly named file is the caller's decision, not the sort's."""
+    now = time.time()
+    p = _seed(tmp_path, "2026-08-15-myproj-aaa.md", now, messages=0)
+    pick = ss.select_digest(tmp_path, "myproj", arg=str(p))
+    assert pick.path == p
+
+
+def test_digest_is_empty_only_on_a_positive_zero(tmp_path):
+    """Every uncertain shape resolves to non-empty — the safe side of the call."""
+    now = time.time()
+    assert ss.digest_is_empty(_seed(tmp_path, "a.md", now, messages=0)) is True
+    assert ss.digest_is_empty(_seed(tmp_path, "b.md", now, messages=7)) is False
+    # no Stats section at all (older digests, a truncated write)
+    assert ss.digest_is_empty(_seed(tmp_path, "c.md", now)) is False
+    # unreadable path
+    assert ss.digest_is_empty(tmp_path / "does-not-exist.md") is False
+    # a Stats line that does not parse must not read as zero
+    d = tmp_path / "d.md"
+    d.write_text("# Session\n## Stats\n- Total user messages: unknown\n")
+    assert ss.digest_is_empty(d) is False
 
 
 # --- resume CLI subcommand (read-only /recall dispatch) ---------------------

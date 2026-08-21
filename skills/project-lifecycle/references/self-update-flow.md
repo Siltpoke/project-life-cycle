@@ -4,8 +4,6 @@ How an AI agent (the assistant using this skill) updates the skill itself when t
 
 **The repo is the single source of truth.** The skill is consumed as a versioned plugin (installed from the marketplace into the plugin cache); released changes reach users only through a version bump + release. Unreleased changes are run straight from the repo working tree via `claude --plugin-dir <repo-path>` — no second "live" copy, no sync step.
 
-> Historical note: this skill used to maintain a live copy at `~/.claude/skills/project-lifecycle/` mirrored to the repo by `scripts/sync.sh`. That flow was retired (the live copy stopped existing; the plugin cache replaced it as the consumption path). If you find sync instructions anywhere, they are stale — edit the repo.
-
 ## When to update the skill (vs. a project's CLAUDE.md)
 
 When the user asks for a rule change, FIRST decide scope:
@@ -15,9 +13,9 @@ When the user asks for a rule change, FIRST decide scope:
 | Rule applies to every project the user runs | ✅ | ❌ |
 | Rule about a specific stack (Django, Rails, Postgres) | ❌ | ✅ |
 | Rule about a specific business domain (accounting, healthcare) | ❌ | ✅ |
-| Rule about specific tools (RTK, caveman) | ✅ (adopt-tier doc) | ❌ |
+| Rule about specific external tools (token-saving proxies, output-style plugins) | ✅ (`references/cost-aware-behaviors.md`) | ❌ |
 | Rule about the per-phase workflow itself | ✅ | ❌ |
-| Rule about audience / mom-test / industry references | ❌ (project-specific) | ✅ |
+| Rule about audience / domain vocabulary / industry references | ❌ (project-specific) | ✅ |
 | The user explicitly says "add this to the project-lifecycle skill" | ✅ | ❌ |
 | First time seeing this pattern, not yet proven cross-project | ❌ (try in CLAUDE.md first, promote later) | ✅ |
 

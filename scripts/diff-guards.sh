@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# diff-guards.sh — out-of-envelope producer of diff-guards.json (verify-gate AC3 / R5).
+# diff-guards.sh — out-of-envelope producer of diff-guards.json (verify-gate guard routing).
 # Two-pass so multi-line comments / strings are handled with real cross-line state (a unified=0
 # diff can't see a construct's opener when only an interior line is added):
 #   pass 1 — from the diff, collect the ADDED line numbers per source file;

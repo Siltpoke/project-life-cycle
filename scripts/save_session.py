@@ -308,18 +308,44 @@ def digest_project(path: Path) -> str:
     return ""
 
 
+def digest_is_empty(path: Path) -> bool:
+    """True only when a digest POSITIVELY declares zero user messages.
+
+    Conservative by construction: a missing, unparseable, or unreadable Stats
+    line reads as NON-empty. The cost of the two mistakes is asymmetric — a
+    stray empty digest surviving costs one dull card, while wrongly discarding
+    a real one hides state the reader is counting on — so every uncertain case
+    resolves toward keeping the digest.
+    """
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    m = re.search(r"^-\s*Total user messages:\s*(\d+)\s*$", text, re.M)
+    return m is not None and int(m.group(1)) == 0
+
+
 def select_digest(directory: Path, repo: str, arg: str | None = None,
                   now: float | None = None) -> DigestPick | None:
     """Resolve which digest ``/recall`` should brief from. Read-only.
 
     - ``arg`` a path (contains ``/`` or ends ``.md``) → that exact file.
     - ``arg`` a ``YYYY-MM-DD`` → that date, current repo, newest.
-    - no ``arg`` → newest for the current repo; if none, newest GLOBAL with
-      ``cross_project=True`` (never silently surface another project's state).
+    - no ``arg`` → newest SUBSTANTIVE digest for the current repo; if none,
+      newest GLOBAL with ``cross_project=True`` (never silently surface another
+      project's state).
 
     Repo scoping is by the digest's ``**Project:**`` header, NOT the filename —
     filename globbing leaks across prefix-colliding project names (``app`` vs
     ``app-web``) because slug and key both allow '-'.
+
+    Recency alone is the wrong sort key. A session that opens and closes without
+    a single user message still gets a digest written for it, and being newest
+    it then shadows every digest that recorded real work — the reader is briefed
+    from the emptiest possible file precisely when they most need the last real
+    one. So ordering is recency WITHIN substance: empty digests are considered
+    only when nothing substantive exists at all, which keeps this a reordering
+    and never a way to return fewer results than before.
     """
     ref = now if now is not None else time.time()
 
@@ -339,12 +365,20 @@ def select_digest(directory: Path, repo: str, arg: str | None = None,
     def date_ok(p: Path) -> bool:
         return arg is None or p.name[:10] == arg
 
+    def substance_first(paths: list[Path]) -> list[Path]:
+        """Newest-first, but every substantive digest ahead of every empty one.
+
+        Falls back to the untouched list when all of them are empty, so this can
+        only ever change WHICH digest is picked, never WHETHER one is.
+        """
+        return [p for p in paths if not digest_is_empty(p)] or paths
+
     candidates = [p for p in directory.glob(f"{_DATE_GLOB}-*.md") if date_ok(p)]
-    repo_hits = newest([p for p in candidates if digest_project(p) == repo])
+    repo_hits = substance_first(newest([p for p in candidates if digest_project(p) == repo]))
     if repo_hits:
         return DigestPick(repo_hits[0], _age_days(repo_hits[0], ref), False)
 
-    global_hits = newest(candidates)
+    global_hits = substance_first(newest(candidates))
     if global_hits:
         return DigestPick(global_hits[0], _age_days(global_hits[0], ref), True)
     return None

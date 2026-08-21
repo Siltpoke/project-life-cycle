@@ -1,0 +1,2 @@
+scripts/test_close_gate_closure_check.py::122 -> .claude/.ac5-baseline.txt
+scripts/test_close_gate_closure_check.py::54 -> .claude/.ac5-baseline.txt

@@ -6,7 +6,7 @@ export const meta = {
 
 // ---- INLINED VERBATIM from verify-tail.lib.mjs ----
 // IMPORT_OK=false: the Workflow sandbox has no module resolution (static `import`
-// parses as a dynamic-import call → SyntaxError; probed 2026-07-16). The canonical,
+// parses as a dynamic-import call → SyntaxError). The canonical,
 // node-tested copy of these functions lives in verify-tail.lib.mjs; this inlined copy
 // is drift-guarded by verify-tail.inline-guard.test.mjs. Keep both in sync in ONE commit.
 
@@ -147,11 +147,11 @@ function normalizeVerifier (verifierRaw, runVerifier) {
 // ---- end inlined ----
 
 // args = { builderCommitSHA, builderSummary, storyPath, prevTaskTip, folderMapSide, specPath, planPath }.
-// specPath/planPath are optional (NEW): threaded into the validator prompt so it can
+// specPath/planPath are optional: threaded into the validator prompt so it can
 // compare the diff against spec/plan when they exist; absent → the prompt says so explicitly.
-// Defensive: the runtime may hand `args` over as a JSON string (observed in an earlier
-// self-test — scriptPath invocation delivered a stringified payload, so a raw destructure
-// yielded all-undefined). Parse-if-string so real inputs flow whichever form arrives.
+// Defensive: the runtime may hand `args` over as a JSON string (a scriptPath invocation can
+// deliver a stringified payload, and a raw destructure of a string
+// yields all-undefined). Parse-if-string so real inputs flow whichever form arrives.
 const input = typeof args === 'string' ? JSON.parse(args) : args
 if (input == null || typeof input !== 'object') throw new Error(`verify-tail: expected an object (or JSON-string) for args, got ${typeof input}`)
 const { builderCommitSHA, builderSummary, storyPath, prevTaskTip, specPath, planPath } = input

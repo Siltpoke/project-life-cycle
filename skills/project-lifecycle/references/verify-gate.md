@@ -39,9 +39,9 @@ and the gate is invoked with that ancestor SHA as `<HEAD_SHA>` — not necessari
 tip of the branch. Later commits on top (e.g. a bookkeeping "bind report" commit) don't
 invalidate the binding as long as the caller passes the SHA the report actually claims.
 
-Later tasks extend the checks run inside the `else` branch of the report-schema block
-(spec/AC cross-reference, evidence resolution, override matching, envelope assertions) —
-this doc will grow alongside them.
+5. **Requirements floor** — when the PR base carries `.plc/spec.json` with acceptance criteria, the report's `perAc` ids must equal the spec's ids exactly; no spec on the base, or a spec with no criteria, is recorded as N/A rather than blocking.
+6. **Per-AC verdict + typed evidence** — every `perAc` entry is `met` or `unmet` and carries at least one evidence ref typed `file://` (the file must exist in the repo), `test://` or `hunk://`.
+7. **Override when not QUALIFIED** — any other verdict requires `.plc/override-<prHeadSha>.json` with a matching `reviewedHeadSha`, at least one finding and a non-empty `reason`. A PR whose only change adds that override file is re-evaluated against the prior report instead of failing SHA binding. When `.plc/diff-guards.json` records added guards, each must also be fixture-proven potent (`potency-result.json`) or carry an audited waiver.
 
 ## Envelope regression lock
 

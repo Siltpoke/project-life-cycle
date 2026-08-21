@@ -20,7 +20,7 @@ claude plugin marketplace add Victoriakaey/project-life-cycle
 claude plugin install project-lifecycle@project-life-cycle
 ```
 
-Restart Claude Code. Skill becomes available as `project-lifecycle`; auto-triggers when you start a new project, plan a milestone, or run per-phase work. The three headline commands — `/project-lifecycle:init-harness` (bootstrap a project), `/project-lifecycle:ship` (vertical-slice feature), `/project-lifecycle:release` (cut a release) — drive the core arc, alongside the opt-in `/project-lifecycle:builder-profile` (a local snapshot of how you actually use an AI coding agent). A set of auxiliary commands rounds out the workflow — `/catchup`, `/handoff`, `/reconcile`, `/review`, `/research`, `/capture`, `/recall`, `/cognition-distill`, `/tasklist` — see the [Guide](GUIDE.md) for what each does. The bare forms (`/init-harness`, `/ship`, …) used throughout this README also work, as long as no other installed command claims the same name.
+Restart Claude Code. Skill becomes available as `project-lifecycle`; auto-triggers when you start a new project, plan a milestone, or run per-phase work. The three headline commands — `/project-lifecycle:init-harness` (bootstrap a project), `/project-lifecycle:ship` (vertical-slice feature), `/project-lifecycle:release` (cut a release) — drive the core arc, alongside the opt-in `/project-lifecycle:builder-profile` (a local snapshot of how you actually use an AI coding agent). A set of auxiliary commands rounds out the workflow — `/catchup`, `/handoff`, `/reconcile`, `/review`, `/research`, `/capture`, `/recall`, `/cognition-distill`, `/tasklist`, `/plc-status` — see the [Guide](GUIDE.md) for what each does. The bare forms (`/init-harness`, `/ship`, …) used throughout this README also work, as long as no other installed command claims the same name.
 
 Update later:
 
@@ -71,7 +71,7 @@ python3 ~/.codex/skills/.system/plugin-creator/scripts/update_plugin_cachebuster
 codex plugin add project-lifecycle@<your-marketplace-name>
 ```
 
-Then start a new Codex thread. The cachebuster step updates `.codex-plugin/plugin.json` from `0.11.0` to a local build version such as `0.11.0+codex.YYYYMMDDHHMMSS`, which forces Codex to refresh its installed plugin cache. Use this update flow after changing `SKILL.md`, bundled references, Codex UI metadata, or `.codex-plugin/plugin.json`.
+Then start a new Codex thread. The cachebuster step stamps the version in `.codex-plugin/plugin.json` with a fresh local build suffix (`X.Y.Z+codex.YYYYMMDDHHMMSS`), which forces Codex to refresh its installed plugin cache. Use this update flow after changing `SKILL.md`, bundled references, Codex UI metadata, or `.codex-plugin/plugin.json`.
 
 ### Qoder setup
 

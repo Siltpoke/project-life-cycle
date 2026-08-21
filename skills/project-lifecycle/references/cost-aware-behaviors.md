@@ -42,8 +42,8 @@ Even where cost is not the binding constraint, **every token should earn its pla
 
 ### Session boundaries
 
-- **`/clear` at natural breaks** — phase boundary, task boundary, when context >50% and starting fresh work. The handoff doc + RESUME.md + mid-phase resume note make `/clear` safe.
-- **Hot-path artifacts before /clear**: confirm handoff doc / journal / resume note are written so the next session has a tight entry point.
+- **`/clear` at natural breaks** — phase boundary, task boundary, when context >50% and starting fresh work. The journal entry + RESUME.md + mid-phase resume note make `/clear` safe.
+- **Hot-path artifacts before /clear**: confirm journal / RESUME.md / resume note are written so the next session has a tight entry point.
 - **Deterministic backstop:** the `/clear at >50%` rule above is model-discipline; `hooks/context-floor.sh` (machine-local global PreToolUse:Edit|Write hook) enforces an absolute-token floor (default 150K) that blocks new Edit/Write until RESUME.md is refreshed. It is deliberately a hard block only — soft, advisory warnings are left to whatever session monitoring your host provides. See `references/harness-primitives.md` §9. Tune `PLC_CONTEXT_FLOOR` after watching it fire a few times. **Verify it's actually armed** — the `phase-done` gate prints a warn-only row when no settings file wires `context-floor.sh`, and `/init-harness --refresh` repairs the wiring (un-armed floors let sessions run far past the floor unnoticed). At task boundaries, `close-gate-nudge.sh` adds a throttled "/clear now" nudge when the task close passed clean and occupancy is over the floor.
 
 ### Skill invocation triage
@@ -63,7 +63,7 @@ Before invoking `project-lifecycle` (or any heavyweight workflow skill), apply t
 | Refactor of one function | NO | Inline + journal one-liner |
 | Test for one new function | NO | TDD inline |
 
-The full workflow (brainstorm → plan → 6-step cadence → handoff → PR) is **100-300K tokens per phase**. Trivial work doesn't earn that overhead. Triage saves the majority of token waste from skill misuse.
+The full workflow (brainstorm → plan → 6-step cadence → journal → PR) is **100-300K tokens per phase**. Trivial work doesn't earn that overhead. Triage saves the majority of token waste from skill misuse.
 
 ### Workflow compression (when workflow IS invoked)
 
@@ -103,7 +103,6 @@ Example: `Agent(subagent_type=Explore, model=haiku, …)` for cheap lookups.
 
 | Tool | What changes |
 |---|---|
-| **RTK** (Rust bash proxy) | Most `git`/`pytest`/`playwright`/`eslint` calls auto-compress 60-90%. No code change; just expect tool results to be shorter. Failures are tee'd to disk for re-inspect. |
 | **token-savior** (MCP) | Use `mcp__token-savior__*` tools for symbol lookup INSTEAD of `Read` on large files. The tool reports a large reduction in injected characters; measure on your own codebase before relying on the figure. |
 | **context-mode** (MCP) | Tool outputs sandboxed; query with intent strings to get only relevant chunks. Heavy install — only adopt for large-codebase / long-session projects. |
 | **code-review-graph** (MCP) | Use `mcp__code-review-graph__*` for blast-radius analysis BEFORE editing — find affected callers/tests with one query instead of grep-fests. |
@@ -113,7 +112,7 @@ Example: `Agent(subagent_type=Explore, model=haiku, …)` for cheap lookups.
 Every project should have:
 
 - `make codemap` — generates a per-directory index (≤200 lines each) listing classes / functions / routes. Used as the "where is X" pre-Read filter.
-- `make phase-checks PHASE=X.Y` — see `smoke-tracks.md`. Outputs feed handoff doc §5/§6.
+- `make phase-checks PHASE=X.Y` — see `smoke-tracks.md`. Outputs feed the smoke artifacts and the PR body.
 
 ## Anti-patterns
 

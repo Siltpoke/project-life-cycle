@@ -41,3 +41,4 @@ close-gate; if it fails, the gate is unaffected.
 
 See `skills/project-lifecycle/references/cognition.md` §"Distill (regenerate)",
 §"Hot cognition doc format", §"Confidence surface".
+

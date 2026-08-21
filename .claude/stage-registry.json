@@ -1,0 +1,344 @@
+{
+  "note": [
+    "The stage registry, as DATA. One declared list read by the writers, the scanner and",
+    "the reader alike, so that the rule -- every registry stage gets exactly one row in every",
+    "run -- is checkable rather than aspirational. Like the gate manifest .claude/close-gate.json (see",
+    ".claude/close-gate.json.example), it is repo-scoped configuration, and its gate_check bindings name",
+    "identifiers inside THIS repo's scripts/close-gate.sh.",
+    "",
+    "THE DENOMINATOR IS len(stages), FULL STOP. `mandated_when` is prose here and nothing in this",
+    "release evaluates it. A conditional stage that did not apply is not an",
+    "absent row; it is a row in one of the reader's five states. Writing the condition down without an",
+    "evaluator is deliberate: it is the documentation an evaluator would turn into code, and leaving it out",
+    "would lose the reason each stage is here.",
+    "",
+    "gate_check BINDS TO AN IDENTIFIER, NEVER AN ORDINAL. close-gate.sh labels its checks `5(journal)`,",
+    "`7(test-evidence)` and so on, and those numbers move whenever a check is added or inserted, so",
+    "the bindings below name the shell variables the gate",
+    "actually branches on (RUN_JOURNAL, RUN_EVIDENCE, ...), which do not renumber. An invariant",
+    "asserts every one of them still exists in close-gate.sh: renumbering the gate is then free, and",
+    "RENAMING it is loud.",
+    "",
+    "available_from IS WHEN THE EVIDENCE COULD FIRST EXIST IN THIS REPO, not when the idea did. A run",
+    "older than a stage's available_from renders `unknown (retro)` and never `missing` -- reporting a",
+    "stage as skipped when its mechanism did not yet exist would manufacture a systematic false",
+    "finding across the whole historical corpus.",
+    "",
+    "available_from_basis SAYS HOW THE DATE WAS ARRIVED AT, because some of them are measured and",
+    "some are not, and a reader cannot tell from the date itself. `measured` = the date the mechanism",
+    "first became available, followed by how that date was established. `repo-start` = the",
+    "`repo_start` value below, used where the stage is a human act",
+    "with no mechanism to date. THE RESIDUAL, STATED: a `repo-start` row whose practice actually began",
+    "later will score early runs `missing` when `unknown (retro)` would be honest. That is a wrong",
+    "answer in the accusing direction, and it is the one this file cannot rule out. It is cheap to fix",
+    "per row -- change the date and the basis -- and expensive to fix for all of them at once, so it",
+    "is fixed when a run is scored wrongly rather than by guessing twenty dates today.",
+    "",
+    "retro_evidence SAYS WHETHER A STAGE CAN BE RECOVERED FROM DISK AT ALL, and null is a",
+    "load-bearing value rather than an omission. The stages divide in two: some leave an artifact",
+    "with the phase in its name, and some -- intent_gate, the two cross-checks, smoke,",
+    "independent_review, close_gate_task/phase, test_evidence, invariants, product_diff -- leave",
+    "nothing a later reader can find. `.claude/.last-test-run` holds only the CURRENT tree.",
+    "A null here is what makes the",
+    "reader render `unknown (retro)` instead of `missing`: accusing a phase of skipping a stage whose",
+    "evidence could never have survived would manufacture a systematic false finding across the whole",
+    "corpus.",
+    "",
+    "changelog and cross_family_review are null DESPITE being recoverable in principle, and the reason",
+    "is the same in both cases: recovering them means matching CONTENT rather than a filename -- a git",
+    "range that touched CHANGELOG.md, or the `2nd-agent status:` line inside a qa-log fragment. Content",
+    "matching is the substring class the scanner's regression fixture exists to punish (a phase id can",
+    "occur in a qa-log only as a cross-reference inside another phase's fragment). Left null,",
+    "and left recorded, rather than done badly.",
+    "",
+    "roadmap_row IS TRUE BY CONSTRUCTION FOR EVERY RETRO RUN and is emitted anyway. The run population",
+    "IS docs/ROADMAP.md, so a retro run cannot fail to have a ROADMAP row -- the enumeration source and",
+    "the evidence source are one file. It carries no information retroactively and only means something",
+    "for a live run. Said here rather than left for a reader to mistake for a check that passed.",
+    "",
+    "retro_reason SPLITS THE TWO KINDS OF null, because they call for opposite",
+    "actions yet would otherwise render identically. `not-recoverable` means the evidence could never have survived",
+    "-- intent_gate, smoke, the cross-checks, close_gate_*, test_evidence, invariants, product_diff --",
+    "and a reader can do nothing about it. `not-implemented` means recovery IS possible in principle",
+    "and this scanner declines to do it, because recovering `changelog` or `cross_family_review` means",
+    "matching CONTENT rather than a filename, which is the substring class the scanner's regression",
+    "fixture exists to punish. A reader who sees the second one can act: implement the lookup, or",
+    "check by hand."
+  ],
+  "repo_start": "2026-06-10",
+  "stages": [
+    {
+      "stage_id": "intent_gate",
+      "mandated_when": "always",
+      "writer": null,
+      "gate_check": null,
+      "available_from": "2026-06-10",
+      "available_from_basis": "repo-start",
+      "retro_evidence": null,
+      "retro_reason": "not-recoverable"
+    },
+    {
+      "stage_id": "qa_log",
+      "mandated_when": "large work",
+      "writer": null,
+      "gate_check": null,
+      "available_from": "2026-06-10",
+      "available_from_basis": "repo-start",
+      "retro_evidence": [
+        {
+          "kind": "phase-file",
+          "roots": [
+            "docs/qa-log.d",
+            "docs/archive/.pre-images/*/files/docs/qa-log.d"
+          ]
+        },
+        {
+          "kind": "archive-heading",
+          "roots": [
+            "docs/archive/brainstorming-qa-log"
+          ]
+        }
+      ],
+      "retro_reason": null
+    },
+    {
+      "stage_id": "user_story",
+      "mandated_when": "user-observable phases",
+      "writer": null,
+      "gate_check": null,
+      "available_from": "2026-06-10",
+      "available_from_basis": "repo-start",
+      "retro_evidence": [
+        {
+          "kind": "phase-file",
+          "roots": [
+            "docs/superpowers/specs"
+          ],
+          "suffix": "-user-story.md"
+        }
+      ],
+      "retro_reason": null
+    },
+    {
+      "stage_id": "spec",
+      "mandated_when": "large work",
+      "writer": null,
+      "gate_check": null,
+      "available_from": "2026-06-10",
+      "available_from_basis": "repo-start",
+      "retro_evidence": [
+        {
+          "kind": "phase-file",
+          "roots": [
+            "docs/superpowers/specs"
+          ],
+          "suffix": "-design.md"
+        }
+      ],
+      "retro_reason": null
+    },
+    {
+      "stage_id": "crosscheck_a",
+      "mandated_when": "after spec",
+      "writer": null,
+      "gate_check": null,
+      "available_from": "2026-07-24",
+      "available_from_basis": "measured: the date the cross-check lens was added to skills/project-lifecycle/references/reviewer-brief.md",
+      "retro_evidence": null,
+      "retro_reason": "not-recoverable"
+    },
+    {
+      "stage_id": "plan",
+      "mandated_when": "large work",
+      "writer": null,
+      "gate_check": null,
+      "available_from": "2026-06-10",
+      "available_from_basis": "repo-start",
+      "retro_evidence": [
+        {
+          "kind": "phase-file",
+          "roots": [
+            "docs/superpowers/plans"
+          ]
+        }
+      ],
+      "retro_reason": null
+    },
+    {
+      "stage_id": "crosscheck_b",
+      "mandated_when": "after plan",
+      "writer": null,
+      "gate_check": null,
+      "available_from": "2026-07-24",
+      "available_from_basis": "measured: same commit as crosscheck_a -- one lens, two dispatch points",
+      "retro_evidence": null,
+      "retro_reason": "not-recoverable"
+    },
+    {
+      "stage_id": "journal",
+      "mandated_when": "every task",
+      "writer": "close-gate.sh",
+      "gate_check": "RUN_JOURNAL",
+      "available_from": "2026-07-15",
+      "available_from_basis": "measured: the date scripts/close-gate.sh was added",
+      "retro_evidence": [
+        {
+          "kind": "phase-file",
+          "roots": [
+            "docs/journal.d",
+            "docs/archive/.pre-images/*/files/docs/journal.d"
+          ]
+        },
+        {
+          "kind": "archive-heading",
+          "roots": [
+            "docs/archive/journal"
+          ]
+        }
+      ],
+      "retro_reason": null
+    },
+    {
+      "stage_id": "test_evidence",
+      "mandated_when": "every task",
+      "writer": "close-gate.sh",
+      "gate_check": "RUN_EVIDENCE",
+      "available_from": "2026-07-15",
+      "available_from_basis": "measured: the date scripts/close-gate.sh was added",
+      "retro_evidence": null,
+      "retro_reason": "not-recoverable"
+    },
+    {
+      "stage_id": "invariants",
+      "mandated_when": "every task",
+      "writer": "close-gate.sh",
+      "gate_check": "INV_DECLARED",
+      "available_from": "2026-07-16",
+      "available_from_basis": "measured: the date scripts/invariants/ was added",
+      "retro_evidence": null,
+      "retro_reason": "not-recoverable"
+    },
+    {
+      "stage_id": "product_diff",
+      "mandated_when": "every task",
+      "writer": "close-gate.sh",
+      "gate_check": "RUN_PRODUCT_TREE",
+      "available_from": "2026-07-15",
+      "available_from_basis": "measured: the date scripts/close-gate.sh was added",
+      "retro_evidence": null,
+      "retro_reason": "not-recoverable"
+    },
+    {
+      "stage_id": "close_gate_task",
+      "mandated_when": "every task",
+      "writer": "close-gate.sh",
+      "gate_check": null,
+      "available_from": "2026-07-15",
+      "available_from_basis": "measured: the date scripts/close-gate.sh was added",
+      "retro_evidence": null,
+      "retro_reason": "not-recoverable"
+    },
+    {
+      "stage_id": "cross_family_review",
+      "mandated_when": "when armed",
+      "writer": "cross-family-review.sh",
+      "gate_check": null,
+      "available_from": "2026-07-24",
+      "available_from_basis": "measured: the date scripts/cross-family-review.sh was added -- the earliest day review evidence could exist; a repo that arms `second-agent-family` later has none before that",
+      "retro_evidence": null,
+      "retro_reason": "not-implemented"
+    },
+    {
+      "stage_id": "smoke",
+      "mandated_when": "user-visible phases",
+      "writer": null,
+      "gate_check": null,
+      "available_from": "2026-06-10",
+      "available_from_basis": "repo-start",
+      "retro_evidence": null,
+      "retro_reason": "not-recoverable"
+    },
+    {
+      "stage_id": "changelog",
+      "mandated_when": "phase",
+      "writer": "close-gate.sh",
+      "gate_check": "RUN_CHANGELOG",
+      "available_from": "2026-07-15",
+      "available_from_basis": "measured: the date scripts/close-gate.sh was added",
+      "retro_evidence": null,
+      "retro_reason": "not-implemented"
+    },
+    {
+      "stage_id": "spec_doc",
+      "mandated_when": "phase",
+      "writer": "close-gate.sh",
+      "gate_check": "RUN_PHASE_DOCS",
+      "available_from": "2026-07-15",
+      "available_from_basis": "measured: the date scripts/close-gate.sh was added",
+      "retro_evidence": [
+        {
+          "kind": "phase-file",
+          "roots": [
+            "docs/superpowers/specs"
+          ],
+          "suffix": "-design.md"
+        }
+      ],
+      "retro_reason": null
+    },
+    {
+      "stage_id": "plan_doc",
+      "mandated_when": "phase",
+      "writer": "close-gate.sh",
+      "gate_check": "RUN_PHASE_DOCS",
+      "available_from": "2026-07-15",
+      "available_from_basis": "measured: the date scripts/close-gate.sh was added",
+      "retro_evidence": [
+        {
+          "kind": "phase-file",
+          "roots": [
+            "docs/superpowers/plans"
+          ]
+        }
+      ],
+      "retro_reason": null
+    },
+    {
+      "stage_id": "roadmap_row",
+      "mandated_when": "phase",
+      "writer": "close-gate.sh",
+      "gate_check": "RUN_ROADMAP",
+      "available_from": "2026-07-15",
+      "available_from_basis": "measured: the date scripts/close-gate.sh was added",
+      "retro_evidence": [
+        {
+          "kind": "prose-token",
+          "roots": [
+            "docs/ROADMAP.md"
+          ]
+        }
+      ],
+      "retro_reason": null
+    },
+    {
+      "stage_id": "independent_review",
+      "mandated_when": "phase",
+      "writer": null,
+      "gate_check": null,
+      "available_from": "2026-06-10",
+      "available_from_basis": "repo-start",
+      "retro_evidence": null,
+      "retro_reason": "not-recoverable"
+    },
+    {
+      "stage_id": "close_gate_phase",
+      "mandated_when": "phase",
+      "writer": "close-gate.sh",
+      "gate_check": null,
+      "available_from": "2026-07-15",
+      "available_from_basis": "measured: the date scripts/close-gate.sh was added",
+      "retro_evidence": null,
+      "retro_reason": "not-recoverable"
+    }
+  ]
+}

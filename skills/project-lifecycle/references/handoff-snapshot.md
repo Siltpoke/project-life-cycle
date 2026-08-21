@@ -32,6 +32,14 @@ Eight fields, split **core (required)** vs **progressive (omit-if-empty)**. MOME
 3. **Staleness anchor** — `HEAD <sha> · <branch> · <ISO-timestamp>` captured at write-time. Lets a
    resuming session *trust* the snapshot rather than re-audit, and detect drift by diffing against the
    current HEAD.
+   **The anchor is LOCAL-GIT-ONLY and makes no claim about CI health** — it answers "has the tree
+   moved since I wrote this", never "does the default branch build". A snapshot whose anchor still
+   matches HEAD is *not* evidence that anything is green. This is an explicit decline, stated
+   rather than left to inference: an anchor either carries the CI fact **or** declines it, and
+   silence is not an option, because a staleness field that quietly says nothing about CI is exactly
+   how a welcome-back surface ends up implying everything is fine. Declining is the choice because
+   `/handoff` is prompt-only with no script; the CI state on record is carried by `/catchup`, which
+   reads `.claude/ci-status.json` and reports the comparison.
 
 ### Progressive — render only when non-empty; an empty field is **omitted entirely**, never a literal "None" line
 
@@ -129,8 +137,8 @@ write it locally and **report the local-only reality — never a phantom "commit
 ## The conditional journal FACT
 
 The durable half. The FACT schema already exists (`references/journal-schema.md` §FACT —
-`Date / Decision / Why / Backing / Rejected / Gotcha? / Source`) and its `Date / Decision / Why / Backing`
-subset is enforced by `phase-done`'s grep. Append a FACT to `docs/journal.d/<date>-<branch-slug>.md`
+`Date / Decision / Why / Backing / Rejected / Gotcha? / Source`), and `phase-done`'s grep requires
+six of them (all but `Gotcha?`) in this phase's journal entry (resolved as `references/journal-schema.md` §"The FACT entry (track close)" describes). Append a FACT to `docs/journal.d/<date>-<branch-slug>.md`
 **only when** the session produced a non-derivable decision or gotcha worth persisting. A zero-decision
 session writes **no FACT** — skipping is the correct outcome, emit no warning. The same "fabrication worse
 than empty" law applies: do not manufacture a FACT to look thorough.
@@ -139,9 +147,9 @@ than empty" law applies: do not manufacture a FACT to look thorough.
 fork).** `Source` (`<sha>:<path the working doc had BEFORE archival>`) and `Rejected` are **track-close
 artifacts**: mid-session, before any archival, `Source` has no pre-archival path to point at. Mark them
 **absent** on a mid-session FACT rather than fabricate one — the fabrication guard outranks a rote
-"all-fields-required" reading. The grep-enforced subset (`Date / Decision / Why / Backing`) is always
-truthfully fillable when a real decision occurred, so a mid-session FACT still satisfies `phase-done`
-honestly; it is a genuine journal entry, not a gate-gaming stub.
+"all-fields-required" reading. The other four (`Date / Decision / Why / Backing`) are always
+truthfully fillable when a real decision occurred, so a mid-session FACT is a genuine journal entry,
+not a gate-gaming stub — but `phase-done` greps for all six fields, so fill `Rejected` + `Source` at track close.
 
 ## Commit behavior
 
@@ -157,7 +165,7 @@ real `docs(handoff): snapshot` commit.
 - **Modifying the SessionStart:resume hook** — this brief writes what the existing hook already reads;
   the hook is untouched.
 - **Auto-firing** — `/handoff` is manual only; no context-pressure / phase-boundary trigger.
-- **Replacing `/save-session`** — distinct artifact (in-repo, MOMENT-tense, schema-enforced); no
+- **Replacing an external end-of-session command you may already use** — distinct artifact (in-repo, MOMENT-tense, schema-enforced); no
   migration, no deprecation of the external command.
 - **Adding a close-gate grep for the RESUME snapshot** — enforcement is generation-time (above). The
   journal FACT half keeps its existing `phase-done` grep; the moment half is validated at generation.

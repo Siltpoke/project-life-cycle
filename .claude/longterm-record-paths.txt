@@ -1,0 +1,26 @@
+# .claude/longterm-record-paths.txt -- the files a phase's distilled lessons would be written into.
+#
+# WHY THIS LIST EXISTS. Some of what a phase learns gets written into files the assistant reads
+# FIRST in every future conversation. Getting one right is valuable. Getting one wrong means it is
+# still acting on the wrong note three months later, and almost nothing points back to it as the
+# cause. The asymmetry is the whole argument for the default being "write nothing": a missing note
+# is fixed by mentioning it next time; a wrong note is found a quarter later.
+#
+# Under `mode: fast` these files are NOT in the PR's diff at all. An
+# unticked checkbox in the pre-merge brief means nothing if the change is already staged -- merging
+# writes it regardless. Closing that gap takes
+# both halves: the candidates stay out of the diff, and writing happens afterwards as its own act.
+#
+# THE ONLY AUTHORISED ROUTE is a commit carrying a `Longterm-write:` trailer naming what the user
+# ticked. The trailer is authorised by a human selection that happened BEFORE the write -- not by
+# the merge.
+#
+# WHAT THIS LIST IS NOT: it is not "every file that matters". It is the files a phase's own
+# distillation step writes into. A project that keeps its standing notes somewhere else adds that
+# path here; nothing discovers it automatically, and a path nobody adds is a path nobody protects.
+#
+# One glob per line. Matched against the paths a commit touches.
+docs/ROADMAP.md
+docs/cognition.md
+docs/BACKLOG.md
+CLAUDE.md

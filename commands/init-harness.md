@@ -71,11 +71,25 @@ Runs only when Phase 0 inventory found NO plc artifacts AND Phase 1 confirmed su
 
 Generate each in order. For each, check whether it already exists; if yes, propose a MERGE diff for user approval; if no, CREATE.
 
+**Close-gate scaffold — two things that must be generated together.** When writing
+`.claude/close-gate.json`, fill `test_evidence_inputs` from the detected source and test trees
+and emit `test_command` in the header-prefixed placeholder form, AND copy
+`references/close-gate.md` §"Evidence runner" to `scripts/gen-test-evidence.sh` (`chmod +x`)
+beside the gate. Exact template + the ambiguous-detection fallback:
+`references/init-harness.md` §"Generated close-gate manifest". Without the key the gate's
+test-evidence row silently falls back to comparing file timestamps, which git does not preserve
+across a checkout — so it false-passes on any fresh clone or CI runner. Without the runner the
+generated `test_command`'s `{SET}` / `{EVIDENCE_FILE}` placeholders are never resolved and the
+manifest is inert; and **never substitute the hand-written `… | tee <file>` pipeline for the
+runner** — it ends in a bare `tee`, which returns 0 even when the header step failed and
+overwrites good evidence with a broken file. On `--refresh`, add the key and the runner, but ask
+before rewriting an existing hand-tuned `test_command`.
+
 #### 5. `CLAUDE.md` at repo root
 
 Template (filled from detection):
 
-```markdown
+````markdown
 # Project: <repo name>
 
 ## What this is
@@ -151,7 +165,7 @@ retention: { distill: on }           # doc-retention; hot-caps/archive-dir defau
 - `CONTEXT.md` — domain glossary (DDD-style anchor)
 - `docs/RESUME.md` — current milestone state
 - `docs/ROADMAP.md` — whole-plan map (goal + milestone table + status)
-```
+````
 
 If `CLAUDE.md` exists, propose merge: new sections (stack, commands, folder-map, policy keys) appended; existing sections preserved.
 
@@ -212,7 +226,7 @@ Copy the skill's `hooks/inject-resume.sh.template` → `.claude/hooks/inject-res
 
 #### 9c. `Stop` → `save_session.py` (automatic session digest — the save half of `/recall`)
 
-Additively wire a `Stop` hook running the skill's `scripts/save_session.py` into **machine-local `~/.claude/settings.json`** (parallel to 9b, but machine-local like `context-floor` — it must fire for every session on the machine, not only PLC-active ones). After each assistant turn it writes a deterministic mechanical digest to `~/.claude/plc-session-data/` so `/recall` can brief the next session — PLC's own automatic session-save half. **Additive merge is mandatory:** read the existing `Stop` array and **append**; never clobber a `say`/voice Stop, `close-gate-nudge`, or any other Stop hook. Idempotent: skip if a `save_session` entry is already present. NOT the same event as the agent-chats `capture-hook` (that is `SessionEnd`), so the two coexist without collision. The hook must be `async: true` with a generous `timeout` and **always exits 0** (a per-turn hook must never block or crash a session). Entry shape:
+Additively wire a `Stop` hook running the skill's `scripts/save_session.py` into **machine-local `~/.claude/settings.json`** (parallel to 9b, but machine-local like `context-floor` — it must fire for every session on the machine, not only PLC-active ones). After each assistant turn it writes a deterministic mechanical digest to `~/.claude/plc-session-data/` so `/recall` can brief the next session — PLC's own automatic session-save half. **Additive merge is mandatory:** read the existing `Stop` array and **append**; never clobber any existing Stop hook. Idempotent: skip if a `save_session` entry is already present. NOT the same event as the agent-chats `capture-hook` (that is `SessionEnd`), so the two coexist without collision. The hook must be `async: true` with a generous `timeout` and **always exits 0** (a per-turn hook must never block or crash a session). Entry shape:
 
 ```json
 { "matcher": "*", "hooks": [ { "type": "command",
@@ -276,7 +290,7 @@ If `.claude-plugin/` was created, ship a validator workflow too.
     - CLAUDE.md (stack + commands + folder-map + policy keys + don't-do)
     - CONTEXT.md placeholder
     - docs/RESUME.md + docs/iteration-journal.md placeholders
-- docs/ROADMAP.md whole-plan-map stub
+    - docs/ROADMAP.md whole-plan-map stub
     - docs/qa-log.d/.gitkeep + changelog.d/.gitkeep (if fragment convention adopted)
     - .claude/commands/<list>
     - .claude/handlers/<list>
@@ -329,12 +343,12 @@ Detect + report only. Write nothing. Useful for "what would this do to my repo?"
 
 ## Related
 
-- `~/.claude/skills/project-lifecycle/references/init-harness.md` — full spec including detection signal table, merge strategy, handler scaffold templates per language.
-- `~/.claude/skills/project-lifecycle/references/onboarding.md` — Day 1 protocol for new contributors (post-bootstrap).
-- `~/.claude/skills/project-lifecycle/references/builder-split.md` — `folder-map` schema this command generates.
-- `~/.claude/skills/project-lifecycle/references/deterministic-handlers.md` — handler pattern + 6 canonical examples this command scaffolds from.
-- `~/.claude/skills/project-lifecycle/references/changelog.md` — CHANGELOG format this command generates an empty seed of.
-- `~/.claude/skills/project-lifecycle/references/output-format.md` — policy keys this command pre-fills.
+- `skills/project-lifecycle/references/init-harness.md` — full spec including detection signal table, merge strategy, handler scaffold templates per language.
+- `skills/project-lifecycle/references/onboarding.md` — Day 1 protocol for new contributors (post-bootstrap).
+- `skills/project-lifecycle/references/builder-split.md` — `folder-map` schema this command generates.
+- `skills/project-lifecycle/references/deterministic-handlers.md` — handler pattern + 6 canonical examples this command scaffolds from.
+- `skills/project-lifecycle/references/changelog.md` — CHANGELOG format this command generates an empty seed of.
+- `skills/project-lifecycle/references/output-format.md` — policy keys this command pre-fills.
 - `/ship` — first command to run after `/init-harness` completes.
 - `/release` — release-cut command (only relevant when project is a Claude-plugin OR user opts in to the release workflow).
 - **Session loop** — `/handoff` before you `/clear` (writes the next-step + gotchas into `RESUME.md`), then `/catchup` on return to a fresh session (renders a welcome-back card from git + RESUME + the session digest). Surface both to the user at the end of `/init-harness`.

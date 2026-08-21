@@ -1,5 +1,5 @@
 ---
-description: Render the current phase's progress from .claude/tasklist.md (the tasklist contract) in the terminal. Default is a brief collapsed line — phase name, a progress bar with done/total, and the one step in progress ("▶ now: …"). `/tasklist --tree` expands the full overview — every task group with its count and each step glyphed ✓ done / ▶ in-progress / ○ todo, the current `- [/]` step flagged "← here". Pure jq-free bash, portable on every CLI. Read-only — renders the contract, never writes it.
+description: Render the current phase's progress from .claude/tasklist.md (the tasklist contract) in the terminal. Default is a brief collapsed line — phase name, a progress bar with done/total, and the one step in progress ("▶ now — …"). `/tasklist --tree` expands the full overview — every task group with its count and each step glyphed ✓ done / ▶ in-progress / ○ todo, the current `- [/]` step flagged "← here". Pure jq-free bash, portable on every CLI. Read-only — renders the contract, never writes it.
 ---
 
 # /tasklist — render the PLC tasklist progress view (terminal)
@@ -39,3 +39,4 @@ lines are skipped.
 Read-only. This view **renders** the contract; it never writes `.claude/tasklist.md`. The writer sets
 `- [/]` on the step in progress (see SKILL.md "Definition of Done" → the in-progress marker); `/tasklist`
 only reads it.
+

@@ -21,7 +21,12 @@
 #
 # Exit 2 blocks the tool call; exit 0 allows. Fails OPEN on anything unparseable:
 # a weird-but-legitimate command is never wrongly blocked, and the pre-push hook
-# remains the un-bypassable backstop.
+# remains the backstop. NOT an un-bypassable one, which this comment used to
+# claim: `git push --no-verify` skips every pre-push hook, and this file's own
+# header names the enforcing layers as the pre-push hook AND the forge's branch
+# protection -- only the latter cannot be skipped from a local machine. Calling
+# the backstop un-bypassable while failing open in front of it is the same
+# inferred-vs-checked defect named above, one level up.
 
 INPUT="$(cat 2>/dev/null || true)"
 CMD="$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
@@ -43,7 +48,7 @@ BARE="$(printf '%s' "$CMD" | sed -e "s/'[^']*'//g" -e 's/"[^"]*"//g' 2>/dev/null
 # `git push origin feat/x && gh pr create --base main` is TWO commands. The old
 # check scanned the whole line as one flat token list, so `push` from the first
 # and `main` from the second combined into a verdict about neither -- it blocked
-# `gh pr create --base main` and branch-delete pushes, 8 times live during development.
+# `gh pr create --base main` and branch-delete pushes.
 # Splitting on the operator CHARACTERS (not on tokens) also handles the unspaced
 # form `x&&gh`, which a token-level split silently misses.
 # `$(...)` contents stay in their enclosing segment: that over-blocks rather than
@@ -65,7 +70,7 @@ deny() {
 #   main:release   -> dst is release              -> NOT main
 #   refs/heads/main-> fully-qualified form        -> main
 # The target is the dst (right of the colon) when a colon is present, else the
-# src. Matching `main` anywhere -- the previous rule -- gets main:release wrong in
+# src. Matching `main` anywhere -- the old rule -- gets main:release wrong in
 # one direction and +main / refs/heads/main wrong in the other.
 targets_main() {
   _r="${1#+}"                       # force marker is not part of the ref
@@ -115,7 +120,7 @@ for seg in "$@"; do
   # --delete/-d is a MODE for the whole segment, not a binding to the single next token. Binding
   # it to the next token missed `git push --delete origin main` / `-d origin main`: the token
   # after --delete (the remote) was eaten as the delete target, and `main` then landed in the
-  # refspec slot unchecked (independent-review finding). Every bare word after the remote is a
+  # refspec slot unchecked. Every bare word after the remote is a
   # refspec regardless of where --delete sits; whether it is a delete or a push, targeting main
   # is denied either way — the flag only picks the message.
   seen_push=0; seen_remote=0; want_value=0; delete_mode=0
@@ -146,8 +151,8 @@ done
 
 # KNOWN FALSE POSITIVE -- heredoc and other inline document bodies. The hook
 # receives the whole command string, so a `git commit -F - <<EOF ... EOF` whose
-# BODY describes a push to main is read as a segment that performs one. Observed
-# immediately: the commit message for this very rewrite was blocked by it.
+# BODY describes a push to main is read as a segment that performs one -- a commit
+# message that merely mentions such a push is blocked.
 # NOT FIXED HERE, on purpose. The direction is over-block, which is the safe one
 # for a guard that is explicitly not a boundary; the workaround is exact and
 # already the project's convention for anything long (`git commit -F <file>`,

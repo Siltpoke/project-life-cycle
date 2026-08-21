@@ -1,0 +1,38 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "checks_performed": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "check": { "type": "string" },
+          "known_good_input": { "type": "string" },
+          "confirmed_working": { "type": "boolean" }
+        },
+        "required": ["check", "known_good_input", "confirmed_working"]
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "severity": { "type": "string", "enum": ["Critical", "Important", "Minor"] },
+          "file": { "type": "string" },
+          "line": { "type": "integer" },
+          "claim": { "type": "string" },
+          "failure_scenario": { "type": "string" },
+          "refutation_attempted": { "type": "string" }
+        },
+        "required": ["severity", "file", "line", "claim", "failure_scenario", "refutation_attempted"]
+      }
+    },
+    "defect_class_both_oracles_would_miss": { "type": "string" },
+    "verdict": { "type": "string" }
+  },
+  "required": ["checks_performed", "findings", "defect_class_both_oracles_would_miss", "verdict"]
+}

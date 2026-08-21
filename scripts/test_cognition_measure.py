@@ -96,7 +96,7 @@ def test_decision_keep_measuring_under_5():
 def test_decision_justified_when_reexplain_down_efficiency_flat():
     rows = [_row(f"2026-07-0{i}T00:00:00", 5 - i, 10) for i in range(1, 6)]  # reex 4,3,2,1,0; turns flat 10
     out = cm.report(rows)
-    assert "Phase 2 JUSTIFIED" in out
+    assert "heavier machinery JUSTIFIED" in out
 
 def test_decision_stop_when_reexplain_not_falling():
     rows = [_row(f"2026-07-0{i}T00:00:00", 3, 10) for i in range(1, 6)]  # reex flat

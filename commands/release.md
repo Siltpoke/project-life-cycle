@@ -83,7 +83,7 @@ If cancelled, exit gracefully without touching files.
     - Update compare links at the bottom of the file:
       - Replace `[Unreleased]: ...compare/v<PREV>...HEAD` with `[Unreleased]: ...compare/vX.Y.Z...HEAD`.
       - Insert a new line `[X.Y.Z]: ...compare/v<PREV>...vX.Y.Z` above the previous version's link.
-13. Bump `.version` in `.claude-plugin/plugin.json` to `X.Y.Z`.
+13. **If the repo generates its manifests** (`.claude-plugin/plugin.source.json` + `scripts/gen_plugin_manifests.py`, as this repository does): bump `.version` in the source to `X.Y.Z`, run `python3 scripts/gen_plugin_manifests.py`, and skip to step 16 — never hand-edit a generated manifest, `scripts/validate.py` rejects one that differs from the source. Otherwise bump `.version` in `.claude-plugin/plugin.json` to `X.Y.Z`.
 14. Bump `plugins[0].version` in `.claude-plugin/marketplace.json` to `X.Y.Z`.
 15. Bump the sibling manifests to `X.Y.Z` too: `.version` in `.qoder-plugin/plugin.json` + `.codebuddy-plugin/plugin.json`, and `plugins[0].version` in `.qoder-plugin/marketplace.json` + `.codebuddy-plugin/marketplace.json`. (Do NOT touch the top-level `plugin.json` — the Antigravity manifest's schema forbids a `version` field, so it carries none and is never bumped.)
 
@@ -93,7 +93,7 @@ If cancelled, exit gracefully without touching files.
 
 ### Phase 6 — Commit + tag + push
 
-17. `git add CHANGELOG.md .claude-plugin/marketplace.json .claude-plugin/plugin.json .qoder-plugin/plugin.json .qoder-plugin/marketplace.json .codebuddy-plugin/plugin.json .codebuddy-plugin/marketplace.json`. The `changelog.d/` fragment removals from step 11.5 are already staged via `git rm` and ride along in this same commit — no separate `git add` needed for them.
+17. `git add CHANGELOG.md .claude-plugin/marketplace.json .claude-plugin/plugin.json .qoder-plugin/plugin.json .qoder-plugin/marketplace.json .codebuddy-plugin/plugin.json .codebuddy-plugin/marketplace.json`. The `changelog.d/` fragment removals from step 11.5 are already staged via `git rm` and ride along in this same commit — no separate `git add` needed for them. Add `.claude-plugin/plugin.source.json` too when the repo generates its manifests.
 18. Commit:
     ```bash
     git commit -m "chore(release): vX.Y.Z
@@ -101,6 +101,10 @@ If cancelled, exit gracefully without touching files.
     <paste the new [X.Y.Z] CHANGELOG section verbatim into the body
     so the commit itself carries the release notes>"
     ```
+18.5. **Regenerate the close-gate test-evidence file** — only if the repo wires the close-gate pre-push hook (`.claude/close-gate.json` exists with a `test_evidence` key): `bash scripts/gen-test-evidence.sh task`. Then `git add` the evidence file if it is tracked, and `git commit --amend --no-edit` (or leave it untracked/gitignored, whichever this repo does).
+     - **Why here and nowhere else**: the release commit rewrites `.claude-plugin/*.json` and `CHANGELOG.md`. In a repo whose manifest declares those files in `product_paths` (so the pre-push gate runs its diff-triggered checks) *and* in `test_evidence_inputs` (so the evidence fingerprint the gate compares against is now stale), step 19 would otherwise be blocked.
+     - **Order is load-bearing**: after the bump commit, because the fingerprint covers the bumped manifests — regenerating before step 13–18 produces evidence of the *pre-bump* tree, which is exactly the staleness this step exists to clear. And before step 19, because that is the push the gate blocks.
+     - Never hand-write or copy-paste the manifest's declared `test_command` to do this: it ends in a bare `tee`, which exits 0 even when the header-writing step fails and silently replaces good evidence with broken evidence. `gen-test-evidence.sh` writes to a temp file and only moves it into place on success.
 19. `git push`.
 20. `git tag vX.Y.Z -m "vX.Y.Z — <one-line summary derived from the [X.Y.Z] section's intro paragraph>"`.
 21. `git push origin vX.Y.Z`.
@@ -141,7 +145,7 @@ If cancelled, exit gracefully without touching files.
 
 ## Related
 
-- `~/.claude/skills/project-lifecycle/references/release-process.md` — full process spec including SemVer bump table, exempt-PR rules, retroactive-tag flow for cleanup.
-- `~/.claude/skills/project-lifecycle/references/changelog.md` — CHANGELOG + per-PR discipline this command depends on.
-- `~/.claude/skills/project-lifecycle/references/self-update-flow.md` — how this skill itself versions + ships updates to its repo.
+- `skills/project-lifecycle/references/release-process.md` — full process spec including SemVer bump table, exempt-PR rules, retroactive-tag flow for cleanup.
+- `skills/project-lifecycle/references/changelog.md` — CHANGELOG + per-PR discipline this command depends on.
+- `skills/project-lifecycle/references/self-update-flow.md` — how this skill itself versions + ships updates to its repo.
 - `/ship` — orchestrator for a single vertical-slice feature (upstream of `/release`; many `/ship` runs accumulate into `[Unreleased]`, then one `/release` ships them).

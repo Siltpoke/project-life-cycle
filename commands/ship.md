@@ -54,7 +54,7 @@ No edits.
 
 Dispatch `Story Writer` subagent. Inputs: feature description + researcher findings.
 
-Output: `docs/superpowers/specs/YYYY-MM-DD-<phase>-<slug>-user-story.md` per `~/.claude/skills/project-lifecycle/references/user-story.md` template:
+Output: `docs/superpowers/specs/YYYY-MM-DD-<phase>-<slug>-user-story.md` per `skills/project-lifecycle/references/user-story.md` template:
 - One sentence: "As a {role}, I want {behavior}, so that {outcome}."
 - Numbered ACs (AC1, AC2, …) — each observable from outside, atomic, test-sketchable
 - Out of Scope (explicit no's)
@@ -93,7 +93,7 @@ If approved → write `docs/superpowers/plans/YYYY-MM-DD-<phase>-<slug>.md` from
 
 ### Phase 3 — Backend Builder (cadence step 1a)
 
-Dispatch `backend-builder` subagent per `~/.claude/skills/project-lifecycle/references/builder-split.md`:
+Dispatch `backend-builder` subagent per `skills/project-lifecycle/references/builder-split.md`:
 - Allowed write paths: CLAUDE.md `folder-map.backend`
 - Forbidden: anything under `folder-map.frontend`
 - Pre-flight assumption block MANDATORY before code
@@ -160,18 +160,18 @@ Fix loop again if Critical/Important found.
 
 ### Phase 9 — Journal entry (cadence step 5)
 
-Dispatch journal subagent. 6-section schema per `~/.claude/skills/project-lifecycle/references/journal-schema.md`. Plan deviations header required.
+Dispatch journal subagent. 6-section schema per `skills/project-lifecycle/references/journal-schema.md`. Plan deviations header required.
 
 Commits as `docs(journal): <phase> <feature>`.
 
 ### Phase 10 — Smoke + PR
 
-- Dual-track smoke per `~/.claude/skills/project-lifecycle/references/smoke-tracks.md` (Track A manual checklist + Track B Playwright/equivalent acceptance test set — Track B = the acceptance tests from Phase 5)
-- No handoff doc — that file was retired; its one non-derivable content (findings/gotchas) lands in the journal FACT entry at track close (`~/.claude/skills/project-lifecycle/references/journal-schema.md` §"The FACT entry"; `~/.claude/skills/project-lifecycle/references/cadence.md` §"Track close"), the PR body's §1-3 come from `~/.claude/skills/project-lifecycle/references/handoff-template.md`'s retained appendix template instead
+- Dual-track smoke per `skills/project-lifecycle/references/smoke-tracks.md` (Track A manual checklist + Track B Playwright/equivalent acceptance test set — Track B = the acceptance tests from Phase 5)
+- No handoff doc — that file was retired; its one non-derivable content (findings/gotchas) lands in the journal FACT entry at track close (`skills/project-lifecycle/references/journal-schema.md` §"The FACT entry"; `skills/project-lifecycle/references/cadence.md` §"Track close"), the PR body's §1-3 come from `skills/project-lifecycle/references/handoff-template.md`'s retained appendix template instead
 - Push branch
 - Open PR with 3-section body (§1 What was done w/ Use cases / §2 Why this approach / §3 Requirements satisfied — close each AC explicitly)
-- Post test evidence as PR COMMENT (raw output blocks per `~/.claude/skills/project-lifecycle/references/ci-cd-gates.md`)
-- Dispatch the independent reviewer (`~/.claude/skills/project-lifecycle/references/reviewer-brief.md`) — the sole review gate, whose computed verdict gates the merge. `@copilot review` is an optional advisory pass on top, never a gate (and is unavailable anyway under Pattern E, when Actions billing is blocked) — per `~/.claude/skills/project-lifecycle/references/copilot-review-loop.md`
+- Post test evidence as PR COMMENT (raw output blocks per `skills/project-lifecycle/references/ci-cd-gates.md`)
+- Dispatch the independent reviewer (`skills/project-lifecycle/references/reviewer-brief.md`) — the sole review gate, whose computed verdict gates the merge. `@copilot review` is an optional advisory pass on top, never a gate (and is unavailable anyway under Pattern E, when Actions billing is blocked) — per `skills/project-lifecycle/references/copilot-review-loop.md`
 
 ### ⏸ HUMAN CHECKPOINT 3: Approve PR
 
@@ -199,9 +199,10 @@ Everything between checkpoints (research, build BE, build FE, verify, validate, 
 
 ## Related
 
-- `~/.claude/skills/project-lifecycle/SKILL.md` — phase-level workflow this command sits inside
-- `~/.claude/skills/project-lifecycle/references/cadence.md` — full per-task cadence (6 steps) this command automates
-- `~/.claude/skills/project-lifecycle/references/user-story.md` — story format used at Phase 1
-- `~/.claude/skills/project-lifecycle/references/builder-split.md` — BE/FE split used at Phase 3+4
+- `skills/project-lifecycle/SKILL.md` — phase-level workflow this command sits inside
+- `skills/project-lifecycle/references/cadence.md` — full per-task cadence (6 steps) this command automates
+- `skills/project-lifecycle/references/user-story.md` — story format used at Phase 1
+- `skills/project-lifecycle/references/builder-split.md` — BE/FE split used at Phase 3+4
 - `superpowers:writing-plans` (or your own planning command) — heavier planner for non-vertical-slice work
 - `/review` — PLC-native reviewer for diffs that didn't go through `/ship` (dispatches `references/reviewer-brief.md`)
+

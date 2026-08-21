@@ -1,0 +1,104 @@
+{
+  "phase": "p4",
+  "note": "FIXTURE for the guard-removal test in scripts/test_ac_evidence.py, not a real phase's evidence matrix. Every row points at a test that genuinely exists, because the differential is only meaningful if the control run is green for real reasons. The row under test is p4:AC10, whose carrier is the guard that test removes; the other thirteen are here so the control exercises a populated matrix rather than a single row.",
+  "criteria": [
+    {
+      "id": "p4:AC1",
+      "status": "oracle",
+      "class": "tracked-suite",
+      "carrier": "scripts/test_gate4_payload_shapes.py::test_brainstorm_caller",
+      "why": "parametrised over the payload shapes the brainstorm caller can produce, including the present-non-null-empty one"
+    },
+    {
+      "id": "p4:AC2",
+      "status": "oracle",
+      "class": "tracked-suite",
+      "carrier": "scripts/test_gate4_payload_shapes.py::test_code_review_caller",
+      "why": "the same shape table against the other caller, asserting the expected reason class per shape"
+    },
+    {
+      "id": "p4:AC3",
+      "status": "oracle",
+      "class": "tracked-suite",
+      "carrier": "scripts/test_reason_enum_sites.py::test_the_four_declaration_sites_agree",
+      "why": "reads all four declaration sites and requires them to agree, which is the criterion restated"
+    },
+    {
+      "id": "p4:AC4",
+      "status": "oracle",
+      "class": "tracked-suite",
+      "carrier": "scripts/test_reason_enum_sites.py::test_nothing_is_emitted_that_goes_undeclared",
+      "why": "pins the emitted set against the declared set in the direction that catches a new exit path"
+    },
+    {
+      "id": "p4:AC5",
+      "status": "oracle",
+      "class": "tracked-suite",
+      "carrier": "scripts/test_reason_enum_sites.py::test_every_carrier_yields_a_real_set_before_anything_is_compared",
+      "why": "refuses to compare two empty sets, which is what made the disjointness claim checkable at all"
+    },
+    {
+      "id": "p4:AC6",
+      "status": "oracle",
+      "class": "tracked-suite",
+      "carrier": "scripts/test_exit_zero_claims.py::test_no_tracked_carrier_still_claims_it",
+      "why": "scans the tracked sites a caller copies from for the corrected claim"
+    },
+    {
+      "id": "p4:AC8",
+      "status": "oracle",
+      "class": "tracked-suite",
+      "carrier": "scripts/test_install_close_gate_hook.py::test_exec_shim_hook_still_runs_the_chain",
+      "why": "covers the caller shape that was not the one the defect was measured on"
+    },
+    {
+      "id": "p4:AC9",
+      "status": "oracle",
+      "class": "tracked-suite",
+      "carrier": "scripts/test_install_close_gate_hook.py::test_synthesized_hook_runs_the_chain",
+      "why": "the synthesized hook is the case where insertion position is observable end to end"
+    },
+    {
+      "id": "p4:AC10",
+      "status": "oracle",
+      "class": "pin",
+      "carrier": "scripts/test_exit_zero_claims.py::test_the_installer_never_claims_what_the_rest_of_the_hook_does",
+      "why": "the regression sample; that test's own docstring says the checker above it does not own this claim. This is the row whose carrier the guard-removal test removes."
+    },
+    {
+      "id": "p4:AC11",
+      "status": "oracle",
+      "class": "tracked-suite",
+      "carrier": "scripts/test_reason_enum_sites.py::test_empty_answer_is_in_the_set",
+      "why": "the reason class has to be in the set before any consumer can branch on it"
+    },
+    {
+      "id": "p4:AC12",
+      "status": "oracle",
+      "class": "tracked-suite",
+      "carrier": "scripts/test_install_close_gate_hook.py::test_trailing_exit_zero_hook_runs_the_chain",
+      "why": "the unchanged-normal-path case, stated as its own test rather than inferred from the others passing"
+    },
+    {
+      "id": "p4:AC14",
+      "status": "oracle",
+      "class": "tracked-suite",
+      "carrier": "scripts/test_install_close_gate_hook.py::test_a_redirected_hooks_path_is_refused",
+      "why": "exercises the invariant's refusal path, which is where the contract's shape is observable"
+    },
+    {
+      "id": "p4:AC15",
+      "status": "oracle",
+      "class": "tracked-suite",
+      "carrier": "scripts/test_install_close_gate_hook.py::test_the_synthesized_hook_omits_a_notice_that_would_be_false_there",
+      "why": "asserts the script declines to say something it cannot know, which is the criterion's own subject"
+    },
+    {
+      "id": "p4:AC20",
+      "status": "oracle",
+      "class": "tracked-suite",
+      "carrier": "scripts/test_exit_zero_claims.py::test_the_copy_paste_block_carries_the_exit_codes",
+      "why": "the copy-paste block is where an un-oracled half would otherwise be quietly counted as covered"
+    }
+  ]
+}

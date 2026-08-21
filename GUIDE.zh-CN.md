@@ -37,6 +37,7 @@ flowchart LR
 - **`/capture`**（辅助 —— 不属于核心流水线）—— 把一个陈述出来的项目意图（"为什么"）钉进冷 cognition log。至多问两个问题，追加一条经校验的条目到 `docs/cognition-log.d/`，并对同主题的既有意图做 supersede 确认。
 - **`/cognition-distill`**（辅助 —— 不属于核心流水线）—— 从冷 intent-log 重生热 cognition 文档（`docs/cognition.md`）（regenerate-from-source）：把未被 supersede 的意图归成四个 section + 跑确定性 guard。milestone 收尾或按需运行，在 close-gate 之外。
 - **`/tasklist`**（辅助 —— 不属于核心流水线）—— 在终端渲染当前 phase 的进度（读 `.claude/tasklist.md`，tasklist 契约）：默认折叠的 done/total 行，`--tree` 展开全 glyph 概览。纯可移植 bash，只读。
+- **`/plc-status`**（辅助 —— 不属于核心流水线）—— 渲染生命周期账本：一次 run 的每个流程 stage 是 observed、只是 claimed、missing、not applicable 还是 unknown (retro)。`--run <id>` 看单个 run 及其时间线；`--all` 看所有 run 的 conformance 矩阵。只读；唯一依赖是 `jq`。
 
 命令之间：每个 PR 都要更新 `[Unreleased]` + 带恰好一个 category label + 用 Conventional Commits 标题（详见 [`CONTRIBUTING.md`](CONTRIBUTING.md)）。Validator（cadence step 2，只读）抓 builder 说谎；Acceptance Verifier（cadence step 1.5）每条 AC 写一个测试；deterministic handlers（`.claude/handlers/`）在 LLM 介入之前注入 auth / secrets / pre-flight lint / migration safety。
 
@@ -105,7 +106,7 @@ flowchart LR
 | Phase PRD（opt-in） | `docs/superpowers/specs/…-prd.md` |
 | Phase plan | `docs/superpowers/plans/…` |
 | Research notes | `docs/research/…` |
-| 阶段交付 handoff | *已退休* —— §7 的 findings 折进 journal FACT（`references/journal-schema.md`）。**不是** `/handoff` 连续性命令（那个写 `docs/RESUME.md`）。 |
+| Phase 交付 handoff | *已退役* —— §7 findings 并入 journal FACT（`references/journal-schema.md`）。**不是** `/handoff` 续接命令（那个写 `docs/RESUME.md`，见下）。 |
 | Journal | `docs/iteration-journal.md`（append-only，顶部 TOC） |
 | Milestone state | `docs/RESUME.md` |
 | 全计划地图 | `docs/ROADMAP.md`（milestone 表 + 状态，milestone 边界更新） |
@@ -158,8 +159,8 @@ claude --plugin-dir /path/to/project-life-cycle
 ```bash
 # 1. CHANGELOG：把 [Unreleased] 改名为 [X.Y.Z] — YYYY-MM-DD；上面加新的 [Unreleased] 块
 $EDITOR CHANGELOG.md
-# 2. 把所有 plugin manifest bump 到同一版本
-$EDITOR .claude-plugin/marketplace.json .claude-plugin/plugin.json .qoder-plugin/plugin.json .qoder-plugin/marketplace.json .codebuddy-plugin/plugin.json .codebuddy-plugin/marketplace.json
+# 2. 改 manifest 源文件里的版本号，再用生成器重写所有 plugin manifest
+$EDITOR .claude-plugin/plugin.source.json && python3 scripts/gen_plugin_manifests.py
 git commit -am "chore(release): vX.Y.Z"
 # 3. Tag + push
 git tag vX.Y.Z && git push origin vX.Y.Z
@@ -213,7 +214,7 @@ skills/project-lifecycle/
     ├── journal-schema.md                 6-section journal 条目模板
     ├── defer-vs-fix.md                   review finding 分流规则
     ├── diagnose-loop.md                  硬 bug 纪律：反馈循环 → 排序假说 → 修 + 回归。Iron Law + 3-Fix Rule
-    ├── close-gate.md                     确定性 done-gate —— task-done / phase-done 检查（journal header / 新鲜 test-evidence / CHANGELOG touch / smoke / ROADMAP），可移植脚本 + manifest，pre-push hook 接线（不可绕过层）+ close-gate policy key（per-task | pr-boundary —— 人类阻塞批准的位置，自我认证攻击面写明）
+    ├── close-gate.md                     确定性 done-gate —— task-done / phase-done 检查（journal header / 新鲜 test-evidence / handoff sections / CHANGELOG touch / smoke / ROADMAP），可移植脚本 + manifest，pre-push hook 接线（不可绕过层）+ close-gate policy key（per-task | pr-boundary —— 人类阻塞批准的位置，自我认证攻击面写明）
     ├── review-record.md                  可信 AI review —— reviewer dispatch 约束（fresh context / 只读 / tier 不对称 / refute-first / file:line 证据门 / verdict 由代码算），PR 上的双向 review record（reviewer 报告原样 + builder 逐条回应），finding→fix 规则（reviewer snippet = untrusted input；final-pass 强制），覆盖窗口检查
     │
     │  ── 交付 + CI ──
@@ -239,14 +240,14 @@ skills/project-lifecycle/
     │
     │  ── 元 ──
     ├── harness-primitives.md             native Claude Code 原语 → skill 节点映射（frontmatter hooks / SessionStart:resume / dynamic Workflows / run_in_background 并行 reviewer / worktree 隔离 / AskUserQuestion / plan mode / goal,context,branch）+ 核实溯源。记录 skill 现在自带的自强制层。
-    ├── cost-aware-behaviors.md           per-token 杠杆规则 + 工具采纳分级（RTK / token-savior / caveman）
+    ├── cost-aware-behaviors.md           per-token 杠杆规则 + 工具采纳分级（token-savior / context-mode / code-review-graph）
     ├── comprehension-co-discovery.md     可选反认知卸载回合（comprehension policy key）—— 每 phase 一个 why-question 问已验证的 diff；discovery 不是 judgment，无累计计分板
     ├── builder-profile.md                /builder-profile 机制 —— 门控流水线（确定性统计 → 证据 gate → cold-read → 对抗校验 → 独立验证）+ framing 安全规则 + 报告形状
     ├── milestone-done.md                 关闭 milestone 的 gate
     ├── self-update-flow.md               AI 如何更新这个 skill 自身
     └── origin.md                         pilot 历史
 
-hooks/                                     ← 自强制 frontmatter hooks —— 仅在 skill active 时 fire（见 references/harness-primitives.md）
+skills/project-lifecycle/hooks/            ← 自强制 frontmatter hooks —— 仅在 skill active 时 fire（见 references/harness-primitives.md）
 ├── guard.sh                               PreToolUse:Bash —— 拦 --no-verify 和直接 push 到 main
 ├── close-gate-nudge.sh                    Stop/SubagentStop —— 节流 close-gate 提醒，仅在 feat/phase-* 分支有未完成 wrap-up 时
 ├── inject-resume.sh.template              SessionStart:resume RESUME 注入模板（由 /init-harness 按项目安装）
@@ -265,7 +266,8 @@ commands/                                  ← skill 自带的斜杠命令（由
 ├── catchup.md                             /catchup —— /clear 后的暖场 welcome-back 卡片（实时 git + RESUME.md + digest → 你在哪/shipped/在做/save-state；只读；辅助）
 ├── capture.md                             /capture —— 把一个陈述出来的意图（"为什么"）钉进冷 cognition log（≤2 问 → docs/cognition-log.d/；同主题 supersede 确认；辅助）
 ├── cognition-distill.md                   /cognition-distill —— 从冷 intent-log 重生热 docs/cognition.md（四 section + 确定性 guard；在 close-gate 之外运行；辅助）
-└── tasklist.md                            /tasklist —— 在终端渲染当前 phase 进度（读 .claude/tasklist.md，tasklist 契约；折叠行，--tree 展开全 glyph 概览；可移植 bash，只读；辅助）
+├── tasklist.md                            /tasklist —— 在终端渲染当前 phase 进度（读 .claude/tasklist.md，tasklist 契约；折叠行，--tree 展开全 glyph 概览；可移植 bash，只读；辅助）
+└── plc-status.md                          /plc-status —— 渲染生命周期账本（每个 stage 是 observed / claimed / missing / not applicable / unknown；--run 看单个 run 的时间线，--all 看矩阵；只依赖 jq，只读；辅助）
 
 CHANGELOG.md                              Keep a Changelog 1.1.0 —— 按版本记录交付内容。[Unreleased] 在最上。
 CONTRIBUTING.md                           Commit / PR / CHANGELOG / label 纪律，在 repo 边界落地。

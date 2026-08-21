@@ -1,11 +1,11 @@
-# Cognition — Intent Capture + Cold Intent-Log (Phase 1)
+# Cognition — Intent Capture, Cold Intent-Log, Distill + Hot Doc
 
 The **input side** of the project-cognition memory layer. Git captures *what* changed; the
 iteration journal captures *what happened*. Neither reliably captures *why the human wanted
 it that way* — the rationale, the rejected alternative, the quality bar someone stated out
 loud and then the conversation moved on. This reference defines how that stated intent gets
-captured, in what shape, and where it lands. Phase 2 (distill into a hot, queryable doc) is
-out of scope here — this is capture + cold storage only.
+captured, in what shape, and where it lands; §"Distill (regenerate)" below then compiles the
+log into a hot, queryable doc.
 
 ## Purpose
 
@@ -64,9 +64,9 @@ Example entry (see Cold intent-log below for the file it lives in):
   sessions to append to concurrently.
 - **Lazy creation**: `docs/cognition-log.d/` and its fragments are created on first capture,
   same discipline as `docs/adr/` in `adr.md` — no empty scaffolding ahead of need.
-- Downstream distillation (Phase 2: compiling fragments into a hot, queryable doc) follows
-  the same drain shape as journal/qa-log fragments in `retention.md`, but is not specified
-  here — this reference stops at capture + cold storage.
+- Downstream distillation (compiling fragments into a hot, queryable doc) follows
+  the same drain shape as journal/qa-log fragments in `retention.md`; it is specified in
+  §"Distill (regenerate)" below.
 
 ## When to capture (rationale signals)
 
@@ -132,17 +132,17 @@ elicitation questions are a light, occasional prompt, never a structured intake.
 Primary trigger = the plc brainstorm-gate (see `references/intent-gate.md`); `/capture` is
 the manual surface.
 
-## Contradiction-at-capture (Phase 1)
+## Contradiction-at-capture
 
 When a new intent shares a `subject` with an existing entry, surface the prior entry before
 writing the new one — "you previously said X about this; now you're saying Y — is this a
 change of mind?" — and let the user confirm.
 
-Phase 1 records **additively**: on confirmation, write a new entry with `supersedes` set to
+Capture records **additively**: on confirmation, write a new entry with `supersedes` set to
 the old entry's `id`; the old entry is left in place, untouched, `status` unchanged on disk
 (a reader resolves "which entry is current" by following the `supersedes` chain forward).
-**Full destructive supersede — rewriting or marking the old entry `superseded` in place — is
-Phase 2.** Phase 1 never mutates a previously written line; append-only holds even across
+**Destructive supersede — rewriting or marking the old entry `superseded` in place — is not
+implemented.** Capture never mutates a previously written line; append-only holds even across
 contradictions.
 
 ## Provenance
@@ -154,7 +154,7 @@ directly or in direct response to elicitation):
   session.
 - `capture` — captured ad hoc, mid-session, outside a formal brainstorm.
 
-There is no `inferred` source in Phase 1. This reference does not specify a mechanism for
+There is no `inferred` source. This reference does not specify a mechanism for
 deriving intent the user never stated (e.g., pattern-mining commit history) — every entry
 traces back to a `verbatim_quote` someone actually said. Inferred writes, if ever added,
 are a distinct future phase with its own confidence/trust model, not a silent extension of
@@ -162,7 +162,7 @@ are a distinct future phase with its own confidence/trust model, not a silent ex
 
 ## Distill (regenerate)
 
-Phase 2 turns the cold log into a small, always-loaded "hot" doc. Distill is a **regenerate**,
+Distill turns the cold log into a small, always-loaded "hot" doc. Distill is a **regenerate**,
 not an edit — every run reads `docs/cognition-log.d/*.jsonl` fresh and rewrites
 `docs/cognition.md` wholesale. It never reads the prior hot doc as input.
 
@@ -179,7 +179,7 @@ the hot doc's worst failure mode is *incomplete*, never *confidently wrong*.
   and, by the same logic, LLM-free). **Distill failure never blocks close** — a broken or
   skipped distill leaves the gate unaffected; worst case the hot doc goes stale, which the
   confidence surface below will say out loud.
-- **Procedure**: load non-`superseded` entries from the cold log (Phase 1's `status` field —
+- **Procedure**: load non-`superseded` entries from the cold log (the capture schema's `status` field —
   `superseded` entries are excluded outright, never rendered, never counted), group them into
   the four hot-doc sections (Why/intent, Invariants/what-good, Active focus, Open questions),
   and render each surviving entry as one bulleted fact carrying its `[<id>]` source pointer
@@ -303,7 +303,7 @@ distill LLM step:
   references that no longer exist on disk, a lint against citing rot.
 - `stale (>90d): <n>` — count of entries currently carrying the `⚠ stale?` marker.
 - `snapshot: <path>` — where `write_snapshot` wrote this run's audit copy under
-  `docs/.cognition-audit/`, a point-in-time record of the hot doc at this regen. Phase 1
+  `docs/.cognition-audit/`, a point-in-time record of the hot doc at this regen. Distill
   writes the snapshot only; it does not itself emit a diff against the prior run.
   `diff_snapshot` in `cognition_render.py` can compute that diff when invoked, but it is
   not wired into the guards CLI's automatic output yet — treat it as a manual/future
@@ -319,14 +319,14 @@ confidently but wrongly is worse than no hot doc at all. Marking freshness and s
 gaps/evictions/dead-paths in the open lets both the human and the agent calibrate trust per
 line instead of taking the whole file on faith.
 
-## Measurement (Phase-1 close / Phase-2 gate)
+## Measurement
 
-**Why it exists.** Phase 2 — destructive supersede, full contradiction resolution, the
+**Why it exists.** Anything heavier — destructive supersede, full contradiction resolution, the
 heavier arbitration machinery hinted at throughout this reference — is not something to build
 on faith. It's gated on proof the cognition layer actually earns its keep. The measurement
 instrument is how that proof accumulates: a small, deterministic log of whether loading
 cognition context correlates with fewer re-explanations over successive milestones. If the
-numbers show no benefit, the honest conclusion is that Phase 1 stands alone and Phase 2 is
+numbers show no benefit, the honest conclusion is that capture + distill stand alone and that machinery is
 correctly never built — that's not a failure of the instrument, it's the instrument doing its
 job.
 
@@ -351,7 +351,7 @@ the cold intent-log, journal, and qa-log. Eight fields per row: `milestone`, `ts
 
 **The decision gate.** After roughly 5–8 milestones closed with cognition loaded, look at the
 trend: if `reexplain_count` is trending down *and* `turns`/`tokens_est` are not inflating to
-buy that improvement, Phase 2 is justified by data. If the trend is flat or worse, the answer
+buy that improvement, the heavier machinery is justified by data. If the trend is flat or worse, the answer
 is to stop — per Markus Sandelin's ["The First Controlled Benchmark of AI Memory in Coding Agents"](https://medium.com/@mrsandelin/the-first-controlled-benchmark-of-ai-memory-in-coding-agents-8e0bb776d39e), memory is overhead when it doesn't pay for itself, and continuing
 to build on an unproven layer is the mistake, not a discipline gap. `cognition_measure.py
 report` prints which side of the line the accumulated data falls on; a human reads the report

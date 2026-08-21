@@ -45,7 +45,7 @@ if [ -n "${PLC_REVIEW_PROVIDER:-}" ]; then
   exec "$PLC_REVIEW_PROVIDER" evaluate --diff "$DIFF" --spec "$SPEC" --out "$OUT" --sha "$SHA"
 fi
 # else: fall through to the default backend below.
-# --- default backend (Tasks 3-5) ---
+# --- default backend ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCHEMA="$SCRIPT_DIR/plc-review-schema.json"
 [ -f "$SCHEMA" ] || die "schema not found: $SCHEMA"
@@ -61,7 +61,7 @@ trap cleanup EXIT
 
 # --- spec structural guard: a malformed spec.json must fail-closed, not jq-crash raw ---
 # Mirrors verify-gate.sh's own "acceptanceCriteria has entries but none carry an id" guard
-# (an earlier commit) so the two halves of the pipeline share one philosophy: an
+# so the two halves of the pipeline share one philosophy: an
 # AC list with non-object entries, or entries that carry no id at all, is a MALFORMED spec,
 # not a silently-empty one.
 if ! jq -e 'type=="object" and ((.acceptanceCriteria // []) | type=="array")
@@ -132,8 +132,8 @@ fi
 
 # The REAL `claude -p --output-format json` envelope is a JSON ARRAY of event objects
 # (system/init, thinking, assistant, user, rate_limit, ... and finally a type=="result"
-# element) — NOT a single {result, model} object (the earlier assumption; live smoke proved
-# it wrong — all 62 stubbed tests passed against a fabricated shape). Extract the LAST
+# element) — NOT a single {result, model} object (an easy wrong assumption: stubs built on
+# that shape pass while the real CLI output fails). Extract the LAST
 # result-typed element, tolerating a bare single-object envelope defensively too.
 if ! RESULT_EVENT="$(printf '%s' "$CLAUDE_JSON" | jq -c \
     'if type=="array" then (map(select(.type=="result")) | last) else . end')"; then
@@ -178,8 +178,8 @@ fi
 # `perAc` key at all. Every jq read below assumes {perAc:[objects], findings:[]}; without this
 # guard those reads either jq-crash under set -e (raw stderr, no fail-closed message) or — the
 # missing-perAc-key case — silently derive UNMET=0 and write a spurious QUALIFIED report. This
-# mirrors verify-gate.sh's own fix (an earlier commit, "move ? onto perAc field access so
-# array-of-non-objects blocks cleanly") carried into the provider side of the pipeline. An
+# mirrors verify-gate.sh's own handling (`?` on the perAc field access, so an
+# array of non-objects blocks cleanly), carried into the provider side of the pipeline. An
 # empty-AC spec whose model reply is the WELL-FORMED `{"perAc":[],"findings":[]}` still passes
 # this guard (empty arrays are valid) and must still qualify — see the regression test.
 if ! printf '%s' "$MODEL_OUT" | jq -e \

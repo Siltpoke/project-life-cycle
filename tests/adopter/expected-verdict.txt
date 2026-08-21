@@ -1,0 +1,32 @@
+# The adopter run's VERDICT, pinned. compare-reached.sh already asserts which adopter-only
+# branches were reached; that is a SUBSET oracle and says nothing about whether the gate passed,
+# failed, or aborted. This file is the other half, and it is a SET-EQUALITY oracle: exactly these
+# ✗ rows, no more and no fewer.
+#
+# THE SINGLE ✗ ROW BELOW IS A PRODUCT FINDING AND MUST STAY RED. The fabricated manifest
+# omits validator_input_paths_rationale, and adding that key to
+# tests/adopter/fabricated/close-gate.json would turn this fixture green and DELETE the finding.
+# The day that finding is actually fixed in the product, this fixture goes red and forces this file to be
+# edited -- which is the point. Do not edit it to match a passing run.
+#
+# Grammar (an unrecognized line is a FAIL, never skipped -- an unparsed line is not evidence of
+# absence):
+#   ADOPTER-*=<value>   an exit code that must appear byte-exact, exactly once, in the capture
+#   ✗ <text>            a full verdict row that must appear in the capture
+#   NO-FAIL-ROWS        the explicit way to declare "zero ✗ rows expected"; a file that simply
+#                       lists none is a FAIL, because "I meant none" and "I forgot" look alike
+#
+# ⚠ rows are deliberately NOT pinned. Two fire here (no '-phase-<id>-' journal fragment name, and
+# context-floor not wired in a container that has no ~/.claude). They are advisory, they are the
+# most layout-sensitive lines in the output, and pinning them would make this file red on changes
+# that have nothing to do with the verdict.
+
+# Exit codes. The gate number is pinned EXACTLY, not merely "non-zero": scripts/invariants/
+# gate-abort-is-not-success.sh exists because a half-way abort exits 90, and an abort must never
+# be able to read as this expected FAIL.
+ADOPTER-EVIDENCE-EXIT=0
+ADOPTER-GATE-EXIT=1
+
+# The complete ✗ set.
+✗ manifest missing validator_input_paths_rationale (or it is not a JSON array) — the test_evidence_inputs narrowing argument must be declared, not just enforced
+✗ close-gate FAIL (phase 1.0) — fix the ✗ rows above, then re-run

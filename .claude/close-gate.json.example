@@ -7,13 +7,18 @@
   "smoke_b_glob": "tests/e2e/**/*phase-{PHASE}*",
   "acceptance_glob": "tests/acceptance/**/*phase-{PHASE}*",
   "test_evidence": ".claude/.last-test-run",
-  "test_command": "REPLACE_ME e.g. 'bun test' or '.venv/bin/python -m pytest -q'",
+  "test_command": "{ bash scripts/close-gate.sh evidence-header {SET}; REPLACE_ME e.g. 'bun test' or '.venv/bin/python -m pytest -q'; } | tee {EVIDENCE_FILE}",
   "test_evidence_inputs": ["src/**", "tests/**"],
   "test_runs_required": 1,
   "user_visible": true,
   "exempt_user_story": false,
   "exempt_changelog": false,
   "product_paths": ["src/"],
+  "user_story_glob": "docs/superpowers/specs/*-phase-{PHASE}-*user-story*",
+  "ac_evidence": ".claude/ac-evidence.json",
+  "ac_baseline": ".claude/ac-baseline.json",
+  "ac_heading_set": ["acceptance criteria"],
+  "invariants": [],
   "retention": {
     "hot_caps": { "resume": [200, 25], "status": [300, 30], "journal_hot": [0, 100], "qa_log_hot": [0, 50], "changelog_hot": [0, 50] },
     "count_caps": { "specs": 10, "plans": 10, "docs_total": 150 },
@@ -21,6 +26,8 @@
     "coverage_floor_kb": 50,
     "journal_dir": "docs/journal.d",
     "qa_log_dir": "docs/qa-log.d",
-    "changelog_dir": "changelog.d"
+    "changelog_dir": "changelog.d",
+    "order": { "CHANGELOG.md": "newest-first" },
+    "non_entry_headings": { "CHANGELOG.md": [] }
   }
 }

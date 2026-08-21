@@ -63,13 +63,11 @@ At track close the working spec/plan are distilled into ONE entry with these fie
 - **Source:**   <sha>:<the path the working doc had BEFORE it was archived>
 ```
 
-**Enforced, not exhorted.** `phase-done` greps the newest `docs/journal.d/*.md` fragment (mtime order) for `- **Date:**`, `- **Decision:**`, `- **Why:**`, `- **Backing:**`, `- **Rejected:**`, `- **Source:**` and hard-fails, naming which are missing, if any are absent — see `references/close-gate.md` §"What the gate checks" → `phase-done`. `references-log` is 85–90% rot-resistant *because its schema will not accept a claim without a `Date` and a `Backing`* — not because whoever wrote it was more disciplined. Every rot-resistant document measured in the sampled corpus (Decisions log 95% FACT, brainstorming-qa-log 85%, references-log 85–90%) shares one shape: **a date + a decision + why + the evidence + what was rejected**.
+**Enforced, not exhorted.** `phase-done` resolves the phase's entry in three steps — **this phase's own fragment** under `retention.journal_dir` (last by FILENAME, not `ls -t`: mtime is not identity, and within one phase's fragments a stub written early would otherwise be judged instead of the real entry written later), then **this phase's slice of `<archive_dir>/journal/`** when the mandated milestone-close drain has already emptied the hot directory, then the newest fragment as a last resort for projects predating the naming convention. It greps that for `- **Date:**`, `- **Decision:**`, `- **Why:**`, `- **Backing:**`, `- **Rejected:**`, `- **Source:**` and hard-fails, naming which are missing, if any are absent — see `references/close-gate.md` §"What the gate checks" → `phase-done`. A log stays true when its schema will not accept a claim without a `Date` and a `Backing` — not because whoever wrote it was more disciplined. Documents that resist rot share one shape: **a date + a decision + why + the evidence + what was rejected**.
 
-**`Backing` is the evidence slot, and it exists because its absence was measured** (this schema's own first subject). Distilling a spec into a FACT entry carried `Rejected` **7 of 7** and lost most of `Why` — because the schema had a slot for the **conclusion** and none for the **evidence the conclusion rested on**. Every argument silently degraded into an assertion. Gone from one spec: the single statistic its entire case turned on, a corollary the spec itself had marked *load-bearing*.
+**`Backing` is the evidence slot.** Without it, distilling a spec into a FACT entry keeps `Rejected` and loses most of `Why` — because the schema has a slot for the **conclusion** and none for the **evidence the conclusion rested on**. Every argument silently degrades into an assertion, and the first thing to go is the single statistic a case turns on.
 
 A missing field cannot be patched by writing more prose into an adjacent one. Length was never the constraint — this schema explicitly permits unbounded length. **With no slot that says "the number you must not drop," the writer drops it.** So: one bullet per load-bearing figure, each carrying the figure *and where it was measured*. If a `Why` clause rests on a number, that number gets a `Backing` line or the `Why` is an assertion.
-
-> The schema was derived from `references-log`, whose entries carry `Backing` *precisely* so a claim cannot be stated without its support. The first version of this file **said that, two lines below a schema block that had copied `Date` and dropped `Backing`.** The mechanism failed at the one place its own source document told it not to. That is the whole argument for this field, and it is not hypothetical.
 
 **`Rejected` is the highest-value field.** Code records what was built. It never records what was almost built and discarded. That information is unrecoverable by construction — it is the reason a FACT layer has to exist at all.
 
@@ -82,7 +80,7 @@ A missing field cannot be patched by writing more prose into an adjacent one. Le
 - *"On 2026-07-13 we chose X because Y"* → **permanently true**
 - *"The system currently does X"* → **starts dying the second it is written**
 
-Measured: accuracy correlates with a document's **age**, not with the care taken writing it. You cannot write a cache well enough to stop it rotting. Effort does not help; only time does. This is why *"write better docs"* and *"maintain them diligently"* cannot work — they are a footrace against time.
+Accuracy correlates with a document's **age**, not with the care taken writing it. You cannot write a cache well enough to stop it rotting. Effort does not help; only time does. This is why *"write better docs"* and *"maintain them diligently"* cannot work — they are a footrace against time.
 
 **Journal entries are written in the past tense about a dated moment.** They do not describe the system's present shape.
 

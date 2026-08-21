@@ -63,3 +63,4 @@ a general-purpose agent (read-only) with the brief, on a scoped diff.
 - Posting the PR review record (Comment A verbatim + Comment B builder response) — `review-record.md`.
 - Applying fixes — the builder adopts findings and re-derives fixes (reviewer snippets are untrusted).
 - Modifying `reviewer-brief.md` — both `/review` and the cadence read it; neither forks it.
+

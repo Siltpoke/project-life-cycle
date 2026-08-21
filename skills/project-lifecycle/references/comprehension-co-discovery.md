@@ -14,9 +14,9 @@ Memory is encoded by two effortful acts that AI does *for* you by default:
 - **Retrieval practice (testing effect)** — effortful, successful reconstruction *strengthens* what's retrieved. AI handing you the finished answer means retrieval never happens, so nothing is strengthened.
 - **Learning ≠ performance** (Bjork; Soderstrom & Bjork 2015) — the conditions that make you perform best *now* (smooth AI assist) often produce the *least durable* learning. The smoothness is the trap, not the reward.
 
-The mechanism's only job: force *generation* (predict before you see) and *retrieval* (reconstruct/explain after).
+The mechanism's only job: force *retrieval* (reconstruct/explain after) — the round below does exactly that; a *generation* step (predict before you see) is not part of it.
 
-## The behavior (MVP = COMPREHEND only)
+## The behavior (COMPREHEND)
 
 One round, once per phase, after the diff is validated + quality-reviewed, before the PR checkpoint:
 
@@ -37,7 +37,7 @@ Plus: **< 30s total per phase** (lighter to do than to delete), **gap ≠ blocke
 
 ## Why naive gamification is the wrong fix
 
-Adding extrinsic rewards (points / streaks / badges) **backfires** via the *overjustification effect* — it crowds out intrinsic interest, and people with higher initial interest are more susceptible. Rewards have a *controlling* function (undermines) and an *informational* function (signals competence, preserves motivation). Make every signal **informational, not controlling**: the strongest one for a systems-builder is *competence made visible* — the prediction↔reality delta tightening over phases, a category of gaps shrinking to zero, no longer going blank when questioned. Replicate the flow conditions (immediate feedback + right-sized challenge + clear goal), not the scoreboard.
+Adding extrinsic rewards (points / streaks / badges) **backfires** via the *overjustification effect* — it crowds out intrinsic interest, and people with higher initial interest are more susceptible. Rewards have a *controlling* function (undermines) and an *informational* function (signals competence, preserves motivation). Make every signal **informational, not controlling**: the strongest one for a systems-builder is *competence made visible* — the gap between your reconstruction and the diff closing over phases, a category of gaps shrinking to zero, no longer going blank when questioned. Replicate the flow conditions (immediate feedback + right-sized challenge + clear goal), not the scoreboard.
 
 ## The honest caveat (validate by hand first)
 

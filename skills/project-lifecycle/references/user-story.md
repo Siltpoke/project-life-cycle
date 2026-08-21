@@ -112,7 +112,7 @@ Phase-specific constraints that pure code can verify — distinct from ACs (beha
 
 Rules:
 - Run each declared command once at declaration time (it must work and must be able to fail — a check that cannot fail, e.g. `echo ok`, is rejected).
-- At phase close, run all declared invariant commands and include output in the test-evidence/PR comment. The close gate runs every invariant the manifest declares, so declare yours there rather than running them by hand.
+- At phase close, run all declared invariant commands and include output in the test-evidence/PR comment. The canonical close gate in `references/close-gate.md` does not run them, so this step is by hand.
 
 ## Open Questions
 
@@ -138,7 +138,7 @@ Things genuinely unknown. NEVER guess — list them, surface to user, block on a
 | Frontend builder | Same; reads BE builder summary to consume API contract |
 | Acceptance verifier | Writes 1 test per AC; reports per-AC pass/fail |
 | Validator | Reports any AC without test coverage, any code without an AC, any "Out of Scope" item that snuck in |
-| Handoff §1 | User-facing summary derived from story + ACs ("After this PR, user can: AC1 paraphrased, AC2 paraphrased, …") |
+| PR body §1 | User-facing summary derived from story + ACs ("After this PR, user can: AC1 paraphrased, AC2 paraphrased, …") |
 
 ## Conventions
 

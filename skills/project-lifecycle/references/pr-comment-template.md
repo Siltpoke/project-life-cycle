@@ -127,7 +127,7 @@ Pattern:
 
 Rules:
 
-- **Real measured dollars, not estimates**. If you ran the smoke for real (on a real run), report what was actually charged.
+- **Real measured dollars, not estimates**. If you ran the smoke for real, report what was actually charged.
 - **Show cap interactions**: how many calls hit soft warn / hard abort. Proves cost guards live.
 - **Total session line** so the reviewer sees the audit cost in aggregate.
 
@@ -281,7 +281,7 @@ Why scratchpad-first:
 - **Iteration is cheap**: `gh pr comment --edit-last --body-file <updated>` is one command vs re-typing in the web UI.
 - **Cross-references work**: PR body can reference paths inside the same commit; comments embed screenshot URLs at the same SHA.
 
-Why NOT commit the `.md` drafts (unlike the earlier `docs/pr-drafts/` convention): the PR itself — body + comments, once posted via `gh` — already is the durable, publicly-readable audit trail; a second, git-committed copy of the same prose was pure cache (the retention count-axis measurement that motivated retiring it found `docs/pr-drafts/` had grown to 143 files / 1.1 MB, invisible to every size-based retention check — see `references/retention.md` §"The count axis"). Screenshots don't have that problem: GitHub's raw-URL embed needs a real file at a real repo path, so `docs/pr-drafts/screenshots/` stays and is never cache.
+Why NOT commit the `.md` drafts: the PR itself — body + comments, once posted via `gh` — already is the durable, publicly-readable audit trail; a second, git-committed copy of the same prose is pure cache, and a directory that gains one small draft per PR grows by file count where no size-based retention check can see it (see `references/retention.md` §"The count axis"). Screenshots don't have that problem: GitHub's raw-URL embed needs a real file at a real repo path, so `docs/pr-drafts/screenshots/` stays and is never cache.
 
 ## When to skip layers (and how to surface that)
 

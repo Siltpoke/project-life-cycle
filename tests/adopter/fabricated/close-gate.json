@@ -1,0 +1,11 @@
+{
+  "_comment": "The minimal close-gate manifest an adopter has after bootstrap. It DELIBERATELY omits user_story_glob and closure_declaration -- those omissions are what make close-gate.sh's two adopter-only branches reachable. Adding either key silently disarms half this fixture.",
+  "phase_docs_glob": "docs/specs/*-design.md",
+  "plan_glob": "docs/plans/*.md",
+  "product_paths": ["src"],
+  "_comment_test_command": "It writes THROUGH {EVIDENCE_FILE}, exactly as the shipped .claude/close-gate.json.example does -- gen-test-evidence.sh refuses a runner that writes to its own report file instead of through the placeholder. No python3 here on purpose, so the payload is an echo rather than validate.py.",
+  "test_command": "{ bash scripts/close-gate.sh evidence-header {SET}; echo adopter-stub; } | tee {EVIDENCE_FILE}",
+  "test_evidence": ".adopter/.last-test-run",
+  "test_evidence_inputs": ["src"],
+  "invariants": []
+}
