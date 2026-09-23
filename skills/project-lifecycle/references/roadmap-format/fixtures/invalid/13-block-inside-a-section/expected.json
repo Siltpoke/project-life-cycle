@@ -1,0 +1,5 @@
+{
+  "valid": false,
+  "rule": "block-placement",
+  "why": "The plan heading is BETWEEN TWO TABLE ROWS — rows continue below it. Every table row's bytes are unchanged, which is exactly why 'compare the table bytes' is not sufficient evidence on its own. NOTE: the first version of this fixture put the heading AFTER THE LAST table row, which is a SAFE position (one of the nine measured), and it passed only because the guard's first implementation tested one side of a two-sided rule. A negative fixture rejected for the wrong reason proves nothing about the rule it claims — this one proved it about itself. (This fixture also trips other rules; the declared rule is placement.)"
+}

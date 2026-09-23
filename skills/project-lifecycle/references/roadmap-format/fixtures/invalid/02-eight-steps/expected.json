@@ -1,0 +1,5 @@
+{
+  "valid": false,
+  "rule": "steps-upper-bound",
+  "why": "Eight steps, one over the bound."
+}

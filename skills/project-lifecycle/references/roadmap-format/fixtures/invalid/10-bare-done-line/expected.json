@@ -1,0 +1,5 @@
+{
+  "valid": false,
+  "rule": "closed-line-set",
+  "why": "`- done` carries NO COLON, so a key detector anchored on ':' never classifies it as a key and the closed-key-set rule does not see it. This is why the rule is stated over LINES."
+}

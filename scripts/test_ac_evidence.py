@@ -990,34 +990,40 @@ def test_task_mode_does_not_write_the_baseline():
 
 
 # ---------------------------------------------------------------------------
-# the AC scripts are inside the jq-only envelope, and the invariant can SEE them
+# plan Task 9 — REMOVED in p33. Obituary, not a silent deletion.
 # ---------------------------------------------------------------------------
-
-ENVELOPE = REPO / "scripts/invariants/gate-jq-only-envelope.sh"
-
-
-def test_the_envelope_invariant_reaches_the_two_new_gate_scripts():
-    """`DECLARED` is a hand-written list whose completeness assertion walks only
-    scripts/invariants/*.sh, so a new TOP-LEVEL gate script is invisible to it until someone adds
-    it by hand. Planting a python invocation in each and requiring red is the only way to know the
-    invariant actually reads them -- membership in a list proves nothing on its own."""
-    import shutil
-    for target in ("scripts/ac-evidence.sh", "scripts/ac-baseline.sh"):
-        f = REPO / target
-        backup = f.read_bytes()
-        try:
-            assert subprocess.run(["/bin/bash", str(ENVELOPE)],
-                                  capture_output=True, cwd=REPO).returncode == 0, \
-                f"control failed before planting anything in {target}"
-            f.write_bytes(backup + b"\n# planted for the self-coverage assertion\npython3 -c 'pass'\n")
-            r = subprocess.run(["/bin/bash", str(ENVELOPE)], capture_output=True, text=True, cwd=REPO)
-            assert r.returncode != 0, f"the envelope invariant does not read {target}"
-            assert target in (r.stdout + r.stderr), \
-                f"it reddened, but did not name {target}: {(r.stdout + r.stderr)[:300]}"
-        finally:
-            f.write_bytes(backup)
-    assert subprocess.run(["/bin/bash", str(ENVELOPE)],
-                          capture_output=True, cwd=REPO).returncode == 0, "restore failed"
+#
+# `test_the_envelope_invariant_reaches_the_two_new_gate_scripts` lived here. It planted
+# `python3 -c 'pass'` into the REAL `scripts/ac-evidence.sh` and `scripts/ac-baseline.sh`,
+# ran the envelope invariant, required a red, and restored the bytes in a `finally`.
+#
+# WHY IT IS GONE, AND WHY THAT IS SAID RATHER THAN JUST DONE. Its `finally` covers exceptions
+# and nothing else -- not SIGKILL, not `pytest -x`, not a timeout, not a closed terminal. An earlier incident
+# records the outcome: an interrupted run left `# planted for the self-coverage assertion` in
+# BOTH shipped scripts. What caught it was a gate that happens to also scan those two files --
+# luck, not a mechanism aimed at cleanup. Deleting a test while leaving no trace makes a
+# deliberate removal indistinguishable from an oversight, so this note stays.
+#
+# WHAT COVERS IT NOW. `scripts/invariants/gate-jq-only-envelope.sh` already carries
+# `self_coverage()`, which does the same experiment on a COPY: for every entry in `$DECLARED`
+# -- which holds both top-level scripts -- it builds a fixture under `mktemp -d`, plants the
+# python invocation into the copy, and requires a red that NAMES the planted file. Strictly
+# stronger than what was here: the deleted test matched the filename anywhere in the output,
+# the invariant matches its own specific failure string, and it never touches the real tree.
+#
+# MEASURED, NOT REASONED (p33:AC4). Mutating `scan_set` to silently skip a declared file,
+# with this test already gone, in a throwaway clone:
+#
+#     control (pristine)                 exit=0  73s   green
+#     mutant: skip scripts/ac-evidence.sh  exit=1  66s
+#         FAIL gate-jq-only-envelope SELF-COVERAGE: a python invocation planted in
+#         scripts/ac-evidence.sh did not turn the scan red -- that file is DECLARED but
+#         never actually read.
+#     mutant: skip scripts/ac-baseline.sh  exit=1  61s   (same shape, names ac-baseline.sh)
+#     restored                            exit=0        green
+#
+# BOTH halves were mutated separately on purpose. Symmetry in the code is not coverage in the
+# test, and this repository has paid for that assumption before.
 
 
 # --- the adopter contract -----------------------------------------------------------
@@ -1199,47 +1205,76 @@ def test_removing_the_guard_reds_the_fixture(tmp_path):
 
     The guard is the ONLY variable. An earlier shape also deleted the p4:AC10 evidence row, which
     would have produced an identical red with the guard left intact — the test would have measured
-    the deletion, not the resolution."""
+    the deletion, not the resolution (agent B, 2026-08-11).
+
+    THE REMOVAL NOW HAPPENS IN A COPY. This test used to rewrite the real, tracked
+    `scripts/test_exit_zero_claims.py` and put it back in a `finally`. That covers exceptions and
+    not SIGKILL, `pytest -x`, a timeout, or a closed terminal, which is exactly how that incident
+    left planted bytes in two shipped scripts. `ac-evidence.sh` already resolves every carrier
+    against `AC_CARRIER_ROOT` (three sites) and two other tests in this file already drive it that
+    way, so nothing new was built here — this site was simply never routed through the pattern the
+    file had already established.
+
+    THE COPY HOLDS EVERY CARRIER, NOT JUST THE ONE UNDER TEST. The evidence fixture names fourteen,
+    and the checker requires each one's path AND symbol to resolve. Copying only the guard would
+    red the control for the wrong reason and the differential would measure nothing. The list is
+    read out of the fixture rather than hard-coded, so a fixture edit cannot silently narrow it."""
+    import json
+    import os
     import shutil
+
     root = pathlib.Path(__file__).parents[1]
     crit = root / "scripts/testdata/sample-criteria.md"
     ev = root / "scripts/testdata/sample-evidence.json"
-    guard_file = root / "scripts/test_exit_zero_claims.py"
 
-    # CONTROL: with the guard present the fixture run is green.
-    r = run("report", str(crit), "p4", "--evidence", str(ev))
+    # Build the carrier root: every carrier the fixture names, at its own relative path.
+    carrier_root = tmp_path / "carrier-root"
+    rows = json.loads(ev.read_text())["criteria"]
+    rels = sorted({c.split("::")[0] for c in (r.get("carrier") or "" for r in rows) if c})
+    assert rels, "the fixture names no carriers — the differential below would be vacuous"
+    for rel in rels:
+        src = root / rel
+        assert src.exists(), f"fixture carrier {rel} does not exist in the real tree"
+        dst = carrier_root / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+
+    guard_rel = "scripts/test_exit_zero_claims.py"
+    assert guard_rel in rels, "the guard under test is not among the fixture's carriers"
+    guard_copy = carrier_root / guard_rel
+    real_guard = root / guard_rel
+    real_before = real_guard.read_bytes()
+
+    def report():
+        env = {**os.environ, "AC_CARRIER_ROOT": str(carrier_root)}
+        return subprocess.run(
+            ["/bin/bash", str(SCRIPT), "report", str(crit), "p4", "--evidence", str(ev)],
+            capture_output=True, text=True, env=env)
+
+    # CONTROL: with the guard present in the copy, the fixture run is green.
+    r = report()
     assert r.returncode == 0, ("control failed — the guard is the only variable, so this must be "
                                "green\n" + r.stdout + r.stderr)
 
-    backup = tmp_path / "guard.bak"
-    shutil.copy(guard_file, backup)
-    try:
-        src = guard_file.read_text()
-        name = "test_the_installer_never_claims_what_the_rest_of_the_hook_does"
-        start = src.index(f"def {name}")
-        rest = src[start + 1:]
-        end = start + 1 + rest.index("\ndef ") if "\ndef " in rest else len(src)
-        guard_file.write_text(src[:start] + src[end:])
-        assert name not in guard_file.read_text(), "the removal must actually remove the symbol"
+    # The mutation, applied to the COPY.
+    src_text = guard_copy.read_text()
+    name = "test_the_installer_never_claims_what_the_rest_of_the_hook_does"
+    begin = src_text.index(f"def {name}")
+    rest = src_text[begin + 1:]
+    end = begin + 1 + rest.index("\ndef ") if "\ndef " in rest else len(src_text)
+    guard_copy.write_text(src_text[:begin] + src_text[end:])
+    assert name not in guard_copy.read_text(), "the removal must actually remove the symbol"
 
-        r = run("report", str(crit), "p4", "--evidence", str(ev))
-        assert r.returncode != 0, ("removing the guard must red the fixture — if this passes, the "
-                                   "carrier's identifier is not being resolved and this test is vacuous")
-        assert "p4:AC10" in (r.stdout + r.stderr)
-    finally:
-        shutil.copy(backup, guard_file)
+    r = report()
+    assert r.returncode != 0, ("removing the guard must red the fixture — if this passes, the "
+                               "carrier's identifier is not being resolved and this test is vacuous")
+    assert "p4:AC10" in (r.stdout + r.stderr)
 
-
-# --- the adopter gate's FIRST execution oracle -----------------------------------------------------
-#
-# The shipped `ac_oracle_binding()` lives in a reference doc, and a repository that runs a
-# different gate variant executes none of the bytes an adopter
-# copies. That is how a CRITICAL survived there — the function's last
-# statement was `[ -n "$ids" ] && rm -f "$ids"`, which in phase mode returns 1, becomes the
-# FUNCTION's return value, and under `set -euo pipefail` killed the gate after printing its own ✓ row
-# and before the PASS/FAIL banner. `bash -n` cannot see that; only running it can.
-#
-# These tests EXTRACT the function and RUN it against stubs. They do not re-implement it.
+    # p33:AC5 — the real tracked file was never a participant. Asserted, not assumed: without
+    # this line a future edit could quietly reintroduce the write and every other assertion here
+    # would still pass.
+    assert real_guard.read_bytes() == real_before, \
+        "the real tracked guard file changed — this test must operate only on the copy"
 
 def _embedded_gate_block():
     doc = (REPO / DOC_REL).read_text().splitlines()

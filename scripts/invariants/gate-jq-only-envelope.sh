@@ -118,6 +118,22 @@ scripts/invariants/no-icloud-conflict-copies.sh
 scripts/backlog-closures.sh
 scripts/invariants/backlog-closure-log.sh
 scripts/invariants/backlog-no-title-markers.sh
+scripts/invariants/ci-cd-gates-names-no-mode.sh
+scripts/invariants/documented-snippet-matches-reader.sh
+scripts/invariants/skill-checkset-matches-gate.sh
+scripts/invariants/roadmap-station-blocks-placement.sh
+scripts/invariants/station-id-integrity.sh
+scripts/invariants/station-deps-acyclic.sh
+scripts/invariants/no-stored-position.sh
+scripts/invariants/closed-step-refs-resolve.sh
+scripts/invariants/station-state-consistency.sh
+scripts/invariants/no-cjk-in-shipped-files.sh
+scripts/invariants/roadmap-lead-length.sh
+scripts/invariants/test-input-map-fresh.sh
+scripts/gen-roadmap-lead-baseline.sh
+scripts/lib/closure-corpus.sh
+scripts/lib/roadmap-lead.sh
+scripts/invariants/backlog-title-claims-only-what-is-true.sh
 scripts/invariants/gate-abort-is-not-success.sh
 scripts/invariants/unreleased-survives-drain.sh
 scripts/invariants/preimage-invisible-to-rollover.sh
@@ -148,6 +164,7 @@ scripts/invariants/careful-paths-single-block.sh
 scripts/invariants/careful-reason-has-no-inference-words.sh
 scripts/invariants/careful-check-reads-worktree.sh
 scripts/invariants/careful-boundary-text-present.sh
+scripts/invariants/step-enforcement-table-current.sh
 "
 
 # --- the exemption table. One line per file: `<path>|<reason>`. A bare name in a list is

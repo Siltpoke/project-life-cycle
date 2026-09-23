@@ -26,6 +26,12 @@ __pycache__/
 # looser glob.
 /.claude/tasklist.md
 
+# p36: the synthesized decision packets handed to the cross-family blind 2nd agent, and its raw
+# JSON replies. A cache by construction — every field they carry is transcribed verbatim into the
+# phase's qa-log fragment, which IS the audit trail. Keeping the packets too would be a second
+# copy of the same record, and this repository has filed what a second copy does often enough.
+/.claude/packets/
+
 # The CI state a producer puts on record for the welcome-back card. MACHINE-LOCAL by
 # construction — it says what ONE machine observed about ONE commit at ONE moment, so committing it
 # would publish a fact about somebody else's clone. Worse, a checkout of an older branch would then

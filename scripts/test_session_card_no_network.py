@@ -49,13 +49,20 @@ def test_clean_copy_passes(tmp_path):
     assert "PASS session-card-no-network" in r.stdout
     # The pinned numbers are printed, not merely compared. A guard that says only
     # "ok" cannot be audited by the person reading its output.
-    assert "subprocess call sites: 2 (pinned 2)" in r.stdout
+    # 2 -> 3 in the station-position change: the card now derives a station position, which means reading
+    # the two shipped grammar readers rather than re-parsing either format in Python.
+    # The guard's own header carries the design reason; this line carries the number.
+    assert "subprocess call sites: 3 (pinned 3)" in r.stdout
     assert "injected-runner call sites: 6 (pinned 6)" in r.stdout
 
 
 def test_a_new_subprocess_call_site_goes_red(tmp_path):
-    """The named mutation, made standing. The real content: the CI row
-    adds NO new subprocess call site."""
+    """The plan's named mutation, made standing.
+
+    Written earlier, when the criterion said that phase added no new call site. the station-position change DID
+    add one, deliberately, with the reason recorded in the guard's own header. What
+    this case still proves is the durable half, and it is the half that matters: a
+    call site appearing WITHOUT the baseline moving is red."""
     dst = _tree(tmp_path)
     src = dst.read_text(encoding="utf-8")
     needle = "def main(argv=None) -> int:\n"
@@ -66,7 +73,7 @@ def test_a_new_subprocess_call_site_goes_red(tmp_path):
     )
     r = _run(tmp_path)
     assert r.returncode == 1
-    assert "subprocess call sites: 3 found, 2 expected" in r.stdout
+    assert "subprocess call sites: 4 found, 3 expected" in r.stdout
 
 
 def test_an_aliased_import_goes_red(tmp_path):
@@ -96,7 +103,7 @@ def test_an_aliased_import_goes_red(tmp_path):
     )
     r = _run(tmp_path)
     assert r.returncode == 1, r.stdout
-    assert "`subprocess` token appears 4 times but only 3 are accounted for" in r.stdout
+    assert "`subprocess` token appears 5 times but only 4 are accounted for" in r.stdout
 
 
 def test_aliasing_the_module_itself_goes_red(tmp_path):
@@ -112,7 +119,7 @@ def test_aliasing_the_module_itself_goes_red(tmp_path):
     dst.write_text(src, encoding="utf-8")
     r = _run(tmp_path)
     assert r.returncode == 1, r.stdout
-    assert "subprocess call sites: 0 found, 2 expected" in r.stdout
+    assert "subprocess call sites: 0 found, 3 expected" in r.stdout
 
 
 def test_a_seventh_git_command_goes_red(tmp_path):

@@ -1,0 +1,5 @@
+{
+  "valid": false,
+  "rule": "station-id-unique",
+  "why": "Two blocks claim the same id while binding different rows. Measured precedent: two sessions filed the same station id on the same day because the id allocator did not reserve."
+}

@@ -55,7 +55,29 @@ NAME="session-card-no-network"
 
 # The pinned baselines. Changing either of these is a DESIGN DECISION about what the card is allowed
 # to reach, and it belongs in a phase with a story -- not in the commit that happens to trip it.
-WANT_NET=2
+#
+# NET MOVED 2 -> 3 IN A LATER CHANGE, and this paragraph is the record the line above asks for. The card
+# now derives a station's POSITION, which design section 2.3 defines as the closed steps named
+# across the closure declarations over the steps the station plan declares. Reading those two
+# formats is the feature; it is not a convenience the card could do without and still answer the
+# question the phase exists to answer.
+#
+# WHY IT IS A SUBPROCESS AND NOT PYTHON, which is the part worth checking rather than the number.
+# Both formats already have exactly one reader in this repository -- scripts/lib/station-blocks.awk
+# for the plan blocks and scripts/closure-declaration.sh for the closure grammar. A Python copy of
+# either would be a second implementation of a grammar, which is the encoder-divergence class the
+# p36 design forbids by name (and which this repo has already paid for once). So the card shells
+# out to the readers it ships.
+#
+# ONE SITE, NOT TWO: `_station_facts` runs both commands through a single local `_sh` helper, so
+# the count moves by one rather than by two. That is deliberate and it is why the number below is
+# 3 and not 4.
+#
+# WHAT THIS COSTS, stated: the card now runs two local commands it did not run before. Neither
+# touches the network; both are bounded by a 20-second timeout and degrade to `available: False`
+# with a stated reason rather than raising, so a missing reader makes a position print `-` instead
+# of making the card fail. `-` and `0/N` are deliberately different strings.
+WANT_NET=3
 WANT_GIT=6
 
 pass() { printf 'PASS %s: %s\n' "$NAME" "$1"; exit 0; }

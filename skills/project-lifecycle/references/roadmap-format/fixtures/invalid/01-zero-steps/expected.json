@@ -1,0 +1,5 @@
+{
+  "valid": false,
+  "rule": "steps-lower-bound",
+  "why": "An empty steps list satisfies 'no more than 7' and 'no gaps' — both upper-bound style rules — and leaves a divide-by-zero in the position derivation. Only an explicit lower bound of 1 rejects it."
+}

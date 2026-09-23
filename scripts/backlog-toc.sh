@@ -410,6 +410,13 @@ if [ "$HDR_PRESENT" -eq 1 ] && [ "$RELABEL" -eq 0 ] \
 fi
 
 {
+  # The title asserts nothing about how git treats docs/. It said
+  # "(local-only — docs/ is gitignored)" until p39 made docs/ tracked and for
+  # months after, and because this printf restores it, every hand-correction was
+  # silently undone by the next run. A claim a mechanism keeps reasserting cannot
+  # be fixed in the artifact. Guarded by
+  # scripts/invariants/backlog-title-claims-only-what-is-true.sh, which checks
+  # this line AND docs/BACKLOG.md against the tree rather than against wording.
   printf '# Backlog\n\n'
   printf 'Deferred decisions, each with explicit Trigger + Exit criteria per the skill'"'"'s backlog discipline.\n\n'
   printf '## Index\n\n'

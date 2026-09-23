@@ -1,5 +1,5 @@
 ---
-description: Reconcile conversation-made roadmap/status decisions (and merged PRs since the last checkpoint) against docs/ROADMAP.md + the project's read-first status doc (RESUME.md by default; STATUS.md where present). Proposes staged, individually-approvable edits + a drift-latency report. Human-invoked; never auto-commits.
+description: Reconcile conversation-made roadmap/status decisions (and merged PRs since the last checkpoint) against docs/ROADMAP.md + the project's read-first status doc (`RESUME.md` — `docs/STATUS.md` only where an adopter has pointed `status_doc` at one; see `references/document-map.md`). Proposes staged, individually-approvable edits + a drift-latency report. Human-invoked; never auto-commits.
 ---
 
 # /reconcile — chat-decision-drift sweep
@@ -22,7 +22,7 @@ The session-close net for the chat-drift arm (full mechanics: `skills/project-li
 ## Match + propose
 
 For each candidate (merged PR outcome OR session decision):
-- Semantically match it against the live `docs/ROADMAP.md` + the project's read-first status doc (RESUME.md by default; STATUS.md where present). When matching a PR `#N` mentioned in prose, repo-qualify it (this repo's `#N` ≠ another repo's `#N`).
+- Semantically match it against the live `docs/ROADMAP.md` + the project's read-first status doc (`RESUME.md` — `docs/STATUS.md` only where an adopter has pointed `status_doc` at one; see `references/document-map.md`). When matching a PR `#N` mentioned in prose, repo-qualify it (this repo's `#N` ≠ another repo's `#N`).
 - If the docs already reflect it → note "already correct", propose nothing.
 - If not → propose ONE staged edit, shown as a diff, of the smallest faithful shape. The edit's SHAPE is layout-dependent — use the glyphs/sections THIS project's ROADMAP actually defines, never a fixed set:
   - ROADMAP, milestone-table layout (the layout `references/roadmap.md` defines): move a station done↔current using the legend in `references/roadmap.md` §"Status legend" (`✅`↔`▶`, or `☐`/`⏸`/`✗` as applicable); edit the Milestones table row; log a scope change under the dated "Plan changes" section; edit the head vision/current-state bold line (whatever language the doc uses).

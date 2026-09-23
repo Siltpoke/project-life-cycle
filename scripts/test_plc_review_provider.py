@@ -251,7 +251,7 @@ def test_peraC_string_element_fail_closed(tmp_path):
 
 def test_missing_perac_key_fail_closed_even_with_empty_ac_spec(tmp_path):
     # The exact spurious-QUALIFIED case: empty-AC spec + model reply with NO `perAc` key at
-    # all (only `findings`). Before a missing key failed closed, this derived UNMET=0 and wrote a QUALIFIED
+    # all (only `findings`). Before a missing key was made to fail closed, this derived UNMET=0 and wrote a QUALIFIED
     # report; it must now fail-closed instead. Contrast with
     # test_empty_ac_spec_emits_empty_peraC, which uses the WELL-FORMED `perAc:[]` and must
     # still pass.

@@ -1,0 +1,9 @@
+{
+  "stations": [
+    "ci-line",
+    "gate-line"
+  ],
+  "doing": [],
+  "note": "gate-line depends on ci-line; the active list is EMPTY but present. An empty list means 'nothing in flight'; a missing block is red, and this fixture pins that the two are not the same thing.",
+  "valid": true
+}

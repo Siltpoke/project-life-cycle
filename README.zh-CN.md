@@ -14,7 +14,7 @@
 
 ```bash
 # 1. 把这个仓库注册为 Claude Code marketplace
-claude plugin marketplace add Victoriakaey/project-life-cycle
+claude plugin marketplace add Siltpoke/project-life-cycle
 
 # 2. 安装 skill
 claude plugin install project-lifecycle@project-life-cycle
@@ -86,7 +86,7 @@ qodercli plugins install /path/to/project-life-cycle
 或把仓库注册为 marketplace 再按名安装：
 
 ```bash
-qodercli plugins marketplace add Victoriakaey/project-life-cycle
+qodercli plugins marketplace add Siltpoke/project-life-cycle
 qodercli plugins install project-lifecycle
 ```
 
@@ -141,7 +141,7 @@ codebuddy --plugin-dir /path/to/project-life-cycle
 或把仓库注册为 marketplace 再按名安装 —— 在 CodeBuddy TUI 里作为斜杠命令运行：
 
 ```
-/plugin marketplace add Victoriakaey/project-life-cycle
+/plugin marketplace add Siltpoke/project-life-cycle
 /plugin install project-lifecycle@project-life-cycle
 ```
 

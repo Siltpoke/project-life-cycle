@@ -47,7 +47,22 @@ fi
 # per-file hashes are sorted so ordering never perturbs the digest, then hashed as one blob.
 # This is why the SHA-anchor design was abandoned: a fingerprint cannot be fooled by commit
 # order, has no same-commit off-by-one (commits don't change content), and needs no anchor.
-evidence_digest() {
+# ONE resolution of "which tracked files does the declared narrowing match" (p30:AC3).
+#
+# It exists because check 9 now REPORTS that count while check 7 fingerprints the same files, and
+# two consumers resolving the pathspec list separately is two implementations of one question — the
+# drift p30:AC3 forbids. Both callers below go through here.
+#
+# Writes the matched paths NUL-separated to stdout; writes NOTHING when the list resolved to no
+# pathspecs at all. NUL-separated because a tracked path may contain a newline, and because the
+# output is consumed by a pipeline rather than captured — command substitution drops NUL bytes.
+#
+# NOTE ON THE TWO HOMES: the canonical gate in references/close-gate.md carries its own copy of
+# this factoring with the SAME function names and the SAME contract, because the two gates are
+# separate artifacts that cannot share source. What must never differ is the ANSWER, and that task
+# asserts the two agree on the same tree and manifest. Changing one without the other is what
+# scripts/test_gate_conformance.py is there to catch.
+evidence_matched_files() {
   # Disable globbing while splitting the pattern list: '*.md' must reach `git ls-files` as a
   # (recursive) PATHSPEC, not be expanded by the shell against the cwd first — in a directory
   # that happens to contain a top-level .md, an unquoted '*.md' globs to that one file and the
@@ -59,22 +74,26 @@ evidence_digest() {
   # No pathspecs at all — either the manifest has no valid test_evidence_inputs (row 7 will
   # reject this) or `evidence-header` ran with no manifest configured at all. `git ls-files --`
   # with ZERO pathspecs after `--` matches EVERY tracked file, not none, so this case must be
-  # caught explicitly here or an unresolved list would silently fingerprint the whole repo
-  # instead of nothing.
-  if [ "$#" -eq 0 ]; then
-    printf 'EMPTY-no-gate-relevant-paths-matched\n'
-    return 0
-  fi
+  # caught explicitly or an unresolved list would silently fingerprint the whole repo.
+  [ "$#" -gt 0 ] || return 0
+  git ls-files -z -- "$@" 2>/dev/null
+}
+# How many tracked files the declared narrowing matches. This is the number check 9 reports, and it
+# is DERIVED rather than declared precisely so it cannot be faked or go stale (p30). Counts NUL
+# delimiters rather than lines: a path may contain a newline and `wc -l` would then over-count.
+evidence_kept_count() { evidence_matched_files | tr -cd '\000' | LC_ALL=C wc -c | tr -d ' '; }
+evidence_digest() {
   # Zero matches must NOT fall through to `git hash-object --stdin` on empty input: that
   # returns the FIXED empty-blob SHA e69de29b…, a constant that passes the header regex, so
   # row 7 would compare constant-to-constant and PASS vacuously — an adopter whose layout does
   # not fit GATE_RELEVANT_PATHS would silently green, the exact silent-degrade this check
   # removes. Emit a non-hex sentinel instead; the gate rejects it loudly (row 7).
-  if [ -z "$(git ls-files -z -- "$@" 2>/dev/null | tr -d '\0')" ]; then
-    printf 'EMPTY-no-gate-relevant-paths-matched\n'
-    return 0
-  fi
-  git ls-files -z -- "$@" 2>/dev/null \
+  #
+  # The "no pathspecs resolved" case reaches the SAME sentinel, deliberately and as before p30:
+  # this gate has always folded the two, and splitting them here would change row 7's output for
+  # an adopter who never asked for it.
+  [ "$(evidence_kept_count)" -gt 0 ] || { printf 'EMPTY-no-gate-relevant-paths-matched\n'; return 0; }
+  evidence_matched_files \
     | while IFS= read -r -d '' _f; do
         printf '%s %s\n' "$(git hash-object "$_f" 2>/dev/null || echo MISSING)" "$_f"
       done \
@@ -586,6 +605,7 @@ if [ -n "$PP_MATCHED" ]; then DIFF_TOUCHES_PRODUCT=1; fi
 RUN_PRODUCT_TREE=0; RUN_CHANGELOG=0; RUN_PHASE_DOCS=0; RUN_JOURNAL=0; RUN_ROADMAP=0; RUN_EVIDENCE=0; RUN_AC=0
 RUN_DIVERGENCE=0
 RUN_CLOSURE_DECL=0
+RUN_EXPERIMENT_GATE=0
 SKIP_WHY=""
 case "$MODE" in
   phase)
@@ -595,7 +615,19 @@ case "$MODE" in
     # closing: a phase's first task cannot know what the phase will close, so running this on
     # the push path would demand an answer that does not exist yet. It must never be on that path.
     RUN_CLOSURE_DECL=1
+    # 12 is armed by the POLICY, not by the mode -- deliberately unlike row 11 directly above,
+    # whose flag is mode-only and whose comment claimed manifest-arming it does not have.
+    # Reading the key here, where the check-set line is computed, is what makes `off` visible as
+    # SKIPPED rather than invisible.
+    EG_POLICY="$(g experiment_gate)"
+    case "$EG_POLICY" in
+      required|ask) RUN_EXPERIMENT_GATE=1 ;;
+      *)            RUN_EXPERIMENT_GATE=0 ;;
+    esac
     SKIP_WHY="nothing skipped — phase close runs every declared check"
+    if [ "$RUN_EXPERIMENT_GATE" = 0 ]; then
+      SKIP_WHY="12 is off: experiment_gate is ${EG_POLICY:-<unset>} — an adopter who has not configured it is not failed by it, and this line is why \"off\" and \"this gate has no check 12\" do not look the same"
+    fi
     ;;
   task)
     RUN_PRODUCT_TREE=1; RUN_JOURNAL=1; RUN_EVIDENCE=1; RUN_AC=1
@@ -848,6 +880,7 @@ cs "$RUN_DIVERGENCE"   "9b(divergence-records)"
 cs "$RUN_AC"           "10(ac-oracle-binding)"
 # Reads the SAME flag the row branches on, for the reason 9b records one line up.
 cs "$RUN_CLOSURE_DECL" "11(closure-declaration)"
+cs "$RUN_EXPERIMENT_GATE" "12(experiment-gate)"
 echo "check-set ($MODE): running ${CS_RAN:-none}"
 echo "check-set ($MODE): skipped ${CS_SKIPPED:-none} — $SKIP_WHY"
 echo "check-set ($MODE): product_paths declared [${PP_DISPLAY:-<none: unusable product_paths>}] · touched by $RANGE [${PP_MATCHED:-none}]"
@@ -1310,9 +1343,36 @@ fi
 #     in either direction.
 #
 #     ARMED BY THE MANIFEST, and that is the whole reason this row can exist at all. With no
-#     `closure_declaration` key the row does not run, prints nothing, and leaves the check-set
-#     line untouched -- a check firing on projects that had never
-#     configured the feature is the defect this avoids.
+#     `closure_declaration` key the row PASSES rather than failing -- an adopter who never
+#     configured the feature is never failed by it. a measured defect was a check firing on
+#     projects that had never configured the feature, which pushed 95/0 -> 21 red across eleven
+#     commits while the gate was structurally unable to see it.
+#
+#     WHAT UNARMED LOOKS LIKE, corrected 2026-08-31. This comment used to say the unarmed
+#     row "does not run, prints nothing, and leaves the check-set line untouched". All three were
+#     false of the code directly beneath it, and the wrong sentence is quoted rather than deleted
+#     because it did real damage: a phase in another session copied it as the design precedent for
+#     an `off` policy state and would have shipped a row that failed its own acceptance criterion.
+#     What actually happens: `:629` sets RUN_CLOSURE_DECL=1 inside `case "$MODE" in phase)` on the
+#     MODE ALONE and never on the key, so `:887` always lists 11 in the check-set line; and the
+#     unarmed branch below calls `ok`, which is `echo "✓ $1"`, printing a line indistinguishable
+#     from any passing row. The arming is real. Only the description of it was wrong.
+#
+#     SO: a check that must be ABSENT from the check-set line when disabled cannot be built by
+#     copying this row. It has to gate its own `cs()` call. Check 12 does; this one does not, and
+#     changing that here would be a behaviour change to a row nobody asked to change.
+#
+#     --require-steps IS PASSED HERE AND NOWHERE ELSE (the closed-step criterion). A declaration must name
+#     the station steps it closed, or say `closed-step: none`; silence must not be able to mean
+#     "closed nothing". The rule cannot live in the grammar, because the fourteen declarations
+#     already written predate the step format and would all turn red at once -- so the gate, the
+#     one caller that knows a declaration is being WRITTEN rather than read from history, is what
+#     asks for it. Dropping the flag would disable the rule while every run still looked the same,
+#     which is why scripts/test_closed_step.py asserts this call site carries it.
+#
+#     The failure label reads "was rejected", not "could not be read": the extractor now refuses
+#     for reasons other than unreadability, and a label narrower than the mechanism is the defect
+#     class this repo keeps filing.
 #
 #     THREE VERDICTS, and the middle one is why "absent" cannot pass. `closes: none` is a
 #     statement a human made at the moment they knew; an absent block is a step nobody
@@ -1332,8 +1392,8 @@ if [ "$RUN_CLOSURE_DECL" = 1 ]; then
     # shellcheck disable=SC2086
     if [ -z "$CD_DOCS" ]; then
       bad "closure-declaration: no phase documents matched \`phase_docs_glob\` or \`plan_glob\` for phase $PHASE, so there is nowhere for the declaration to live" closure_declaration
-    elif ! CD_OUT="$(/bin/bash scripts/closure-declaration.sh extract $CD_DOCS 2>&1)"; then
-      bad "closure-declaration: the declaration could not be read — $CD_OUT" closure_declaration
+    elif ! CD_OUT="$(/bin/bash scripts/closure-declaration.sh extract --require-steps $CD_DOCS 2>&1)"; then
+      bad "closure-declaration: the declaration was rejected — $CD_OUT" closure_declaration
     elif [ -z "$CD_OUT" ]; then
       bad "closure-declaration: no \`plc-closes\` block in any phase document for $PHASE. Declare what this phase closed, or declare \`closes: none\` — forgetting and deciding must not look the same" closure_declaration
     elif ! CD_REC="$(/bin/bash scripts/closure-declaration.sh reconcile --ledger "$CD_LEDGER" --deriver "$CD_DERIVER" $CD_DOCS 2>&1)"; then
@@ -1341,6 +1401,102 @@ if [ "$RUN_CLOSURE_DECL" = 1 ]; then
 $(printf '%s\n' "$CD_REC" | sed 's/^/      /')" closure_declaration
     else
       ok "closure-declaration: every id this phase declares closed has a ledger event, and every closure this branch added is declared — NOT proof the declaration is true, only that it is consistent with the ledger" closure_declaration
+    fi
+  fi
+fi
+
+# 12. experiment-gate (p41). A phase that moves a measurable behaviour must have said, BEFORE the
+#     code existed, what it expected to improve and how we would know. This row does not check
+#     that. It cannot: a gate is code and cannot read a hypothesis and tell you it is any good.
+#
+#     WHAT IT CHECKS IS EXISTENCE AND STRUCTURE, AND IT SAYS SO IN ITS OWN OUTPUT. That sentence
+#     is the row, not a caveat attached to it. The upstream discipline this came from names the
+#     failure exactly: many systems' evidence validation checks only EXISTENCE and reports it as
+#     "evidence verified", and a citation that exists but does not support the conclusion is an
+#     entirely different failure. A pass here read as "this experiment is well designed" is that
+#     failure, committed by the mechanism built to teach the lesson.
+#
+#     THREE SATISFIER STATES, and the middle one is the point. `ask` accepts a proposal file OR a
+#     categorised skip line. Without the second, a deliberate "considered, does not apply" and a
+#     "nobody thought about it" leave IDENTICAL repository state and nothing can tell them apart
+#     later. Same argument as row 11's `closes: none`, reached independently by two sessions.
+#
+#     `off` IS LISTED AS SKIPPED, NOT MADE INVISIBLE -- a deliberate deviation from this phase's
+#     own AC11, recorded in the plan's Plan-deviations. AC11 said "absent from the check-set
+#     line", wording inherited from row 11's comment, which the jq-only envelope filed as false. This file's own
+#     rule (see the check-set printer above) is that a required check skipped by a filter is
+#     indistinguishable from one that passed -- so making 12 vanish would satisfy the AC's letter
+#     by breaking the principle the AC exists to serve. Listed-as-skipped is distinguishable from
+#     passing, which is what AC11 actually asks for.
+if [ "$RUN_EXPERIMENT_GATE" = 1 ]; then
+  EG_SECTIONS="Hypothesis|Baseline|Dataset|Ground Truth|Metrics|Procedure|Variance|Decision Rule|Cost"
+  # The six skip categories. A LITERAL here on purpose: an adopter has no copy of
+  # references/experiment-gate.md, so the gate cannot parse the list out of it. In THIS repo the
+  # two copies are pinned by the experiment-gate-tokens-match-doc invariant.
+  EG_CATS="rename|docs|formatting|dependency-bump|equivalent-rewrite|no-measurable-behaviour"
+  EG_GLOB="docs/experiments/*-phase-${PHASE}-*.md"
+  EG_BOUND="bound:structure-only — this row checked EXISTENCE and STRUCTURE. It did not read the hypothesis and cannot tell you whether the experiment is well designed"
+
+  if glob_exists "$EG_GLOB"; then
+    # shellcheck disable=SC2086
+    set -- $EG_GLOB
+    if [ "$#" -gt 1 ]; then
+      # Two proposals for one phase is a real state -- a first draft left beside its rewrite --
+      # and picking the alphabetically first would validate or reject the wrong file while never
+      # naming the other. A gate that silently chooses is worse than one that refuses.
+      bad "experiment-gate: $# files match '$EG_GLOB' and this row will not choose between them: $* — delete or rename the ones that are not this phase's proposal. $EG_BOUND" experiment_gate
+      EG_FILE=""
+    else
+      EG_FILE="$1"
+    fi
+    if [ -n "$EG_FILE" ]; then
+    EG_MISSING=""
+    OLDIFS="$IFS"; IFS='|'
+    for _sec in $EG_SECTIONS; do
+      grep -qE "^[[:space:]]*\*\*${_sec}\*\*" "$EG_FILE" 2>/dev/null || EG_MISSING="${EG_MISSING:+$EG_MISSING, }$_sec"
+    done
+    IFS="$OLDIFS"
+    if [ -n "$EG_MISSING" ]; then
+      bad "experiment-gate: $EG_FILE is missing required section(s): $EG_MISSING — the nine are $EG_SECTIONS. $EG_BOUND" experiment_gate
+    else
+      ok "experiment-gate: $EG_FILE carries all nine sections. $EG_BOUND" experiment_gate
+    fi
+    fi
+
+  elif [ "$EG_POLICY" = required ]; then
+    bad "experiment-gate: no proposal matching '$EG_GLOB', and experiment_gate is \`required\` — a \`SKIP:\` line does not satisfy \`required\`; write the proposal or change the policy to \`ask\`. $EG_BOUND" experiment_gate
+
+  else
+    # `ask`: the skip line. Three outcomes and they are deliberately THREE, not two -- a human who
+    # tried and mistyped must not receive the sentence written for someone who never considered it.
+    EG_SKIP_RE="^[[:space:]]*SKIP:[[:space:]]*experiment-proposal[[:space:]]*[—–-]"
+    # `|| true` is load-bearing under this script's `set -euo pipefail`: grep exits 1 when it
+    # finds nothing, which is the NORMAL case this branch exists to handle, and an unguarded
+    # assignment killed the whole gate mid-run -- silently, with no summary line, so the run read
+    # as a failing gate rather than as a gate that stopped existing. Checks 9 and everything after
+    # it never ran. Found by the fixture for "no skip line at all", which is the one input where
+    # grep returns empty.
+    EG_LINE="$([ -n "$J" ] && grep -m1 -E "$EG_SKIP_RE" "$J" 2>/dev/null || true)"
+    if [ -z "$EG_LINE" ]; then
+      bad "experiment-gate: no proposal matching '$EG_GLOB' and no \`SKIP: experiment-proposal — <category>\` line in ${J:-the newest journal fragment}. Deciding this phase needs no experiment and never considering it must not leave the same repository state. $EG_BOUND" experiment_gate
+    else
+      # The category is the first whitespace-delimited token after the delimiter -- NOT
+      # everything up to the next dash. Splitting on the dash was the first implementation and
+      # the first fixture killed it: `no-measurable-behaviour` CONTAINS the delimiter character,
+      # so it parsed as `no`. A separator that also occurs inside the data is not a separator.
+      # No category contains whitespace, which is what makes the token rule total.
+      # Trailing punctuation is stripped before the compare. `SKIP: experiment-proposal — docs.`
+      # is a correct skip written in this repo's own prose style, and reporting it as MALFORMED
+      # would be a shape criterion rejecting a correct statement -- the shape-criterion defect, in a row added
+      # by the change that quotes it. Found by an independent reviewer running the pipeline.
+      EG_CAT="$(printf '%s' "$EG_LINE" | sed -E "s/$EG_SKIP_RE[[:space:]]*//" | awk '{print $1}' | sed -E 's/[.,;:!?]+$//')"
+      if ! printf '%s' "$EG_CAT" | grep -qE "^($EG_CATS)$"; then
+        bad "experiment-gate: the SKIP line names \`${EG_CAT:-<nothing>}\`, which is not one of the six categories ($EG_CATS). This is a MALFORMED skip, not a missing one — the line is there and its category is not. bound:enforcement-site — the category was asserted by this gate, not left to the reference doc" experiment_gate
+      elif [ "$EG_CAT" = no-measurable-behaviour ] && ! printf '%s' "$EG_LINE" | grep -qE "no-measurable-behaviour[[:space:]]*[—–-][[:space:]]*[^[:space:]]"; then
+        bad "experiment-gate: \`no-measurable-behaviour\` is the one category that requires a clause, and this line has none ON THE SAME LINE — the row reads one physical line, so a clause wrapped after the dash is not seen; keep the first words of the clause on the token's line. The other five are checkable against the diff; this one is a judgement with nothing behind it but the claim, so the claim gets written down. bound:clause-present — a clause is checked for PRESENCE, never for whether it is any good" experiment_gate
+      else
+        ok "experiment-gate: no proposal, and the skip is recorded as \`$EG_CAT\` in $J. $EG_BOUND. bound:enforcement-site — the category was asserted by this gate against a six-token list, not left to the reference doc. bound:clause-present — where a clause was required it was checked for PRESENCE only" experiment_gate
+      fi
     fi
   fi
 fi
@@ -1362,26 +1518,158 @@ fi
 #    This row rides with check 7 (RUN_EVIDENCE), not with check 8. It is the
 #    declared argument for check 7's OWN input list, so on a run where check 7 does not fire it
 #    would be asserting the shape of a rationale for a fingerprint nobody computed.
-if [ "$RUN_EVIDENCE" = 1 ]; then
+#
+#    Also in the same design: the row is ALSO gated on a present, NON-EMPTY `test_evidence_inputs`. Until
+#    p37 it fired on RUN_EVIDENCE alone, so a manifest that narrowed nothing was still required
+#    to argue for a narrowing it had not made. The conformance suite reached that independently
+#    on its first run, which is the first thing an independently-authored requirement caught that
+#    a comparison between the two gates could not. The four edges are RESOLVED here rather than
+#    left to judgement, and each has its own assertion in scripts/test_gate_conformance.py:
+#
+#      absent / null  -> DOES NOT FIRE. Nothing was narrowed, so there is nothing to argue for.
+#      []             -> DOES NOT FIRE. An empty array is not a narrowing.
+#      non-array      -> DOES NOT FIRE from this row, and the reason is NOT "nothing was
+#                        narrowed" -- somebody who writes `"test_evidence_inputs": "src/**"` is
+#                        plainly trying to narrow. It does not fire because the VALUE itself is
+#                        rejected as malformed, which names the actual problem; a second row
+#                        demanding a rationale on top would name a fix that does not fix it.
+#                        MEASURED SEQUENCING, because it reads as silence and is not: that
+#                        rejection sits AFTER the evidence-file check, so a repo with no evidence
+#                        file yet is told about the missing evidence first and about the malformed
+#                        value on its next run. The gate is red either way. Surfaced by a blind
+#                        cross-family review that called it a silent pass; it is a DEFERRED report,
+#                        and the difference was settled by running both cases, not by argument.
+#      ["  "]         -> FIRES. This IS a declared narrowing, merely a broken one — and that is
+#                        how the freshness check already treats it rather than a second answer
+#                        invented here: `evidence_digest` word-splits the glob list, gets zero
+#                        pathspecs, and returns the EMPTY- sentinel, which check 7 rejects as a
+#                        declared-but-matching-nothing narrowing. Declared-and-broken is not
+#                        undeclared.
+# p30: echo a manifest value back to the author, safely, using nothing but jq.
+#
+# WHY jq AND NOT `cut`/`head`. This repository shipped `scripts/utf8-text.sh` because `cut -c`
+# truncates by BYTES and sliced a CJK title mid-character. The gates cannot source that
+# file -- the canonical one is a self-contained script an adopter copies, and reaching outside it
+# would make the gate depend on this repository. jq is already in the dependency envelope and
+# slices strings by CODEPOINT, so it solves both halves with no new dependency.
+#
+# WHY `\p{Cc}` AND NOT A PATTERN FOR ANSI SEQUENCES, measured rather than assumed. Printing
+# untrusted text containing escape sequences to a terminal is CWE-150, with live CVEs. On a fixture
+# whose escape sequence straddles the truncation point:
+#
+#     strip then truncate, this class-based stripper       -> 0 ESC bytes
+#     truncate then strip, this class-based stripper       -> 0 ESC bytes
+#     truncate then strip, a whole-CSI-pattern stripper    -> 1 ESC byte   <- the real failure
+#
+# So the load-bearing property is that the stripper matches the CHARACTER, not the sequence: a bare
+# ESC left behind by a cut is still removed. Strip-first is kept because it is easier to reason
+# about, but the order is not what makes this safe and this comment must not be read as saying so.
+#
+# `\p{Cc}` is Unicode category Control -- both the C0 range and C1. An earlier attempt spelled the
+# same class as a bracket range written with backslash-u escapes. It LOOKS right and silently
+# destroyed the text: Oniguruma does not accept `\uXXXX`, so the class degenerated into ASCII
+# ranges and ate the digits and letters this echo exists to show. It was caught by reading the
+# output, not by the expression failing -- it never failed.
+rationale_echo() {
+  jq -r --argjson n 100 '
+      .validator_input_paths_rationale
+    | ( if   type == "object" then (.why // "") | (if type == "array" then map(tostring) | join(" ") else tostring end)
+        elif type == "array"  then map(tostring) | join(" ")
+        else tostring end )
+    | gsub("\\p{Cc}"; "")
+    | if length > $n then .[0:$n] + " [truncated]" else . end
+  ' "$M" 2>/dev/null || printf '<unreadable>'
+}
+if [ "$RUN_EVIDENCE" = 1 ] \
+   && [ "$(jq -r '.test_evidence_inputs | type' "$M" 2>/dev/null || echo null)" = array ] \
+   && [ "$(jq -r '.test_evidence_inputs | length' "$M" 2>/dev/null || echo 0)" -gt 0 ]; then
 RAT_TYPE="$(jq -r '.validator_input_paths_rationale | type' "$M" 2>/dev/null || echo null)"
-if [ "$RAT_TYPE" != array ]; then
-  bad "manifest missing validator_input_paths_rationale (or it is not a JSON array) — the test_evidence_inputs narrowing argument must be declared, not just enforced"
-else
-  # `|| RAT_JOINED="__ERR__"` guards the same class check 8's NAME/CMD reads guard against
-  # (scripts/close-gate.sh, invariants loop): `jq join` exits non-zero (not just empty output)
-  # when the array holds a non-string element — `echo '{"r":[1,{"a":1}]}' | jq -r '.r|join(" ")'`
-  # exits 5 — and this was a bare top-level assignment under `set -euo pipefail`, so a manifest
-  # with one non-string rationale entry crashed the whole gate with a raw jq trace instead of
-  # printing this row's `bad`. The fallback routes it into the shape check below, where zero
-  # numbers/no "track" naturally fails closed instead of aborting the script.
-  RAT_JOINED="$(jq -r '.validator_input_paths_rationale | join(" ")' "$M" 2>/dev/null)" || RAT_JOINED="__ERR__"
-  RAT_NUM_COUNT="$(printf '%s' "$RAT_JOINED" | grep -oE '[0-9]+' 2>/dev/null | wc -l | tr -d ' ')" || RAT_NUM_COUNT=0
-  if [ "$RAT_JOINED" != "__ERR__" ] && [ "${RAT_NUM_COUNT:-0}" -ge 2 ] && printf '%s' "$RAT_JOINED" | grep -qiE 'track'; then
-    ok "validator_input_paths_rationale present and shaped like a measurement (two numbers + a tracked-surface argument) — NOT a check that the measurement is current or true"
-  else
-    bad "validator_input_paths_rationale present but not shaped like a measurement — needs two numbers and a tracked-surface argument (e.g. 'N files, M tracked'); a placeholder does not satisfy this row"
-  fi
-fi
+# p30: the dispatch below is the SAME logic as the canonical gate's, duplicated because the
+# two gates are separate artifacts that cannot share source. What must never differ is the
+# BEHAVIOUR, and scripts/test_gate_conformance.py authors each requirement once and runs it
+# against each home alone -- a change landing here and not there goes red, which is how this
+# port was driven rather than eyeballed.
+# p30 (review): the help/note tail below was written out in full in EACH of check 9's three
+# refusal rows, in both gate homes -- six copies of the same ~500 characters. It had already
+# drifted once: two copies carried the "(here: N files)" parenthetical and the third did not,
+# and nothing distinguishes the three branches' tails from each other, so a reviewer found the
+# drift rather than a test. Built once here instead. This is INTRA-file only; the two homes stay
+# separate artifacts, and cross-home agreement is what test_gate_conformance.py holds.
+RAT_SHAPE='"validator_input_paths_rationale": {"surface_total": <number greater than 0>, "basis": "tracked-files"|"all-files"|"glob-set"|"explicit-path-list", "why": ["<free prose, any language>"]}'
+RAT_TAIL="help: paste this and edit the numbers -- $RAT_SHAPE -- and do NOT write surface_kept, this gate derives it (here: $(evidence_kept_count) files) | note: deleting test_evidence_inputs silences this row, and it ALSO drops the freshness check back to the legacy mtime comparison, which false-PASSES by construction in a fresh clone or CI. NOTE: this gate no longer requires Arabic numerals or the English word \"tracked\" anywhere -- that rule was removed in p30 because it refused honest arguments written in other languages, and because it was measured to pass strings that say nothing. Write why in whatever language you think in; this gate reads none of it."
+case "$RAT_TYPE" in
+  object)
+    # The declared members, each read by name. Every jq read is guarded: a read that exits
+    # non-zero under `set -euo pipefail` would abort the whole gate with a raw trace instead of
+    # printing this row, which is the class the legacy branch's `|| RAT_JOINED="__ERR__"` guards.
+    RAT_TOTAL_TYPE="$(jq -r '.validator_input_paths_rationale.surface_total | type' "$M" 2>/dev/null || echo null)"
+    RAT_TOTAL="$(jq -r '.validator_input_paths_rationale.surface_total // 0' "$M" 2>/dev/null || echo 0)"
+    RAT_BASIS="$(jq -r '.validator_input_paths_rationale.basis // ""' "$M" 2>/dev/null || echo "")"
+    # "an array of strings, at least one of which says something" -- in ONE jq expression, so the
+    # sub-conditions cannot drift apart across three shell reads.
+    #
+    # NOT "every element non-empty", and the difference was found by dogfooding rather than by
+    # design: this repository's own `why` is a multi-line prose block that uses empty strings as
+    # PARAGRAPH SEPARATORS, and the first version of this rule refused it. The property that
+    # actually matters is that the value says something, so `["", "", "x"]` passes and
+    # `["", "  "]` does not. Elements must still all be strings -- a number in there is a
+    # malformed value, not a formatting choice.
+    RAT_WHY_OK="$(jq -r '.validator_input_paths_rationale.why | if type=="array" and length>0 and (all(.[]; type=="string")) and (any(.[]; gsub("\\s";"")|length>0)) then "yes" else "no" end' "$M" 2>/dev/null || echo no)"
+    RAT_HAS_KEPT="$(jq -r 'if (.validator_input_paths_rationale|has("surface_kept")) then "yes" else "no" end' "$M" 2>/dev/null || echo no)"
+    RAT_MISSING=""
+    # A declared surface_kept is REFUSED rather than ignored. Accepting-and-ignoring it would let
+    # a stale copied number sit in the manifest looking authoritative while nothing reads it --
+    # which is exactly the 77-vs-595 shape this change exists to remove.
+    [ "$RAT_HAS_KEPT" = yes ] && RAT_MISSING="$RAT_MISSING surface_kept-is-derived-remove-it"
+    [ "$RAT_TOTAL_TYPE" = number ] || RAT_MISSING="$RAT_MISSING surface_total-must-be-a-json-number"
+    if [ "$RAT_TOTAL_TYPE" = number ]; then
+      # `jq` may print a float; compare in jq rather than in `[ ]`, which is integer-only.
+      [ "$(jq -r '.validator_input_paths_rationale.surface_total | if . > 0 then "yes" else "no" end' "$M" 2>/dev/null || echo no)" = yes ] \
+        || RAT_MISSING="$RAT_MISSING surface_total-must-be-greater-than-zero"
+    fi
+    case "$RAT_BASIS" in
+      tracked-files|all-files|glob-set|explicit-path-list) ;;
+      *) RAT_MISSING="$RAT_MISSING basis-must-be-one-of-tracked-files|all-files|glob-set|explicit-path-list" ;;
+    esac
+    [ "$RAT_WHY_OK" = yes ] || RAT_MISSING="$RAT_MISSING why-must-be-a-non-empty-array-of-non-empty-strings"
+    if [ -z "$RAT_MISSING" ]; then
+      ok "validator_input_paths_rationale: surface_kept=$(evidence_kept_count) files, DERIVED by this gate from the declared pathspecs; surface_total=$RAT_TOTAL and basis=$RAT_BASIS are DECLARED figures this gate only type-checked, not audited; why is free prose in any language and is checked for presence only"
+    else
+      bad "validator_input_paths_rationale [check9-object] declares a narrowing, so it must carry the argument for it | what this manifest has: $(rationale_echo) | what is missing:$RAT_MISSING | $RAT_TAIL"
+    fi
+    ;;
+  array)
+    # LEGACY SHAPE. Still accepted, deliberately and for a stated window: this repository is the
+    # only KNOWN runner of this check, but the canonical gate is copied by adopters nobody can
+    # enumerate -- unknown population, not zero population. The window's end condition is filed
+    # separately, because "for a window" with no trigger is an open-ended commitment dressed as a
+    # bounded one.
+    #
+    # `|| RAT_JOINED="__ERR__"`: `jq join` EXITS NON-ZERO (not just empty) when the array holds a
+    # non-string element -- `echo '{"r":[1,{"a":1}]}' | jq -r '.r|join(" ")'` exits 5 -- and under
+    # `set -euo pipefail` a bare assignment would abort the whole gate with a raw jq trace instead
+    # of printing this row. The sentinel routes it into the shape check, where zero numbers and no
+    # "track" fail closed.
+    RAT_JOINED="$(jq -r '.validator_input_paths_rationale | join(" ")' "$M" 2>/dev/null)" || RAT_JOINED="__ERR__"
+    RAT_NUM_COUNT="$(printf '%s' "$RAT_JOINED" | grep -oE '[0-9]+' 2>/dev/null | wc -l | tr -d ' ')" || RAT_NUM_COUNT=0
+    if [ "$RAT_JOINED" != "__ERR__" ] && [ "${RAT_NUM_COUNT:-0}" -ge 2 ] && printf '%s' "$RAT_JOINED" | grep -qiE 'track'; then
+      # DEPRECATION, NOT REMOVAL: this must never touch $fail. A warning that fails the build is
+      # a removal wearing a warning's words. `warn` is warn-only by construction (see its
+      # definition), and the test for this row asserts on the row's TYPE, not on the substring --
+      # this repository has measured an entire suite staying green while a row flipped from bad
+      # to warn, because every assertion keyed on whether the line appeared.
+      warn "[p30-deprecated-array-shape] validator_input_paths_rationale is the DEPRECATED array-of-strings shape. It still passes, and its old rule still applies to it (at least two ASCII digits plus the English word \"track\") -- which is the rule p30 replaced because it refuses honest arguments written in other languages. Migrate to the object shape -- paste this and edit the numbers: \"validator_input_paths_rationale\": {\"surface_total\": <number>, \"basis\": \"tracked-files\", \"why\": [\"<your existing prose, unchanged, in any language>\"]}. Do not add surface_kept; this gate derives it (here: $(evidence_kept_count) files)"
+    else
+      bad "validator_input_paths_rationale [check9-legacy] is the deprecated array shape and does not satisfy even that shape own rule | what this manifest has: $(rationale_echo) | what is missing: at-least-two-ascii-digits-and-the-english-word-track -- which is precisely the language-bound rule you should stop trying to satisfy | $RAT_TAIL"
+    fi
+    ;;
+  *)
+    # Neither object nor array -- including absent (jq prints "null"). Named as malformed rather
+    # than silently treated as "no narrowing to argue for": the manifest DID declare a narrowing
+    # (this branch is gated on that), so the argument is owed.
+    bad "validator_input_paths_rationale [check9-type] declares a narrowing but the value is $RAT_TYPE | what this manifest has: $(rationale_echo) | what is missing: the-value-must-be-an-object -- an array of strings is the deprecated shape and still works | $RAT_TAIL"
+    ;;
+esac
 fi  # end check 9 (RUN_EVIDENCE)
 
 # context-floor arming row — WARN-ONLY, three states (not wired · wired · wired but inert: jq

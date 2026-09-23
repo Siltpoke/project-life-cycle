@@ -120,10 +120,18 @@ def test_ac5_the_narrowed_row_still_reds_when_a_new_check_appears() -> None:
 
 
 @pytest.mark.skipif(not BASELINE.exists(), reason="baseline absent (fresh clone); it cannot be re-taken")
-def test_ac5_skipped_line_gains_exactly_one_token() -> None:
+def test_ac5_skipped_line_gains_exactly_the_declared_phase_only_rows() -> None:
     """Clause 2. Pinning WHAT changed rather than forbidding all change — the alternative was
     to hide the row from `cs()` in task mode, which would make the oracle pass by making the
-    gate less honest about what it is not running."""
+    gate less honest about what it is not running.
+
+    **The expected delta grew from one token to two in p41, and that is a real expectation
+    change rather than a weakening.** It stays a set EQUALITY against the frozen baseline: the
+    tempting repair was `>= {"11(closure-declaration)"}` or dropping the assertion to a count,
+    either of which would have let any future phase-only row appear unnoticed — which is the
+    thing this row exists to prevent. Every addition to this set has to be a deliberate edit here,
+    naming what was added.
+    """
 
     def tokens(line: str) -> set:
         body = line.split(" skipped ", 1)[1].split(" — ", 1)[0]
@@ -131,7 +139,8 @@ def test_ac5_skipped_line_gains_exactly_one_token() -> None:
 
     before = tokens(check_set(BASELINE.read_text(encoding="utf-8"), "skipped", "task"))
     after = tokens(check_set(gate("task").stdout, "skipped", "task"))
-    assert after - before == {"11(closure-declaration)"}, f"unexpected delta: {after - before}"
+    expected = {"11(closure-declaration)", "12(experiment-gate)"}
+    assert after - before == expected, f"unexpected delta: {after - before}"
     assert before - after == set(), f"a check stopped being reported: {before - after}"
 
 

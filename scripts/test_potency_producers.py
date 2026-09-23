@@ -7,6 +7,7 @@ NOT part of any gate envelope. The producers are themselves out-of-envelope (bas
 the fixture's own toolchain); only verify-gate.sh must stay jq-only.
 """
 from __future__ import annotations
+from close_gate_lib import assert_fixture_is_its_own_repo
 
 import json
 import os
@@ -38,6 +39,10 @@ def _write(repo: Path, rel: str, body: str) -> None:
 
 
 def _commit(repo: Path, msg: str) -> str:
+    # p33 — refuse to commit into anything but this fixture. One line here covers every
+    # call site this helper serves; see close_gate_lib for why the check is on the git dir
+    # and not the top level, and why it is insurance rather than a fix for a measured path.
+    assert_fixture_is_its_own_repo(repo)
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", msg)
     return subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo,

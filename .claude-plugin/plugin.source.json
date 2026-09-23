@@ -2,7 +2,7 @@
   "_comment": "SINGLE SOURCE OF TRUTH for every host plugin manifest. Edit THIS file, then run `python3 scripts/gen_plugin_manifests.py`. Never hand-edit .*-plugin/*.json — they are generated and CI re-checks them.",
   "name": "project-lifecycle",
   "marketplaceName": "project-life-cycle",
-  "version": "4.0.0",
+  "version": "4.1.0",
   "_hostVersionOverrides_comment": "Hosts whose version is DELIBERATELY not part of the synced set, per scripts/invariants/manifest-version-sync.sh: that invariant syncs exactly .claude-plugin, .qoder-plugin and .codebuddy-plugin, and excludes codex on the stated grounds that it carries its own X.Y.Z+codex.<stamp> scheme. Antigravity is excluded differently — its schema has no version field at all. Setting a host here means 'this host's version is independent by design', NOT 'this host is behind'.",
   "hostVersionOverrides": {
     "codex": "0.11.0+codex.20260707001844"
@@ -11,7 +11,7 @@
     "name": "Jiaqi Duan",
     "url": "https://github.com/Victoriakaey"
   },
-  "repository": "https://github.com/Victoriakaey/project-life-cycle",
+  "repository": "https://github.com/Siltpoke/project-life-cycle",
   "license": "PolyForm-Perimeter-1.0.1",
   "keywords": [
     "project-lifecycle",

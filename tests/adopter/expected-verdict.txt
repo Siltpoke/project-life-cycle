@@ -3,11 +3,25 @@
 # failed, or aborted. This file is the other half, and it is a SET-EQUALITY oracle: exactly these
 # ✗ rows, no more and no fewer.
 #
-# THE SINGLE ✗ ROW BELOW IS A PRODUCT FINDING AND MUST STAY RED. The fabricated manifest
-# omits validator_input_paths_rationale, and adding that key to
-# tests/adopter/fabricated/close-gate.json would turn this fixture green and DELETE the finding.
-# The day that finding is actually fixed in the product, this fixture goes red and forces this file to be
-# edited -- which is the point. Do not edit it to match a passing run.
+# THERE ARE NO ✗ ROWS, AND THAT IS A RESULT RATHER THAN AN ABSENCE. Until 2026-08-25 this file
+# pinned ONE ✗ row -- a product finding: the fabricated manifest narrowed
+# test_evidence_inputs and declared no validator_input_paths_rationale, and this repo's gate hard-
+# failed on it. The comment here said "the day the narrowed-inputs finding is actually fixed, this fixture
+# goes red and forces this file to be edited -- which is the point." That day was 2026-08-25. The
+# fixture's manifest now carries a FILLED rationale (not the REPLACE_ME placeholder /init-harness
+# scaffolds -- planting that would model an adopter who ignored a red row, a different fixture),
+# the check is coupled to what it justifies in BOTH gates, and the adopter run comes back clean.
+#
+# WHAT THE ORACLE IS NOW, because "no rows" is the easiest thing in this file to weaken by accident:
+# NO-FAIL-ROWS is an EXPLICIT declaration, not an empty list -- a file that simply listed nothing
+# would be a FAIL, because "I meant none" and "I forgot" look alike. ADOPTER-GATE-EXIT is pinned to
+# 0 EXACTLY, so a gate that starts failing for any reason moves it, and scripts/invariants/
+# gate-abort-is-not-success.sh exists because a half-way abort exits 90 and must never read as a
+# pass. Any ✗ row appearing here at all is a new, untriaged product finding.
+#
+# THE NARROWED-INPUTS FINDING IS NAMED ABOVE ON PURPOSE and must stay named: this file is where
+# it lived, so it is where the record of its closing belongs. Deleting that history would leave a
+# green fixture with nothing saying what it used to catch.
 #
 # Grammar (an unrecognized line is a FAIL, never skipped -- an unparsed line is not evidence of
 # absence):
@@ -21,12 +35,12 @@
 # most layout-sensitive lines in the output, and pinning them would make this file red on changes
 # that have nothing to do with the verdict.
 
-# Exit codes. The gate number is pinned EXACTLY, not merely "non-zero": scripts/invariants/
-# gate-abort-is-not-success.sh exists because a half-way abort exits 90, and an abort must never
-# be able to read as this expected FAIL.
+# Exit codes. The gate number is pinned EXACTLY, not merely "zero-or-not": scripts/invariants/
+# gate-abort-is-not-success.sh exists because a half-way abort exits 90. That guard mattered in
+# both directions -- while this file expected a FAIL, an abort must not read as the expected 1;
+# now that it expects a PASS, a gate that dies half-way must not read as anything but a change.
 ADOPTER-EVIDENCE-EXIT=0
-ADOPTER-GATE-EXIT=1
+ADOPTER-GATE-EXIT=0
 
 # The complete ✗ set.
-✗ manifest missing validator_input_paths_rationale (or it is not a JSON array) — the test_evidence_inputs narrowing argument must be declared, not just enforced
-✗ close-gate FAIL (phase 1.0) — fix the ✗ rows above, then re-run
+NO-FAIL-ROWS

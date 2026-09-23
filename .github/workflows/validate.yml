@@ -14,10 +14,16 @@ jobs:
         with:
           fetch-depth: 0
 
+      # p35: was "3.12". The width table in scripts/lib/eaw-ranges.jq is a pinned export
+      # declaring Unicode 15.1.0; 3.12 ships unicodedata 15.0.0, so its version-gated check
+      # had no oracle here and skipped on every run since the table landed. Every developer
+      # interpreter in this project is 3.13, so that check ran NOWHERE. Aligning the version
+      # is half the fix -- the durable half is the "may not skip" step below, which does not
+      # care why a test skipped and therefore survives the next version bump.
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.13"
 
       - name: Validate manifests + skill references
         run: python3 scripts/validate.py
@@ -26,6 +32,57 @@ jobs:
         run: |
           python -m pip install --quiet pytest pyyaml
           python -m pytest scripts/ -q
+
+      # p35: the durable half. The step above prints one green tick whether a test passed
+      # or skipped, and that is exactly how the width table went unchecked here for weeks
+      # while every run reported success. This step re-runs the width suite for a machine-
+      # readable report and refuses ANY skip in it.
+      #
+      # It deliberately does not know WHY a test might skip -- not the Unicode version, not
+      # a missing jq. A guard that re-states the skip conditions drifts from the suite the
+      # first time a fourth reason is added; this one only knows that something skipped, so
+      # a reason invented later is covered by construction. An empty report fails too: zero
+      # collected cases is indistinguishable from zero skips.
+      #
+      # WHEN THIS GOES RED, there are exactly two causes and they need opposite fixes. The
+      # message printed below says which; do not skip reading it.
+      #
+      #   "did not all RUN" -- something skipped. Two reasons can produce it:
+      #     (a) a newer Python moved unicodedata past the version the table declares. Fix by
+      #         regenerating BOTH pinned files on that interpreter, never one:
+      #           python3 scripts/gen-eaw-ranges.py            > scripts/lib/eaw-ranges.jq
+      #           python3 scripts/gen-eaw-ranges.py --snapshot > scripts/lib/eaw-boundary-widths.json
+      #     (b) `jq` is missing from the runner image. The whole width suite carries a
+      #         module-level skipif on it, so this reddens with FIFTEEN skips and no Unicode
+      #         involvement at all. Fix the image; regenerating the pinned files here would
+      #         rewrite two correct artifacts and change nothing. This cause was named by a
+      #         reviewer precisely because an earlier version of this comment listed only (a)
+      #         and would have sent the maintainer to the wrong remedy.
+      #
+      #   "RAN and FAILED" -- the table and its snapshot disagree, or one was hand-edited.
+      #
+      # In neither case is the fix to relax this step. A red here is the mechanism working.
+      - name: The width table's checks may not skip (p35)
+        run: |
+          # The two verdicts are kept APART on purpose. A single `rc` made this step say
+          # "did not all run" for a failing suite as well -- measured, with one digit wrong
+          # in the table: every case ran, three failed, the report showed zero skips, and
+          # the message still sent the reader off to look for a skip. A red that names the
+          # wrong cause costs more than no message.
+          rc_tests=0
+          python -m pytest scripts/test_eaw_width.py -q \
+            --junit-xml=width-junit.xml || rc_tests=$?
+          rc_skips=0
+          python scripts/assert_no_skipped_tests.py width-junit.xml || rc_skips=$?
+          if [ "$rc_tests" -ne 0 ]; then
+            echo "::error::the width table's checks RAN and FAILED — the table and its pinned snapshot disagree, or one of them was hand-edited; see above"
+          fi
+          if [ "$rc_skips" -ne 0 ]; then
+            echo "::error::the width table's checks did not all RUN — something skipped, so this run verified less than it looks like; see above"
+          fi
+          if [ "$rc_tests" -ne 0 ] || [ "$rc_skips" -ne 0 ]; then
+            exit 1
+          fi
 
       # pyyaml is needed by the frontmatter assertion inside test-hooks.sh, not by the
       # gate tests — it is installed in the step above because both run on this job.

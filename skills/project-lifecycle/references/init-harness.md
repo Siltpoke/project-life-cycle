@@ -218,6 +218,11 @@ quietly reaching adopters.
   "test_evidence": ".claude/.last-test-run",
   "test_command": "{ bash scripts/close-gate.sh evidence-header {SET}; REPLACE_ME_TEST_COMMAND; } | tee {EVIDENCE_FILE}",
   "test_evidence_inputs": ["src/**", "tests/**"],
+  "validator_input_paths_rationale": {
+    "surface_total": 0,
+    "basis": "REPLACE_ME_HOW_YOU_COUNTED",
+    "why": ["REPLACE_ME_WHY_THE_INPUT_SET_IS_NARROW"]
+  },
   "test_runs_required": 1,
   "user_visible": true,
   "exempt_user_story": false,
@@ -237,6 +242,25 @@ single-layer repo; per-package globs on a monorepo); if detection is ambiguous, 
 `["REPLACE_ME_SOURCE_GLOB", "REPLACE_ME_TEST_GLOB"]` and say so at the checkpoint rather than
 guessing — globs matching no tracked file fail the gate closed, which is the correct loud
 failure, but it should not be the adopter's first experience of the gate.
+
+**`validator_input_paths_rationale` is emitted with a placeholder the gate REFUSES** (an earlier phase, reshaped later).
+Narrowing `test_evidence_inputs` is a safety-reducing choice -- it shrinks what the freshness
+fingerprint can see -- so the gate requires the manifest to carry the argument for why the
+narrowed set is the right one. The checkable part lives in named members rather than in prose:
+`surface_total` must be a number greater than zero, `basis` must be one of `tracked-files` /
+`all-files` / `glob-set` / `explicit-path-list`, and `why` is free prose in **any language** that
+the gate checks for presence only. `surface_kept` is not written at all -- the gate derives it.
+**The scaffolded value is therefore chosen so it cannot pass**: `surface_total` is `0`, which the
+gate refuses as not-greater-than-zero, and `basis` carries a `REPLACE_ME` string that is not in
+the enum. Both are named in the one failing row, so the adopter is told which members to fix
+rather than handed the rule again. A fresh adopter's first gate run fails on exactly this row and
+on nothing else, which is the point -- an untouched placeholder that satisfied the check would
+make the key a formality. **If a candidate placeholder ever does satisfy the check, change the
+placeholder, not the check.** That sentence predates p30 and is repeated here rather than
+carried forward silently: rewriting this paragraph for the object shape truncated it mid-clause
+and dropped it, which a reviewer caught. The instruction is not about the old rule -- it is
+about the relationship between a scaffold and the check that refuses it, and that survived the
+change unchanged.
 
 **The paired half is the runner, and it is scaffolded too.** Declaring the key does nothing
 until something writes the `# plc-gate-evidence inputs=<digest>` header, and a declared-but-

@@ -1436,6 +1436,62 @@ else
   DISABLE_HINT="set PLC_CONTEXT_FLOOR=0 to disable"
 fi
 
+# WORKTREE (2026-09-01). A worktree exists to isolate one session from another,
+# so the RESUME.md resolved inside one is, by construction, NOT this session's:
+# it was inherited from the base branch and belongs to whoever wrote it there,
+# or -- when the checkpoint is gitignored, as PLC's own is -- it does not exist
+# at all and the block names a path that was never on disk.
+#
+# Either way the instruction is unsatisfiable as written, and the message named
+# only the disable switch. That is the shape this whole hook exists to avoid: a
+# guard whose only stated exit is its own off-switch teaches the operator to
+# take it (see the note at the DISABLE_HINT rationale above). PLC_RESUME_PATH
+# was already the correct exit and went unmentioned.
+#
+# MEASURED TWICE ON THE SAME DAY, not reasoned:
+#   1. A session repairing a release pipeline hit the floor inside a worktree
+#      of the repo it was working in; that RESUME.md belonged to another
+#      LIVE session's branch. It complied by prepending its own section and
+#      keeping the original verbatim -- which is a workaround, not a fix.
+#   2. Opening a worktree HERE to write this very patch hit the floor again, on
+#      a RESUME.md that does not exist in any PLC worktree. The defect blocked
+#      its own repair.
+#
+# Detected structurally rather than by matching "/worktrees/" in a path: in a
+# normal checkout the git dir is `<toplevel>/.git`; in a worktree it is not.
+# Both calls fail safe -- a non-git or unreadable CWD yields empty strings and
+# no note. Silent when PLC_RESUME_PATH is already set, for the same reason
+# RESUME_HINT is: the reader configured the location and does not need it read
+# back to them.
+#
+# The sentence says "a worktree", never the two-word form: INV-2 of
+# `scripts/invariants/context-floor-envelope.sh` requires every `git ` in this
+# file to carry a stderr guard, and it skips comment lines but not string
+# literals — so the longer phrase reads as an unguarded call and blocks the
+# push. Widening that invariant to understand strings would trade a false
+# positive for a real hole, and the extra word buys nothing in a message that
+# is already talking about branches and checkouts.
+#
+# Spends NO git call: in a normal checkout `<toplevel>/.git` is a DIRECTORY, and in a
+# worktree it is a regular FILE holding a `gitdir:` pointer. That is git's own on-disk
+# shape, so this is still structural rather than a match on "/worktrees/" in a path —
+# and it costs one stat.
+#
+# Two rejected alternatives, both measured, so neither comes back:
+#   * `rev-parse --absolute-git-dir` alongside `--show-toplevel`: AC9 pins checkpoint
+#     resolution to EXACTLY ONE git call (this hook runs ahead of every Edit/Write, so
+#     the count is a budget), and adding one took it to three.
+#   * Asking `rev-parse` for both values in one process and splitting its output on the
+#     newline: an acceptance criterion pins that a checkpoint path may itself contain a newline, which
+#     makes a line-split parse wrong exactly where that test looks.
+WORKTREE_NOTE=""
+if [ -z "${PLC_RESUME_PATH:-}" ]; then
+  _wt_top="${TOP:-}"
+  if [ -n "$_wt_top" ] && [ -f "$_wt_top/.git" ]; then
+    WORKTREE_NOTE="This is a worktree, so that RESUME.md is inherited from the base branch (and may be another session's, or may not exist) -- point PLC_RESUME_PATH at a checkpoint of your own rather than overwriting it. "
+  fi
+fi
+
 # WHICH RESUME.md. Once the checkpoint is resolved from the target's git root it can no
 # longer be assumed to be `./RESUME.md`, and "refresh RESUME.md" stops being an instruction the
 # reader can act on -- which is the same unsatisfiable-guard failure this resolution exists to remove,
@@ -1451,6 +1507,6 @@ fi
 # sentence already says everything and an absolute path would be noise on the common case; and an
 # explicit `PLC_RESUME_PATH`, where the reader configured the location themselves and repeating
 # it back tells them nothing they did not type.
-printf '[context-floor] Blocked: context ~%sK (~%s%% of %sK window) over %s and RESUME.md%s not refreshed since. %sRefresh RESUME.md%s to clear this -- it is the checkpoint the floor exists to force, and it is almost certainly stale if you are seeing this. (To turn the floor off on this machine: %s.)\n' \
-  "$OCC_K" "$PCT_S" "$WIN_K" "$TRIGGER_DESC" "$RESUME_HINT" "$NOTE" "$RESUME_HINT" "$DISABLE_HINT" >&2
+printf '[context-floor] Blocked: context ~%sK (~%s%% of %sK window) over %s and RESUME.md%s not refreshed since. %sRefresh RESUME.md%s to clear this -- it is the checkpoint the floor exists to force, and it is almost certainly stale if you are seeing this. %s(To turn the floor off on this machine: %s.)\n' \
+  "$OCC_K" "$PCT_S" "$WIN_K" "$TRIGGER_DESC" "$RESUME_HINT" "$NOTE" "$RESUME_HINT" "$WORKTREE_NOTE" "$DISABLE_HINT" >&2
 exit 2

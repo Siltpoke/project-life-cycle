@@ -187,7 +187,7 @@ git tag vX.Y.Z && git push origin vX.Y.Z
 
 ```
 skills/project-lifecycle/
-├── SKILL.md                              ← 入口 + 10 步 per-phase 工作流
+├── SKILL.md                              ← 入口 + 11 步 per-phase 工作流
 └── references/
     │
     │  ── 入门 + 操作习惯（新贡献者从这里开始）──

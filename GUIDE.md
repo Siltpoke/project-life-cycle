@@ -192,7 +192,7 @@ An annotated layout of the main surfaces of this repository, with a one-line not
 
 ```
 skills/project-lifecycle/
-├── SKILL.md                              ← entry point + 10-step per-phase workflow
+├── SKILL.md                              ← entry point + 11-step per-phase workflow
 └── references/
     │
     │  ── onboarding + ergonomics (start here for new contributors) ──
@@ -226,6 +226,7 @@ skills/project-lifecycle/
     ├── journal-schema.md                 6-section journal entry template
     ├── defer-vs-fix.md                   triage rule for review findings
     ├── diagnose-loop.md                  hard-bug discipline: feedback loop → ranked hypotheses → fix + regression. Iron Law + 3-Fix Rule
+    ├── document-map.md                   which file do I open? one row per document the skill tells you to keep — who writes it, who reads it first, when, whether it is truth or a derived view, and which document it is most confused with; settles the RESUME.md / docs/STATUS.md ambiguity (RESUME is the read-first doc; STATUS is what `status_doc` points at) and names the two documents the skill references but this repo does not keep
     ├── close-gate.md                     deterministic done-gate — task-done / phase-done checks (journal header / fresh test-evidence / handoff sections / CHANGELOG touch / smoke / ROADMAP), portable script + manifest, pre-push-hook wiring (the un-bypassable layer) + the close-gate policy key (per-task | pr-boundary — where the human-blocking approval sits, with the self-certification attack surface written out)
     ├── review-record.md                  trustworthy AI review — reviewer dispatch constraints (fresh context / read-only / tier asymmetry / refute-first / file:line evidence gate / computed verdicts), the bidirectional review record on the PR (reviewer report verbatim + builder per-finding response), finding→fix rules (reviewer snippets are untrusted input; mandatory final-pass), coverage-window check
     │
@@ -237,6 +238,7 @@ skills/project-lifecycle/
     ├── copilot-review-loop.md            per-PR @copilot review loop + per-finding inline-reply convention
     ├── pr-comment-template.md            9-layer PR-comment audit narrative (golden/negative-path demo / before-after / cost / perf / findings tier / gate output / reviewer asks / what's next) + the review-record companion comments + draft-first workflow + folded raw evidence
     ├── research-gate.md                  when online research is required before deciding
+    ├── experiment-gate.md                step 3.5: the experiment proposal, when one is NOT required, and what the gate can and cannot check
     ├── verify-gate.md                    the per-PR "qualified?" artifact contract — `scripts/verify-gate.sh` (jq-only) VALIDATES artifacts; separate runtimes PRODUCE them
     ├── deploy.md                         putting a non-technical user's project online — fires at project finish, reuses the plain-language voice in audience-tone.md
     │
@@ -248,6 +250,7 @@ skills/project-lifecycle/
     ├── audience-tone.md                  plain-language layer for CONVERSATIONAL, user-facing output only — never touches specs / plans / journal / commits / PR bodies / ADRs
     ├── proactive-tips.md                 surfacing a genuine high-value app improvement inline, in plain language, while a non-technical user is building
     ├── retention.md                      the hot/cold document model — dual-limit caps, a coverage-discovery net, and a deterministic drain that runs at milestone close; every transition is event-triggered off the lifecycle, never a calendar chore
+    ├── roadmap-format.md                 the station-plan format contract — how a ROADMAP station declares its planned steps, what it waits on, and how position is DERIVED from closure records rather than stored; a published format with golden fixtures anyone may pull, never a runtime any consumer must adopt
     │
     │  ── release ──
     ├── release-process.md                full /release spec — artifact inventory, SemVer bump table, per-release file updates, commit + tag conventions, workflow behavior on tag push, verification checklist, failure-mode recovery, retroactive-tag flow, cadence guidance
@@ -266,6 +269,7 @@ skills/project-lifecycle/
     ├── careful-paths.md                  the exception channel out of `fast` — the `careful-paths` key, the one data block holding the three signals that need no declaration plus the tick-box word list, what a hit upgrades and what it deliberately does not, and the four sentences saying what this will miss
     ├── kickoff-confirmation.md           the one screen `fast` stops on before starting: mode line first, work-kind plus its reason, every acceptance criterion in the story's order, uncertainties as must-answer questions, and what not to use `fast` for
     ├── pre-merge-brief.md                the fixed block at the top of a `fast` PR: one guidance line plus exactly four items, the two stop counts kept separate, and the sentence saying this is not a human code review
+    ├── step-enforcement.md               which rules this skill states are actually held up by code and which are held up by nothing — one row per required step, naming its enforcer (a close-gate check, a hook, CI) or saying there is none
     ├── dependency-boundary.md            PLC depends on nothing external — the drop-in-anywhere claim, and how integration happens through open contracts instead
     ├── progressive-disclosure.md         deciding what may leave an always-loaded surface: SKILL.md is read every session, references/ are not
     ├── checkpoint-segmentation.md        splitting a checkpoint-gated chain (like /ship's outer chain) into Workflow-scriptable segments

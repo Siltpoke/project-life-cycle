@@ -240,6 +240,156 @@ _G_PLANNED = "☐"                    # ☐
 _LEGEND_GLYPHS = (_G_DONE, "▶", "◐", _G_PLANNED, "⏸", "✗")  # + ⏸ ✗
 
 
+def _clean_cell(text: str) -> str:
+    """Strip markup from ANYWHERE inside a cell, not just its ends.
+
+    The old form was `.strip().strip("`")`, which only touches the two ends of
+    the span — so `**`p13`** —— ...` kept its interior closing backtick and
+    rendered as ``p44` —— ...`` on the card.
+
+    MODULE LEVEL, AND SHARED WITH `_milestone_table_rows`, as of the station-position change. It used
+    to be nested inside `parse_roadmap`, so the two glyph readers in this file
+    normalised differently and disagreed about the same bytes. MEASURED, not
+    inferred: `| 1 | Name | what | **✅ done** |` was read as a finished milestone
+    by the fisheye path and as NOTHING by the table fallback, because only one of
+    them stripped bold before looking for the glyph. A whole-cell bold is exactly
+    what a migrating author types, and the fallback is what runs when the fisheye
+    parse yields nothing — so the disagreement was worst precisely where the
+    fallback is the only reader.
+    """
+    return re.sub(r"\*\*(.+?)\*\*", r"\1", text).replace("`", "").strip()
+
+
+def _bound_station(facts: dict, cleaned_name: str) -> str | None:
+    """The station id whose `binds-to` names this row, or None.
+
+    Compared against the CLEANED name, because that is the form every other consumer of
+    this row already works with; comparing raw would make a row bind or not depending on
+    whether somebody bolded it.
+    """
+    for sid, b in facts.get("blocks", {}).items():
+        if _clean_cell(b["binds_to"]) == cleaned_name:
+            return sid
+    return None
+
+
+def _station_facts(root: Path) -> dict:
+    """Station plans, the active list, and which steps the corpus says are closed.
+
+    NOTHING HERE PARSES EITHER FORMAT. The station-block grammar is read by
+    `scripts/lib/station-blocks.awk` and the closure grammar by
+    `scripts/closure-declaration.sh`, both shelled out to, because a Python copy of
+    either would be a second implementation of a grammar this repo already ships one
+    reader for — the encoder-divergence class the p36 design forbids by name.
+
+    ONE shell-out SITE, not two, and that is why both commands go through the local `_sh`
+    helper below. `scripts/invariants/session-card-no-network.sh` counts those sites and
+    says in its own header that moving its baseline is a design decision belonging to a
+    phase with a story. This is that phase and that story: the design defines a station's
+    position as derived from the closure declarations (the closure design), so reading them is the
+    feature rather than a convenience. That guard also refuses a mention of the module
+    name it counts even inside a docstring — deliberately, since a prose mention hides a
+    real one from its own arithmetic — which is why this paragraph does not spell it.
+
+    DEGRADES, NEVER RAISES, AND SAYS WHICH. A missing reader, an unreadable corpus or a
+    non-zero exit gives `available: False` with a reason, and the caller renders the
+    position as unknown rather than as zero. Zero is a claim; unknown is the truth when
+    the deriver could not run, and this phase exists because those two were the same
+    thing on a card.
+    """
+    here = Path(__file__).resolve().parent
+    awk_prog = here / "lib" / "station-blocks.awk"
+    extractor = here / "closure-declaration.sh"
+    corpus_lib = here / "lib" / "closure-corpus.sh"
+    roadmap = next((root / n for n in ("docs/ROADMAP.md", "ROADMAP.md")
+                    if (root / n).exists()), None)
+
+    out: dict = {"blocks": {}, "active": [], "closed": {},
+                 "available": False, "why": ""}
+    if roadmap is None:
+        out["why"] = "no ROADMAP.md"
+        return out
+    for needed in (awk_prog, extractor, corpus_lib):
+        if not needed.exists():
+            out["why"] = "reader missing: %s" % needed.name
+            return out
+
+    def _sh(argv: list[str]) -> tuple[int, str]:
+        try:
+            r = subprocess.run(argv, capture_output=True, text=True,
+                               timeout=20, cwd=str(root))
+            return r.returncode, r.stdout
+        except Exception as exc:                       # noqa: BLE001 - degrade, never raise
+            return 255, "%s: %s" % (type(exc).__name__, exc)
+
+    rc, blocks_out = _sh(["awk", "-f", str(awk_prog), str(roadmap)])
+    if rc != 0:
+        out["why"] = "station-blocks.awk exited %d" % rc
+        return out
+    for line in blocks_out.split("\n"):
+        f = line.split("\t")
+        if f[0] == "BLOCK" and len(f) >= 4:
+            out["blocks"][f[1]] = {"binds_to": f[2], "nsteps": int(f[3]), "steps": [],
+                                   # Field 6 is the RAW `depends-on` value, `none` included.
+                                   # Absent on an older parser, so it is read defensively
+                                   # rather than indexed: a reader that crashes on a shorter
+                                   # record turns a missing field into a missing card.
+                                   "depends_on": f[5] if len(f) >= 6 else ""}
+        elif f[0] == "STEP" and len(f) >= 3 and f[1] in out["blocks"]:
+            out["blocks"][f[1]]["steps"].append(f[2])
+        elif f[0] == "ACTIVE" and len(f) >= 2:
+            out["active"].append(f[1])
+
+    # The corpus half, through the shipped helper rather than a glob written here: what
+    # counts as "the corpus" is defined once, in scripts/lib/closure-corpus.sh.
+    script = (
+        '. "$1" || exit 3\n'
+        'files=$(closure_corpus_files "$2") || exit 4\n'
+        '[ -n "$files" ] || exit 0\n'
+        'closure_step_records "$3" $files\n'
+    )
+    rc, recs = _sh(["/bin/bash", "-c", script, "_", str(corpus_lib),
+                    "docs", str(extractor)])
+    if rc != 0:
+        out["why"] = "closure corpus read exited %d" % rc
+        return out
+    for line in recs.split("\n"):
+        tok = line.split("\t")[0].strip()
+        if not tok or "." not in tok:
+            continue
+        sid, _, num = tok.rpartition(".s")
+        if sid and num.isdigit():
+            out["closed"].setdefault(sid, set()).add(num)
+
+    out["available"] = True
+    return out
+
+
+def station_state(facts: dict, sid: str) -> dict:
+    """The three states, from the three sources the design gives them.
+
+    `done` is fraction-equals-one and nothing else: DISTINCT closed steps equal the
+    declared count, with the count at least 1. A step touched by two phases is one step
+    done. `doing` is the declared active list and is never inferred from a trace.
+    `future` is the difference and has no source of its own.
+    """
+    b = facts["blocks"].get(sid)
+    if b is None:
+        return {"state": "unknown", "closed": 0, "total": 0, "position": None}
+    total = b["nsteps"]
+    closed = len({n for n in facts["closed"].get(sid, set()) if n in b["steps"]})
+    if not facts["available"]:
+        return {"state": "unknown", "closed": 0, "total": total, "position": None}
+    if total >= 1 and closed == total:
+        state = "done"
+    elif sid in facts["active"]:
+        state = "doing"
+    else:
+        state = "future"
+    return {"state": state, "closed": closed, "total": total,
+            "position": "%d/%d" % (closed, total)}
+
+
 def _milestone_table_rows(md: str) -> list[tuple[str, str, str]]:
     """Every markdown-table row ANYWHERE in the doc whose LAST cell carries a
     status-legend glyph → (glyph, name, what). Structure only (never header
@@ -268,10 +418,12 @@ def _milestone_table_rows(md: str) -> list[tuple[str, str, str]]:
         # "✅ done", "▶ current"). A glyph merely mentioned mid-prose in some
         # other table's final column is not a milestone row — the structural
         # anchor the fallback needs, not just "a glyph appears somewhere".
-        glyph = next((g for g in _LEGEND_GLYPHS if cells[-1].lstrip().startswith(g)), None)
+        # `_clean_cell`, not `.lstrip()`: one normalisation for every glyph test in
+        # this file (the station-plan work). See that function for the measurement.
+        glyph = next((g for g in _LEGEND_GLYPHS if _clean_cell(cells[-1]).startswith(g)), None)
         if glyph is None:
             continue  # header / separator / non-milestone table row
-        name = re.sub(r"\*\*(.+?)\*\*", r"\1", f"{cells[0]} {cells[1]}").strip().strip("`").strip()
+        name = _clean_cell(f"{cells[0]} {cells[1]}")
         rows.append((glyph, name, cells[2]))
     return rows
 
@@ -356,7 +508,7 @@ def _cross_read(mainline_done: list[str], current: str | None) -> tuple[list[str
     return conflicts, skipped
 
 
-def parse_roadmap(md: str) -> dict:
+def parse_roadmap(md: str, facts: dict | None = None) -> dict:
     """Fact-gatherer for docs/ROADMAP.md's fisheye view.
 
     Parses by emoji prefix + positional structure only — never by matching
@@ -401,16 +553,6 @@ def parse_roadmap(md: str) -> dict:
         body = "\n".join(body_lines)
         return [p.strip() for p in body.split("·") if p.strip()] if body else []
 
-    def _clean_name(text: str) -> str:
-        """Strip markup from ANYWHERE inside a captured name, not just its ends.
-
-        The old form was `.strip().strip("`")`, which only touches the two ends
-        of the span — so `**`p13`** —— ...` kept its interior closing backtick
-        and rendered as ``p13` —— ...`` on the card. Shared by mainline,
-        backlog and doing so the three cannot disagree about the same cell.
-        """
-        return re.sub(r"\*\*(.+?)\*\*", r"\1", text).replace("`", "").strip()
-
     def _table_dicts(cells_rows: list[list[str]], declared: int) -> tuple[list[dict], int]:
         """Rows to dicts, plus a count of the rows that could not be read.
 
@@ -453,7 +595,7 @@ def parse_roadmap(md: str) -> dict:
             if len(cells) != declared:
                 unreadable += 1
                 continue
-            out.append({"name": _clean_name(cells[0]), "what": cells[1].strip(),
+            out.append({"name": _clean_cell(cells[0]), "what": cells[1].strip(),
                         "weight": cells[2].strip(), "eta": cells[3].strip()})
         return out, unreadable
 
@@ -488,6 +630,8 @@ def parse_roadmap(md: str) -> dict:
     # A station is now marked where the parser looks: a
     # doing GLYPH LEADING the name cell, the same discipline
     # `_milestone_table_rows` applies to its status cell.
+    facts = facts if facts is not None else {"blocks": {}, "active": [], "closed": {},
+                                             "available": False, "why": "not supplied"}
     doing: list[str] = []
     mainline_done: list[str] = []
     future_rows: list[list[str]] = []
@@ -510,7 +654,37 @@ def parse_roadmap(md: str) -> dict:
         # is most likely to type. Worse than a miss: the row then falls through
         # to the Future band carrying a raw `▶` in its rendered name, i.e. a
         # second focus marker in the wrong band.
-        cleaned = _clean_name(cells[0])
+        cleaned = _clean_cell(cells[0])
+        # ------------------------------------------------------------------ T7b, THE SPLIT
+        # A row some plan block BINDS TO takes its state from the derivation and from the
+        # declared active list — the glyph in its name cell plays no part at all. Every
+        # other row keeps the inclusive test below, untouched.
+        #
+        # THIS IS A SPLIT AND NOT A DELETE, and the plan says so because deleting was the
+        # first proposal. Measured on a real roadmap: most finished rows
+        # carry the done glyph INSIDE the name cell and 0 carry it leading, so removing the
+        # inclusive test zeroes `mainline_done` for all of them — and no test would have gone
+        # red, because the new mechanism is only exercised by rows that have a plan block
+        # and those 47 never will (a station id exists only where a block does).
+        #
+        # The boundary is `binds-to`, nothing else. Not the glyph, not the position in the
+        # table, not whether the row looks new.
+        sid = _bound_station(facts, cleaned)
+        if sid is not None:
+            st = station_state(facts, sid)
+            if st["state"] == "done":
+                mainline_done.append(cleaned)
+                continue
+            if st["state"] == "doing":
+                doing.append(cleaned)
+                continue
+            if st["state"] == "unknown":
+                # The deriver could not run. Not future, not done — undecidable, which this
+                # parser already has an honest bucket for.
+                undecidable += 1
+                continue
+            future_rows.append(cells)
+            continue
         glyph = next((g for g in _G_DOING if cleaned.startswith(g)), None)
         if glyph is None:
             # Finished stations leave the Future band. Two layers, and
@@ -576,6 +750,17 @@ def parse_roadmap(md: str) -> dict:
         # the name formats have no overlap, so dedup matches zero rows and stops
         # none of the double-count it was proposed to prevent.
         "mainline_done": mainline_done,
+        # Per-station derived state, emitted whether or not any station exists: an absent
+        # key and an empty one read differently to a renderer, and "no stations yet" is a
+        # real answer.
+        "stations": {
+            sid: dict(station_state(facts, sid),
+                      binds_to=_clean_cell(b["binds_to"]),
+                      depends_on=b.get("depends_on", ""))
+            for sid, b in facts.get("blocks", {}).items()
+        },
+        "station_facts_available": bool(facts.get("available")),
+        "station_facts_why": facts.get("why", ""),
         "mainline": mainline, "backlog": backlog,
         # Both emitted always, both computed from the two halves the card reads
         # independently. `crossread_skipped` is 0 far more often than not, and
@@ -794,7 +979,7 @@ def gather_card_facts(root, run, resume_runner=_run_resume, now=None):
         if p.exists():
             roadmap_md = p.read_text()
             break
-    roadmap = parse_roadmap(roadmap_md)
+    roadmap = parse_roadmap(roadmap_md, _station_facts(root))
     roadmap_has_signal = _roadmap_has_signal(roadmap)
     # Distinguish "no ROADMAP.md" from "ROADMAP.md the parser could not read" —
     # otherwise the card renders both identically (a silent-miss defect).
@@ -979,6 +1164,37 @@ def render_facts_text(f: dict) -> str:
             # without digits gets nothing from the cross-read, and this line is
             # the only way they can find that out.
             f"  crossread-skipped: {rm.get('crossread_skipped', 0)}",
+            # ------------------------------------------------------------ p36 T7c
+            # One `station:` line per plan block, and a `station-facts:` line saying
+            # whether the derivation ran at all.
+            #
+            # THE DERIVATION'S AVAILABILITY IS PRINTED WHETHER OR NOT IT SUCCEEDED. An
+            # absent line and a successful run would otherwise look the same, and the
+            # difference is the whole point of the phase: `0/3` is a claim about history,
+            # `-` is the truth when nothing could be read.
+            #
+            # `blocked-by:` AND `next:` ARE SEPARATE FIELDS. Merging them would let a
+            # reader take a dependency for a priority — a station can be blocked by work
+            # nobody plans to start, and the roadmap declares dependencies, never order
+            #. `next:` is deliberately NOT emitted here: no source in this format
+            # declares it, and inventing one from dependency order is the thing the design says
+            # this document does not do. The field is named in this comment so the next
+            # person meets the reason rather than reading the absence as an oversight.
+            *([
+                "  station-facts: available"
+                if rm.get("station_facts_available")
+                else f"  station-facts: UNAVAILABLE ({rm.get('station_facts_why') or 'no reason recorded'}) — positions below read `-`, which is not the same as 0"
+            ] if rm.get("stations") else []),
+            *([f"  stations ({len(rm['stations'])}):", *[
+                "    - %s | steps %s | %s | blocked-by: %s | binds-to: %s" % (
+                    sid,
+                    st["position"] if st.get("position") else "-",
+                    st["state"],
+                    st.get("depends_on") or "-",
+                    st.get("binds_to", ""),
+                )
+                for sid, st in sorted(rm["stations"].items())
+            ]] if rm.get("stations") else []),
         ]
     if f["sources_present"].get("roadmap_unparseable"):
         out.append("ROADMAP: (present but unrecognized layout — parser could not read it)")
