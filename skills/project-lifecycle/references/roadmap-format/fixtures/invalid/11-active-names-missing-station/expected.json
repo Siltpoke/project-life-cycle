@@ -1,0 +1,5 @@
+{
+  "valid": false,
+  "rule": "active-names-known-station",
+  "why": "The active list names a station with no plan block."
+}

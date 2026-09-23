@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from close_gate_lib import (
+    assert_fixture_is_its_own_repo,
     extract_gate_script,
     extract_self_test_script,
     make_fixture_repo,
@@ -98,6 +99,10 @@ def test_count_row_is_quiet_when_under_cap(tmp_path: Path, gate_script: str) -> 
 
 
 def _commit(repo: Path, message: str) -> None:
+    # p33 — refuse to commit into anything but this fixture. One line here covers every
+    # call site this helper serves; see close_gate_lib for why the check is on the git dir
+    # and not the top level, and why it is insurance rather than a fix for a measured path.
+    assert_fixture_is_its_own_repo(repo)
     subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
     subprocess.run(["git", "commit", "-q", "-m", message], cwd=repo, check=True, capture_output=True)
 

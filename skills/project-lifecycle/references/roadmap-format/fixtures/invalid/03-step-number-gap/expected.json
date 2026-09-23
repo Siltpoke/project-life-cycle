@@ -1,0 +1,5 @@
+{
+  "valid": false,
+  "rule": "steps-consecutive",
+  "why": "s2 is missing. A closure declaration naming ci-line.s2 would then be a dangling reference nobody could resolve."
+}

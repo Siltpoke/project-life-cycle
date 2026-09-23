@@ -72,8 +72,13 @@ Runs only when Phase 0 inventory found NO plc artifacts AND Phase 1 confirmed su
 Generate each in order. For each, check whether it already exists; if yes, propose a MERGE diff for user approval; if no, CREATE.
 
 **Close-gate scaffold — two things that must be generated together.** When writing
-`.claude/close-gate.json`, fill `test_evidence_inputs` from the detected source and test trees
-and emit `test_command` in the header-prefixed placeholder form, AND copy
+`.claude/close-gate.json`, fill `test_evidence_inputs` from the detected source and test trees,
+emit `validator_input_paths_rationale` as the OBJECT shape with a refusable placeholder --
+`{"surface_total": 0, "basis": "REPLACE_ME_HOW_YOU_COUNTED", "why": ["REPLACE_ME_WHY_THE_INPUT_SET_IS_NARROW"]}`
+(the gate REFUSES that placeholder on purpose — narrowing must be argued, and an untouched
+scaffold value that passed would make the key a formality; `surface_kept` is deliberately absent
+because the gate derives it, and `why` may be written in any language), emit `test_command` in the header-prefixed
+placeholder form, AND copy
 `references/close-gate.md` §"Evidence runner" to `scripts/gen-test-evidence.sh` (`chmod +x`)
 beside the gate. Exact template + the ambiguous-detection fallback:
 `references/init-harness.md` §"Generated close-gate manifest". Without the key the gate's

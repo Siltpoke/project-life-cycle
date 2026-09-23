@@ -148,6 +148,24 @@ grandfather; the other four should not be.
 
 `test_evidence_inputs` (optional array) switches the **test-evidence freshness** check from mtime to a **content fingerprint**. mtime is not evidence that the tests ran against the *current* code — git does not preserve mtime across a checkout, and a fresh clone / CI checkout / synced folder shuffles mtimes, so a mtime-only row false-PASSES by construction there. Declare the inputs whose change means "the tests must be re-run" (globs, e.g. `["src/**","tests/**"]`); the gate then requires the evidence file's first line to be a `# plc-gate-evidence inputs=<digest>` header that matches the current-tree digest of those inputs. **The runner must produce that header** — prepend it with the `evidence-header` subcommand: `{ close-gate.sh evidence-header; <test_command>; } | tee <test_evidence>`. **Two-part opt-in, so no adopter breaks:** an *absent* key keeps the legacy mtime check byte-identical (existing manifests are untouched), and even a declared key does nothing until the runner writes the header — a declared-but-unheaded evidence file **hard-fails** (never silently falls back to mtime) with the exact regenerate command. Inputs that match no tracked file, or a malformed value, fail closed. The digest is over git-**tracked** working-tree content (an uncommitted edit to a tracked input *is* caught; a brand-new *unstaged* file is not — stage before generating evidence), the same git-tracked convention `product_paths` uses. **`/init-harness` generates both for new adopters**: the key is filled from the detected source/test tree, the `test_command` is emitted in the header-prefixed placeholder form above, and `scripts/gen-test-evidence.sh` (§Evidence runner) is scaffolded — so a bootstrapped repo is in fingerprint mode from its first run rather than only if someone knew to turn it on. **Do not hand-write the pipeline** even when retrofitting: the documented `… | tee <file>` form ends in a bare `tee`, which exits 0 even when the step writing the header fails, silently overwriting good evidence with a broken file. Copy the runner instead. An *existing* manifest with no key is still untouched and stays on mtime, so no adopter's gate flips on upgrade.
 
+`validator_input_paths_rationale` (**object**, required whenever `test_evidence_inputs` is a non-empty array; an array of strings is the DEPRECATED shape and still passes behind a warning) is the written argument for that narrowing. Narrowing is safety-REDUCING -- it shrinks what the freshness fingerprint can see -- so the manifest must say why the narrowed set is the right one. The shape:
+
+```json
+"validator_input_paths_rationale": {
+  "surface_total": 3020,
+  "basis": "tracked-files",
+  "why": ["the narrowed set is exactly the validator's inputs; nothing else is read"]
+}
+```
+
+`surface_total` must be a JSON **number** greater than zero (a numeric string is refused). `basis` says what universe that total counts, and must be exactly one of `tracked-files` / `all-files` / `glob-set` / `explicit-path-list`. `why` is a non-empty array of non-empty strings, **free prose in any language and any script -- the gate reads none of it** and checks only that it is there.
+
+**Do not write `surface_kept`.** The gate DERIVES how many files the narrowing matches, from the same pathspec resolution the fingerprint itself uses, and a manifest that declares the member is refused. A number you cannot write is one you cannot fake and cannot leave to rot -- and the rotting is not hypothetical: this repository's own manifest stated 77 where the truth had grown to 595, with this row green over it the whole time.
+
+**What p30 removed, stated rather than silently dropped.** Until p30 the value was an array of strings and the row asserted a measurement SHAPE inside that prose: at least two ASCII digit groups plus a case-insensitive match on the English root `track`. Both predicates were language-bound, so an argument that was entirely true but spelled its numbers out, or was written in another language, or made the case without that word, was REFUSED by a hard-fail gate. And the anti-gaming strength the rule was assumed to buy was measured and was not there -- `0 0 track` satisfied it. The one property it reliably delivered, that an untouched scaffold placeholder fails, is preserved. **There is no longer any requirement to use Arabic numerals or the English word `tracked` anywhere.**
+
+**SHAPE, not truth.** The gate type-checks `surface_total` and `basis` and audits neither, and the ✓ row says so in those words. It also does not cross-check `basis` against what `test_evidence_inputs` actually is -- an author can declare `explicit-path-list` while narrowing by glob and nothing notices (filed). **Coupled to what it justifies**: with no `test_evidence_inputs`, an empty array, or a malformed value, the row does not fire at all -- there is no narrowing to argue for. A single blank glob (`["  "]`) DOES fire: that is a declared narrowing, merely a broken one. **The escape hatch is real and it is not free** -- deleting `test_evidence_inputs` silences this row and simultaneously drops the freshness check back to the legacy mtime comparison, which git does not preserve across a checkout.
+
 > **Declare inputs that cover what `test_command` actually exercises — the two must be read together, and nothing checks that they agree.** The failure is silent in *both* directions and neither is visible in the gate's output. **Under-declare** and the row greens on evidence older than the code it is trusted to guarantee: a commit touching only an undeclared path recomputes a byte-identical digest, so the ✓ prints while the evidence predates the change. **Over-declare** and the digest breaks on files the command never runs, so the ✓ certifies freshness for things nothing tested — which trains you to clear a red row by re-running the command as a reflex, and a gate cleared by reflex is worse than no gate. This is the "missing dependency" bug class every incremental build system names: Bazel calls the result *"an incorrect incremental build"*, and Gradle states the asymmetry — *"Failing to specify an input that affects the task's outputs can result in incorrect builds, while needlessly specifying inputs that do not affect the task's output can cause cache misses."* Under-declaring costs correctness; over-declaring costs time. When a suite is too slow to put in `test_command`, do **not** declare its inputs here to compensate — run it in CI and leave this row's scope honest.
 >
 > Two related traps in the runner, neither of which the gate can see:
@@ -190,30 +208,53 @@ g() { jq -r ".$1 // empty" "$M" | sed "s/{PHASE}/$PHASE/g"; }
 # sorted so ordering never perturbs the digest, then hashed as one blob. The inputs come from the
 # manifest (the canonical gate serves ANY tree — unlike a project-local variant of this gate, it cannot hardcode
 # a validator's inputs).
-evidence_digest() {
+# ONE resolution of "which tracked files does the declared narrowing match" (p30:AC3).
+#
+# It exists because check 9 now REPORTS that count and check 7 fingerprints those same files, and
+# two consumers reading the manifest separately is two implementations of the same question — the
+# drift p30:AC3 forbids and the story's Contingency pre-declares. Both callers below go through
+# here; neither re-reads `test_evidence_inputs`.
+#
+# Writes the matched paths NUL-separated to stdout, and writes NOTHING for either empty case. The
+# two empty cases are NOT the same thing and callers must still tell them apart — use
+# `evidence_inputs_declared` for that. This function deliberately does not encode which sentinel
+# belongs to which case, because the two gate homes word them differently and folding that in here
+# would make one home's wording leak into the other.
+#
+# NUL-separated because a tracked path may contain a newline; the output is consumed by a pipeline,
+# never captured into a variable, since command substitution drops NUL bytes.
+evidence_matched_files() {
+  _inputs="$(jq -r '.test_evidence_inputs[]?' "$M" 2>/dev/null)"
+  [ -n "$_inputs" ] || return 0
   # Disable globbing while splitting the pattern list: a pattern like 'src/**' must reach
   # `git ls-files` as a (recursive) PATHSPEC, not be expanded by the shell against the cwd first.
   # `set -- $LIST` under `set -f` passes them verbatim.
-  _inputs="$(jq -r '.test_evidence_inputs[]?' "$M" 2>/dev/null)"
-  # No inputs declared → emit the sentinel, do NOT proceed to `git ls-files` with an empty pathspec:
-  # an empty pathspec list means "no restriction" (matches the WHOLE tracked tree), not "match
-  # nothing", so `evidence-header` run on a manifest without test_evidence_inputs would silently hash
-  # the entire repo. check_evidence never reaches here on that path (it gates on a non-empty array),
-  # but the `evidence-header` subcommand is adopter-reachable directly.
-  [ -n "$_inputs" ] || { printf 'EMPTY-no-test-evidence-inputs-declared\n'; return 0; }
   set -f
   # shellcheck disable=SC2086
   set -- $_inputs
   set +f
+  git ls-files -z -- "$@" 2>/dev/null
+}
+# Whether the manifest declares a narrowing at all. Separate from "did it match anything", because
+# an empty pathspec list means "no restriction" (matches the WHOLE tracked tree), not "match
+# nothing" — so `evidence-header` on a manifest without test_evidence_inputs would otherwise
+# silently hash the entire repo. check_evidence never reaches that path (it gates on a non-empty
+# array), but the `evidence-header` subcommand is adopter-reachable directly.
+evidence_inputs_declared() { [ -n "$(jq -r '.test_evidence_inputs[]?' "$M" 2>/dev/null)" ]; }
+# How many tracked files the declared narrowing matches. This is the number check 9 reports, and it
+# is DERIVED rather than declared precisely so it cannot be faked or go stale (p30).
+# Counts NUL delimiters rather than lines: a path may contain a newline, and `wc -l` would then
+# over-count. Measured on BSD and GNU `tr` alike.
+evidence_kept_count() { evidence_matched_files | tr -cd '\000' | LC_ALL=C wc -c | tr -d ' '; }
+evidence_digest() {
+  evidence_inputs_declared || { printf 'EMPTY-no-test-evidence-inputs-declared\n'; return 0; }
   # Zero matches must NOT fall through to `git hash-object --stdin` on empty input: that returns the
   # FIXED empty-blob SHA e69de29b…, a constant that passes the header regex, so the row would compare
   # constant-to-constant and PASS vacuously — an adopter whose globs match nothing would silently
   # green, the exact silent-degrade this mode removes. Emit a non-hex sentinel; check_evidence rejects
   # it loudly.
-  if [ -z "$(git ls-files -z -- "$@" 2>/dev/null | tr -d '\0')" ]; then
-    printf 'EMPTY-no-test-evidence-inputs-matched\n'; return 0
-  fi
-  git ls-files -z -- "$@" 2>/dev/null \
+  [ "$(evidence_kept_count)" -gt 0 ] || { printf 'EMPTY-no-test-evidence-inputs-matched\n'; return 0; }
+  evidence_matched_files \
     | while IFS= read -r -d '' _f; do
         printf '%s %s\n' "$(git hash-object "$_f" 2>/dev/null || echo MISSING)" "$_f"
       done \
@@ -473,16 +514,190 @@ evidence_runs_ok() {
 #   • absent → LEGACY mtime check, byte-identical to before (no adopter's gate flips on upgrade). The
 #     path check is opt-in by declaring the inputs, exactly like product_paths is.
 #   • malformed (present but not a non-empty array) → fail closed, same type-guard as product_paths.
+# p30: echo a manifest value back to the author, safely, using nothing but jq.
+#
+# WHY jq AND NOT `cut`/`head`. This repository shipped `scripts/utf8-text.sh` because `cut -c`
+# truncates by BYTES and sliced a CJK title mid-character. The gates cannot source that
+# file -- the canonical one is a self-contained script an adopter copies, and reaching outside it
+# would make the gate depend on this repository. jq is already in the dependency envelope and
+# slices strings by CODEPOINT, so it solves both halves with no new dependency.
+#
+# WHY `\p{Cc}` AND NOT A PATTERN FOR ANSI SEQUENCES, measured rather than assumed. Printing
+# untrusted text containing escape sequences to a terminal is CWE-150, with live CVEs. On a fixture
+# whose escape sequence straddles the truncation point:
+#
+#     strip then truncate, this class-based stripper       -> 0 ESC bytes
+#     truncate then strip, this class-based stripper       -> 0 ESC bytes
+#     truncate then strip, a whole-CSI-pattern stripper    -> 1 ESC byte   <- the real failure
+#
+# So the load-bearing property is that the stripper matches the CHARACTER, not the sequence: a bare
+# ESC left behind by a cut is still removed. Strip-first is kept because it is easier to reason
+# about, but the order is not what makes this safe and this comment must not be read as saying so.
+#
+# `\p{Cc}` is Unicode category Control -- both the C0 range and C1. An earlier attempt spelled the
+# same class as a bracket range written with backslash-u escapes. It LOOKS right and silently
+# destroyed the text: Oniguruma does not accept `\uXXXX`, so the class degenerated into ASCII
+# ranges and ate the digits and letters this echo exists to show. It was caught by reading the
+# output, not by the expression failing -- it never failed.
+rationale_echo() {
+  jq -r --argjson n 100 '
+      .validator_input_paths_rationale
+    | ( if   type == "object" then (.why // "") | (if type == "array" then map(tostring) | join(" ") else tostring end)
+        elif type == "array"  then map(tostring) | join(" ")
+        else tostring end )
+    | gsub("\\p{Cc}"; "")
+    | if length > $n then .[0:$n] + " [truncated]" else . end
+  ' "$M" 2>/dev/null || printf '<unreadable>'
+}
 check_evidence() {
+  # MAINTAINER WARNING (the conformance design): this function now holds TWO checks, not one. Below the evidence
+  # freshness modes (fingerprint / legacy mtime) sits the `validator_input_paths_rationale` row.
+  # It is a MANIFEST check, not an evidence-file check, and it deliberately runs BEFORE the
+  # `[ -s "$EV" ]` early return — a repo whose evidence file is missing must still be told that its
+  # narrowing is unargued. If you move, guard, or early-return out of the legacy-mtime branch, the
+  # rationale row moves with you. Re-read this whole function before editing either half.
+  TEI_TYPE="$(jq -r '.test_evidence_inputs | type' "$M" 2>/dev/null || echo null)"
+  TEI_LEN="$(jq -r '.test_evidence_inputs | length' "$M" 2>/dev/null || echo 0)"
+  # --- validator_input_paths_rationale: the narrowing argument must be DECLARED, not just enforced
+  # `test_evidence_inputs` narrows what the freshness fingerprint can see. Narrowing is a
+  # safety-REDUCING choice, so the manifest must carry the argument for why the narrowed set is the
+  # right one. Content-checked, not merely present: an untouched scaffold placeholder must not
+  # satisfy it, or the key becomes a formality.
+  #
+  # p30 CHANGED WHAT IS CHECKED, AND THE REASON THE OLD RULE EXISTED IS QUOTED RATHER THAN DELETED.
+  #
+  # What was here until p30: the value was an array of strings, and the row asserted the SHAPE of a
+  # measurement argument inside that prose -- at least two ASCII digit groups, plus a case-insensitive
+  # match on the English root "track". (An even earlier version keyed on the literal digits of one
+  # repo's measurement with a proximity window, and was rejected because it punished honest
+  # re-measurement and rewarded staleness. That rejection still stands; p30 is the next notch of the
+  # same argument.)
+  #
+  # Why that rule is gone. Both predicates were language-dependent, so an honest argument written in
+  # Chinese, or with its numbers spelled out, or carrying no numbers at all, was REFUSED by a
+  # hard-fail gate. And the anti-gaming strength it was assumed to be buying was measured and is not
+  # there: `0 0 track` -- nine characters, no measurement, no argument -- satisfied it, as did
+  # `track track 00 00`. The one property it reliably delivered is that an untouched placeholder
+  # fails, and that property is preserved below.
+  #
+  # What replaces it. The checkable part moves OUT of prose and into named members, following the
+  # precedent of tools that solved this class (Bandit's `# nosec B602,B607` replaced free text with
+  # enumerated codes; SPDX replaced license prose with language-neutral tokens). The prose member
+  # `why` is free text in ANY language and is checked for PRESENCE only -- the gate asserts nothing
+  # about what it says, because every policy tool surveyed that gates on justification prose
+  # (SARIF, Snyk, Dependabot) enforces presence and never content.
+  #
+  # And `surface_kept` is DERIVED, not declared -- see evidence_kept_count(). A number the author
+  # cannot write is a number they cannot fake and cannot leave to rot. This was not the original
+  # design: it was added after a review found that declared numbers drift silently, and after the
+  # repository that ships this gate was found stating 77 where the truth was 595, with this very row
+  # green over it.
+  #
+  # WHAT THIS ROW STILL DOES NOT DO, stated here so the ✓ text and this comment cannot drift apart:
+  # it does not verify `surface_total`, which remains a declared figure only type-checked; it does
+  # not cross-check `basis` against what `test_evidence_inputs` actually is (filed); and it
+  # cannot tell a fresh measurement from a stale copy of `surface_total`.
+  #
+  # Gated on a present, NON-EMPTY `test_evidence_inputs` (the conformance design): with no narrowing declared there
+  # is no narrowing to argue for, so nothing may be demanded. A malformed value (present but not an
+  # array) falls through to the type-guard at the bottom of this function, which fails closed --
+  # and NOT because nothing was narrowed: somebody writing `"test_evidence_inputs": "src/**"` is
+  # plainly trying to. The value is rejected as malformed, which names the actual problem.
+  # SEQUENCING, measured, because it reads as silence and is not: that type-guard sits BELOW the
+  # `[ -s "$EV" ]` early return, so a repo with no evidence file yet is told about the missing
+  # evidence first and about the malformed value on its next run. Red either way.
+  if [ "$TEI_TYPE" = array ] && [ "${TEI_LEN:-0}" -gt 0 ]; then
+    RAT_TYPE="$(jq -r '.validator_input_paths_rationale | type' "$M" 2>/dev/null || echo null)"
+    # p30 (review): the help/note tail below was written out in full in EACH of check 9's three
+    # refusal rows, in both gate homes -- six copies of the same ~500 characters. It had already
+    # drifted once: two copies carried the "(here: N files)" parenthetical and the third did not,
+    # and nothing distinguishes the three branches' tails from each other, so a reviewer found the
+    # drift rather than a test. Built once here instead. This is INTRA-file only; the two homes stay
+    # separate artifacts, and cross-home agreement is what test_gate_conformance.py holds.
+    RAT_SHAPE='"validator_input_paths_rationale": {"surface_total": <number greater than 0>, "basis": "tracked-files"|"all-files"|"glob-set"|"explicit-path-list", "why": ["<free prose, any language>"]}'
+    RAT_TAIL="help: paste this and edit the numbers -- $RAT_SHAPE -- and do NOT write surface_kept, this gate derives it (here: $(evidence_kept_count) files) | note: deleting test_evidence_inputs silences this row, and it ALSO drops the freshness check back to the legacy mtime comparison, which false-PASSES by construction in a fresh clone or CI. NOTE: this gate no longer requires Arabic numerals or the English word \"tracked\" anywhere -- that rule was removed in p30 because it refused honest arguments written in other languages, and because it was measured to pass strings that say nothing. Write why in whatever language you think in; this gate reads none of it."
+    case "$RAT_TYPE" in
+      object)
+        # The declared members, each read by name. Every jq read is guarded: a read that exits
+        # non-zero under `set -euo pipefail` would abort the whole gate with a raw trace instead of
+        # printing this row, which is the class the legacy branch's `|| RAT_JOINED="__ERR__"` guards.
+        RAT_TOTAL_TYPE="$(jq -r '.validator_input_paths_rationale.surface_total | type' "$M" 2>/dev/null || echo null)"
+        RAT_TOTAL="$(jq -r '.validator_input_paths_rationale.surface_total // 0' "$M" 2>/dev/null || echo 0)"
+        RAT_BASIS="$(jq -r '.validator_input_paths_rationale.basis // ""' "$M" 2>/dev/null || echo "")"
+        # "an array of strings, at least one of which says something" -- in ONE jq expression, so the
+        # sub-conditions cannot drift apart across three shell reads.
+        #
+        # NOT "every element non-empty", and the difference was found by dogfooding rather than by
+        # design: this repository's own `why` is a multi-line prose block that uses empty strings as
+        # PARAGRAPH SEPARATORS, and the first version of this rule refused it. The property that
+        # actually matters is that the value says something, so `["", "", "x"]` passes and
+        # `["", "  "]` does not. Elements must still all be strings -- a number in there is a
+        # malformed value, not a formatting choice.
+        RAT_WHY_OK="$(jq -r '.validator_input_paths_rationale.why | if type=="array" and length>0 and (all(.[]; type=="string")) and (any(.[]; gsub("\\s";"")|length>0)) then "yes" else "no" end' "$M" 2>/dev/null || echo no)"
+        RAT_HAS_KEPT="$(jq -r 'if (.validator_input_paths_rationale|has("surface_kept")) then "yes" else "no" end' "$M" 2>/dev/null || echo no)"
+        RAT_MISSING=""
+        # A declared surface_kept is REFUSED rather than ignored. Accepting-and-ignoring it would let
+        # a stale copied number sit in the manifest looking authoritative while nothing reads it --
+        # which is exactly the 77-vs-595 shape this change exists to remove.
+        [ "$RAT_HAS_KEPT" = yes ] && RAT_MISSING="$RAT_MISSING surface_kept-is-derived-remove-it"
+        [ "$RAT_TOTAL_TYPE" = number ] || RAT_MISSING="$RAT_MISSING surface_total-must-be-a-json-number"
+        if [ "$RAT_TOTAL_TYPE" = number ]; then
+          # `jq` may print a float; compare in jq rather than in `[ ]`, which is integer-only.
+          [ "$(jq -r '.validator_input_paths_rationale.surface_total | if . > 0 then "yes" else "no" end' "$M" 2>/dev/null || echo no)" = yes ] \
+            || RAT_MISSING="$RAT_MISSING surface_total-must-be-greater-than-zero"
+        fi
+        case "$RAT_BASIS" in
+          tracked-files|all-files|glob-set|explicit-path-list) ;;
+          *) RAT_MISSING="$RAT_MISSING basis-must-be-one-of-tracked-files|all-files|glob-set|explicit-path-list" ;;
+        esac
+        [ "$RAT_WHY_OK" = yes ] || RAT_MISSING="$RAT_MISSING why-must-be-a-non-empty-array-of-non-empty-strings"
+        if [ -z "$RAT_MISSING" ]; then
+          ok "validator_input_paths_rationale: surface_kept=$(evidence_kept_count) files, DERIVED by this gate from the declared pathspecs; surface_total=$RAT_TOTAL and basis=$RAT_BASIS are DECLARED figures this gate only type-checked, not audited; why is free prose in any language and is checked for presence only"
+        else
+          bad "validator_input_paths_rationale [check9-object] declares a narrowing, so it must carry the argument for it | what this manifest has: $(rationale_echo) | what is missing:$RAT_MISSING | $RAT_TAIL"
+        fi
+        ;;
+      array)
+        # LEGACY SHAPE. Still accepted, deliberately and for a stated window: this repository is the
+        # only KNOWN runner of this check, but the canonical gate is copied by adopters nobody can
+        # enumerate -- unknown population, not zero population. The window's end condition is filed
+        # as an open backlog item, because "for a window" with no trigger is an open-ended commitment dressed as a
+        # bounded one.
+        #
+        # `|| RAT_JOINED="__ERR__"`: `jq join` EXITS NON-ZERO (not just empty) when the array holds a
+        # non-string element -- `echo '{"r":[1,{"a":1}]}' | jq -r '.r|join(" ")'` exits 5 -- and under
+        # `set -euo pipefail` a bare assignment would abort the whole gate with a raw jq trace instead
+        # of printing this row. The sentinel routes it into the shape check, where zero numbers and no
+        # "track" fail closed.
+        RAT_JOINED="$(jq -r '.validator_input_paths_rationale | join(" ")' "$M" 2>/dev/null)" || RAT_JOINED="__ERR__"
+        RAT_NUM_COUNT="$(printf '%s' "$RAT_JOINED" | grep -oE '[0-9]+' 2>/dev/null | wc -l | tr -d ' ')" || RAT_NUM_COUNT=0
+        if [ "$RAT_JOINED" != "__ERR__" ] && [ "${RAT_NUM_COUNT:-0}" -ge 2 ] && printf '%s' "$RAT_JOINED" | grep -qiE 'track'; then
+          # DEPRECATION, NOT REMOVAL: this must never touch $fail. A warning that fails the build is
+          # a removal wearing a warning's words. `warn` is warn-only by construction (see its
+          # definition), and the test for this row asserts on the row's TYPE, not on the substring --
+          # this repository has measured an entire suite staying green while a row flipped from bad
+          # to warn, because every assertion keyed on whether the line appeared.
+          warn "[p30-deprecated-array-shape] validator_input_paths_rationale is the DEPRECATED array-of-strings shape. It still passes, and its old rule still applies to it (at least two ASCII digits plus the English word \"track\") -- which is the rule p30 replaced because it refuses honest arguments written in other languages. Migrate to the object shape -- paste this and edit the numbers: \"validator_input_paths_rationale\": {\"surface_total\": <number>, \"basis\": \"tracked-files\", \"why\": [\"<your existing prose, unchanged, in any language>\"]}. Do not add surface_kept; this gate derives it (here: $(evidence_kept_count) files)"
+        else
+          bad "validator_input_paths_rationale [check9-legacy] is the deprecated array shape and does not satisfy even that shape own rule | what this manifest has: $(rationale_echo) | what is missing: at-least-two-ascii-digits-and-the-english-word-track -- which is precisely the language-bound rule you should stop trying to satisfy | $RAT_TAIL"
+        fi
+        ;;
+      *)
+        # Neither object nor array -- including absent (jq prints "null"). Named as malformed rather
+        # than silently treated as "no narrowing to argue for": the manifest DID declare a narrowing
+        # (this branch is gated on that), so the argument is owed.
+        bad "validator_input_paths_rationale [check9-type] declares a narrowing but the value is $RAT_TYPE | what this manifest has: $(rationale_echo) | what is missing: the-value-must-be-an-object -- an array of strings is the deprecated shape and still works | $RAT_TAIL"
+        ;;
+    esac
+  fi
   EV="$(g test_evidence)"; REQ="$(jq -r '.test_runs_required // 1' "$M")"
   # Absent/empty test_evidence is a HARD FAIL, not a warn-skip — byte-identical to the pre-existing
   # inline blocks (an absent key gave EV="", `[ -s "" ]` false, then bad). Do NOT downgrade this to
   # a skip: a manifest with a test_command but no evidence path is a misconfiguration the gate must
   # surface, and a silent pass here is the vacuous-pass-on-absent-key defect this file guards against.
   [ -s "$EV" ] || { bad "stale/missing test-evidence — run: $(g test_command)"; return 0; }
-  TEI_TYPE="$(jq -r '.test_evidence_inputs | type' "$M" 2>/dev/null || echo null)"
   REGEN="{ close-gate.sh evidence-header; $(g test_command); } | tee $EV"
-  if [ "$TEI_TYPE" = array ] && [ "$(jq -r '.test_evidence_inputs | length' "$M" 2>/dev/null || echo 0)" -gt 0 ]; then
+  if [ "$TEI_TYPE" = array ] && [ "${TEI_LEN:-0}" -gt 0 ]; then
     EVDIG="$(sed -n '1s/^# plc-gate-evidence inputs=\([0-9a-f]\{40,64\}\)[[:space:]]*$/\1/p' "$EV" 2>/dev/null)"
     NOWDIG="$(evidence_digest)"
     if [ "${NOWDIG#EMPTY-}" != "$NOWDIG" ]; then

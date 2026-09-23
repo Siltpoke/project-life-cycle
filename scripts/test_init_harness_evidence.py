@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from close_gate_lib import (
+    _git,
     extract_evidence_runner_script,
     extract_gate_script,
     extract_init_harness_manifest,
@@ -336,4 +337,133 @@ def test_unheaded_evidence_hard_fails_instead_of_falling_back(
     assert MTIME_MARK not in res.stdout, "unheaded evidence silently fell back to mtime"
     assert "plc-gate-evidence" in res.stdout, (
         f"gate did not name the missing header / regenerate command:\n{res.stdout}"
+    )
+
+
+# --- p37:AC5 ---------------------------------------------------------------------------------
+# The scaffolded `validator_input_paths_rationale` placeholder must FAIL the gate, and nothing else
+# in the generated template may fail with it. Two claims in one run, and the second is the one that
+# is easy to lose: a test asserting only "check 9 is red" would stay green if the template had also
+# broken three other rows.
+
+RATIONALE_KEY = "validator_input_paths_rationale"
+
+
+def _template_repo(manifest: dict, tmp_path: Path, gate_script: str) -> Path:
+    """A repo configured EXACTLY as /init-harness prescribes, driven to the state a first real
+    cadence task reaches: the product tree and the journal land in the branch range, a `docs:`
+    subject exists, and the evidence file carries a header the gate itself produced."""
+    repo = make_fixture_repo(tmp_path, manifest, {"README.md": "seed\n"})
+    files = {
+        "src/app.py": "print('hi')\n",
+        "tests/test_app.py": "def test_ok() -> None:\n    assert True\n",
+        manifest["journal"]: (
+            "# Journal\n\n## FACT — a scaffolded project's first task\n\n"
+            "- **Date:**     2026-08-25\n- **Decision:** x\n- **Why:**      x\n"
+            "- **Backing:**  x\n\n## Plan deviations\n\n- none\n"
+        ),
+    }
+    for rel, body in files.items():
+        target = repo / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body, encoding="utf-8")
+    # ORDER MATTERS and it is not cosmetic: the product-tree row reads the HEAD COMMIT ALONE
+    # (`git diff-tree ... HEAD`), while the `docs:` row scans the whole branch RANGE. A `docs:`
+    # commit on top therefore turns the product-tree row red for a project that did ship product
+    # code. Measured, not reasoned -- the first version of this fixture had them the other way and
+    # produced exactly that second red row.
+    _git(repo, "add", "--", str(manifest["journal"]))
+    _git(repo, "commit", "-qm", "docs: journal")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "feat: the first task")
+    header = _digest_via_gate(repo, gate_script)
+    (repo / manifest["test_evidence"]).write_text(header + "all tests passed\n", encoding="utf-8")
+    return repo
+
+
+def test_the_scaffolded_placeholder_is_the_only_thing_the_gate_refuses(
+    generated_manifest: dict, gate_script: str, tmp_path: Path
+) -> None:
+    repo = _template_repo(generated_manifest, tmp_path, gate_script)
+    res = run_gate(repo, gate_script, "task", "p37")
+    failing = [ln for ln in res.stdout.splitlines() if ln.startswith("\u2717")]
+    assert len(failing) == 1, (
+        "a freshly scaffolded project must fail on the unfilled rationale and on NOTHING else --\n"
+        "any other red row is a regression in the generated template, not an adopter's mistake.\n"
+        + "\n".join(failing)
+    )
+    assert RATIONALE_KEY in failing[0], f"the one failing row is not check 9's:\n{failing[0]}"
+
+
+def test_the_scaffolded_placeholder_cannot_satisfy_the_shape_check(generated_manifest: dict) -> None:
+    """Asserted on the VALUE, independently of any gate run: the placeholder must break at least one
+    of the object shape's rules. If a future placeholder ever satisfies them, the doc's own
+    instruction is to change the placeholder rather than the check -- this is what would notice.
+
+    p30 RE-POINTED THIS, and what it used to assert is worth keeping in view: that the placeholder
+    carried neither two ASCII digits nor the English word "track". Both of those were requirements
+    on the author's PROSE, and p30 removed them because they refused honest arguments written in
+    other languages. The placeholder is now an object, and what makes it unsatisfiable is that
+    `surface_total` is 0 (the gate wants greater than zero) and `basis` is not in the enum. The
+    property being asserted is unchanged: the scaffolded value must not pass.
+    """
+    assert RATIONALE_KEY in generated_manifest, (
+        f"the generated template does not emit {RATIONALE_KEY} at all. Measured as a mutant: with "
+        f"the key deleted the gate still fails (on the MISSING branch instead of the placeholder "
+        f"branch), so the one-failing-row assertion above cannot notice this -- which is why the "
+        f"key's presence is asserted here, on the value, and not only through a gate run."
+    )
+    value = generated_manifest[RATIONALE_KEY]
+    assert isinstance(value, dict), (
+        f"{RATIONALE_KEY} must be scaffolded as the OBJECT shape (an array is the deprecated form "
+        f"and a new adopter must not be started on it): {value!r}"
+    )
+    assert "surface_kept" not in value, (
+        f"the scaffold must NOT emit surface_kept -- the gate derives it, and a scaffolded member "
+        f"the gate refuses would teach an adopter to write it: {value!r}"
+    )
+    assert value.get("surface_total") == 0, (
+        f"surface_total must be scaffolded as 0 so the gate refuses it as not-greater-than-zero: "
+        f"{value!r}"
+    )
+    assert value.get("basis") not in ("tracked-files", "all-files", "glob-set", "explicit-path-list"), (
+        f"basis must be scaffolded OUTSIDE the enum so the gate refuses it: {value!r}"
+    )
+    joined = " ".join(str(v) for v in (value.get("basis"), *(value.get("why") or [])))
+    assert "REPLACE_ME" in joined, f"the scaffolded value must be an unmissable marker: {joined!r}"
+    assert isinstance(value.get("why"), list) and value["why"], (
+        f"why must be scaffolded as a non-empty array so the only failures are the intended two: "
+        f"{value!r}"
+    )
+
+
+# --- p37:AC6 ---------------------------------------------------------------------------------
+# Documented where an adopter looks. Three tracked files, each of which read ZERO occurrences of
+# the key before this phase. Asserted against the tracked bytes, not against a rendered page.
+
+COMMANDS_INIT = ROOT / "commands/init-harness.md"
+
+
+def test_the_key_is_documented_where_an_adopter_looks() -> None:
+    for path, why in (
+        (GATE_MD, "the gate's own reference is where a manifest key is looked up"),
+        (INIT_MD, "the scaffold's reference is where a new adopter reads what was generated"),
+        (COMMANDS_INIT, "the command page is what a person reads before running /init-harness"),
+    ):
+        text = path.read_text(encoding="utf-8")
+        assert RATIONALE_KEY in text, f"{path.relative_to(ROOT)} does not name the key -- {why}"
+
+
+def test_the_gate_reference_shows_a_real_example_not_just_the_name() -> None:
+    """Naming a key an adopter cannot copy is not documentation. The example has to be one the
+    check would actually accept, so this asserts the SHAPE the check wants rather than a literal
+    sentence -- pinning the sentence would rot the moment the numbers are re-measured."""
+    import re
+
+    text = GATE_MD.read_text(encoding="utf-8")
+    para = [ln for ln in text.splitlines() if RATIONALE_KEY in ln and "tracked" in ln]
+    assert para, f"{GATE_MD.name} names the key but shows no tracked-surface example"
+    assert any(len(re.findall(r"\d+", ln)) >= 2 for ln in para), (
+        "the documented example carries fewer than two numbers, so it is an example of a value the "
+        "gate would REFUSE"
     )

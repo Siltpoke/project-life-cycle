@@ -82,9 +82,29 @@ run_lychee() {
   ( cd "$WORK" && "$lychee" $LYCHEE_ARGS_COMMON "$LYCHEE_TARGET" "$LYCHEE_TARGET_HIDDEN" ) 2>&1 | tail -3
 }
 
+# `--container-daemon-socket -` DISABLES mounting the host's Docker socket into the container,
+# and without it this script does not run at all on a Docker Desktop host. Measured 2026-09-03:
+#
+#     failed to start container: error while creating mount source path
+#     '/host_mnt/<your home>/.docker/run/docker.sock': operation not supported
+#
+# (the real message spells your home directory out; it is written with a placeholder here
+# because a home-directory path does not belong in a tracked file)
+#
+# Docker Desktop's socket lives under the user's home at a path its file-sharing layer will not
+# bind-mount, so `Set up job` dies before any step runs. THE FAILURE LOOKS LIKE A RESULT: act
+# printed `❌ Failure - Set up job`, the script printed its normal summary, and the test-tally
+# line was simply EMPTY -- a ten-second "run" that reported like a finished one. That is the
+# shape this repo keeps filing, so the count is not the reassuring part; the tallies are.
+#
+# Removing the mount costs nothing here: `.github/workflows/validate.yml` never talks to a Docker
+# daemon, so nothing in the job can want the socket. If a step ever does, this flag is where to
+# look -- and the answer then is to make that step's need explicit, not to re-add a mount whose
+# only current effect is to break the run on the host it is most often used from.
 echo "=== act: the real workflow, as uid 1000 rather than root ==="
 ( cd "$WORK" && act pull_request -j validate \
     -P ubuntu-latest=catthehacker/ubuntu:act-latest \
+    --container-daemon-socket - \
     --container-options "--user 1000" ) > "$OUT" 2>&1
 rc=$?
 

@@ -1,0 +1,5 @@
+{
+  "valid": false,
+  "rule": "deps-acyclic",
+  "why": "a → b → c → a. The case a pairwise checker passes. (This fixture also trips row-bound-at-most-once; the declared rule is the cycle, and a runner must confirm the cycle is among the reasons, not merely that it was rejected.)"
+}

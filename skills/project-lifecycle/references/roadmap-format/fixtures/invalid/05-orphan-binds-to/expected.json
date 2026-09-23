@@ -1,0 +1,5 @@
+{
+  "valid": false,
+  "rule": "binds-to-resolves",
+  "why": "binds-to matches no mainline row. This is the cost of text binding, and the reason it is acceptable: the break is LOUD, unlike the silent text-as-identity breakage this format's research found elsewhere."
+}

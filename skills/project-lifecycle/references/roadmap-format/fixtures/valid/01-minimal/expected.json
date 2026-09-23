@@ -1,0 +1,10 @@
+{
+  "stations": [
+    "ci-line"
+  ],
+  "doing": [
+    "ci-line"
+  ],
+  "note": "One station, one plan block, one active entry. The baseline every invalid case is a single mutation away from.",
+  "valid": true
+}

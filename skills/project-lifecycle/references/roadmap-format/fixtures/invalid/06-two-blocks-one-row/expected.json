@@ -1,0 +1,5 @@
+{
+  "valid": false,
+  "rule": "row-bound-at-most-once",
+  "why": "Two distinct ids bind the same row; position would be ambiguous."
+}

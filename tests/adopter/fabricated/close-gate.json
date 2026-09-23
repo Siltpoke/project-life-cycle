@@ -2,10 +2,18 @@
   "_comment": "The minimal close-gate manifest an adopter has after bootstrap. It DELIBERATELY omits user_story_glob and closure_declaration -- those omissions are what make close-gate.sh's two adopter-only branches reachable. Adding either key silently disarms half this fixture.",
   "phase_docs_glob": "docs/specs/*-design.md",
   "plan_glob": "docs/plans/*.md",
-  "product_paths": ["src"],
+  "product_paths": [
+    "src"
+  ],
   "_comment_test_command": "It writes THROUGH {EVIDENCE_FILE}, exactly as the shipped .claude/close-gate.json.example does -- gen-test-evidence.sh refuses a runner that writes to its own report file instead of through the placeholder. No python3 here on purpose, so the payload is an echo rather than validate.py.",
   "test_command": "{ bash scripts/close-gate.sh evidence-header {SET}; echo adopter-stub; } | tee {EVIDENCE_FILE}",
   "test_evidence": ".adopter/.last-test-run",
-  "test_evidence_inputs": ["src"],
+  "test_evidence_inputs": [
+    "src"
+  ],
+  "_comment_validator_input_paths_rationale": "A FILLED value, not the REPLACE_ME placeholder /init-harness scaffolds. This fixture stands in for an adopter who bootstrapped AND did the one thing the scaffolded placeholder exists to make them do -- writing the argument. Planting the placeholder here would model an adopter who ignored a red row, which is a different fixture and not the one this file is.",
+  "validator_input_paths_rationale": [
+    "1 tracked file under src of 6 in the repo -- src IS the whole product surface here, so the narrowed set and the product tree are the same set"
+  ],
   "invariants": []
 }

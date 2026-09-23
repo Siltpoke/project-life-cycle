@@ -27,13 +27,39 @@ DATA=skills/project-lifecycle/references/careful-paths.md
 command -v git >/dev/null 2>&1 || { printf 'COULD NOT RUN: git is not on PATH\n' >&2; exit 3; }
 command -v jq  >/dev/null 2>&1 || { printf 'COULD NOT RUN: jq is not on PATH\n' >&2; exit 3; }
 
-# A GIT HOOK RUNS WITH GIT_DIR SET, AND GIT_DIR OVERRIDES `-C`.
+# GIT_DIR OVERRIDES `-C`, SO THE ENVIRONMENT IS CLEARED BEFORE ANY FIXTURE IS BUILT.
 #
-# This is proved rather than guessed. With GIT_DIR exported -- exactly what
-# git does for every hook process, including the pre-push hook that runs this gate -- a fixture
-# doing `git init <tmp>` followed by `git -C <tmp> commit` writes the commit into THE REPOSITORY
-# THE HOOK IS RUNNING FOR: the fixture's tree lands on that repository's checked-out branch, and
-# every file already on that branch comes out as a deletion.
+# p33 CORRECTION. This block used to open with "A GIT HOOK RUNS WITH GIT_DIR SET, AND GIT_DIR
+# OVERRIDES `-C`" and continue "with GIT_DIR exported -- exactly what git does for every hook
+# process, including the pre-push hook that runs this gate". The old wording is quoted rather than
+# deleted, because deleting it would leave everything below it unsupported and make a deliberate
+# correction look like an oversight.
+#
+# THE SECOND CLAUSE IS TRUE AND REPRODUCIBLE. With GIT_DIR set, a fixture doing `git init <tmp>`
+# followed by `git -C <tmp> commit` writes the commit into the repository GIT_DIR names. Measured
+# end to end: the decoy's HEAD moved, the fixture's tree landed on its branch, and every real file
+# came out as a deletion.
+#
+# THE FIRST CLAUSE IS FALSE. Measured 2026-08-31 on git 2.50.1 (Apple Git-155) across pre-commit,
+# prepare-commit-msg, commit-msg, post-commit, pre-push and post-checkout: no hook type exports
+# GIT_DIR or GIT_WORK_TREE. Commit-family hooks export GIT_INDEX_FILE (relative); pre-push exports
+# only GIT_EDITOR, GIT_EXEC_PATH and GIT_PREFIX. Nothing in this repository exports it either: the
+# chain is pre-push -> close-gate-prepush.sh -> close-gate.sh -> invariants, and the only variable
+# close-gate.sh exports is AC_MERGE_BASE. The proof the old wording cited,
+# `scratchpad/prove_gitdir.sh`, no longer exists; what it most plausibly established is the
+# conditional, with the antecedent assumed -- a claim wider than its mechanism, inside a fix
+# written for exactly that class.
+#
+# WHAT THAT INCIDENT ACTUALLY WAS IS UNKNOWN, AND SAID SO. Two delete-everything commits really did land on
+# 2026-08-19 and were reset. The reflog no longer holds them and the scratchpad proofs are gone.
+# Naming a mechanism now would produce a confident record nobody would re-check, so the question is
+# left open. Measured in the same session: with BOTH protections below removed and a realistic
+# environment, the decoy's HEAD does not move -- the danger is reachable only if something exports
+# GIT_DIR, and nothing on this path does.
+#
+# THIS GUARD THEREFORE STAYS AS INSURANCE, AND IS LABELLED AS INSURANCE -- not as the fix for a
+# demonstrated failure path. It costs a few milliseconds and it is the only thing standing between
+# an unidentified injection vector and this repository's history.
 #
 # It also defeats the obvious guard. `git -C <tmp> rev-parse --show-toplevel` still answers <tmp>,
 # because the worktree follows the cwd while the commit follows GIT_DIR, so an assertion on the top

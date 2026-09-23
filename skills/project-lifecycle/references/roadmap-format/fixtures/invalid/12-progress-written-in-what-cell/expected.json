@@ -1,0 +1,5 @@
+{
+  "valid": false,
+  "rule": "no-stored-position",
+  "why": "A hand-written position in the table's `what` cell, wrapped in a language the checker was never taught. A scanner looking for the English words done/position/progress matches none of it and passes while a position is very much stored; face 2 catches it because it scans for the SHAPE `N/M`, not for words. The wrapper is not Chinese because this project bans CJK in shipped files. It is Cyrillic now rather than English: rendering it in English would have deleted the only empirical case behind the language-neutrality claim and left the regex vouching for itself."
+}

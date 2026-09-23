@@ -1,0 +1,5 @@
+{
+  "valid": false,
+  "rule": "deps-resolve",
+  "why": "depends-on names an id no block declares."
+}

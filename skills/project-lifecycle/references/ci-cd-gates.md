@@ -124,7 +124,7 @@ AI agents tend to over-generate "fix" attempts when CI fails — try lint fix, r
 
 | Trigger | Signal | Action |
 |---|---|---|
-| CI workflow refuses to start | GitHub web UI shows red ✗ with body `The job was not started because recent GitHub Actions payments have failed or your spending limit needs to be increased` | switch workflow to `workflow_dispatch` dormant + run the 3×-green protocol locally |
+| CI workflow refuses to start | GitHub web UI shows red ✗ with body `The job was not started because recent account payments have failed or your spending limit needs to be increased` | switch workflow to `workflow_dispatch` dormant + run R5 locally |
 | Copilot review job aborts mid-run | PR conversation shows `Copilot stopped work ... due to an error` linking to the same billing message | drop Copilot loop + dispatch a general-purpose reviewer stand-in (per `references/reviewer-brief.md`) |
 | Self-hosted runner registration fails | `api.github.com/actions/runner-registration` returns `404` | Actions is disabled at the account; same fallback applies |
 
@@ -183,6 +183,72 @@ jobs:
 - **Traceability**: the spec lives at the conventional location, baked in YAML, version-controlled. Restoration is a 4-line `on:` block edit, not a re-write.
 - **No PR pollution**: workflow_dispatch doesn't auto-trigger on push or PR, so there's no perpetually-red `test (pull_request)` check. PR status reads cleanly.
 - **Manual triggering still possible**: if billing returns intermittently, owner can click "Run workflow" in GH Actions UI to do a one-off validation without code changes.
+
+### Putting the state on record (example snippet — copy it, PLC does not ship it)
+
+`/catchup` renders a CI row from `.claude/ci-status.json` (p40). PLC **reads** that file and never
+writes it, because R1 forbids forge-specific code anywhere in PLC — a producer under PLC's own
+`scripts/` would satisfy "the card makes no network call" while violating the intent. So the
+producer is yours: copy this into your own tooling and run it when you want the card to stop saying
+`absent`. Documentation is not a dependency. Tracking: an open backlog item.
+
+```python
+# Records what THIS machine saw about ONE commit at ONE moment. Not a CI client.
+# Run it yourself; nothing in PLC calls it.
+import json, subprocess, sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+def observe(root: Path, sha: str) -> dict | None:
+    def gh(*args):                       # a timeout is not optional: see LIMIT 3
+        return subprocess.run(["gh", *args], capture_output=True, text=True, timeout=20)
+    r = gh("run", "list", "--commit", sha, "--limit", "1", "--json", "databaseId,conclusion,url")
+    if r.returncode or not r.stdout.strip() or not (runs := json.loads(r.stdout)):
+        return None                      # no run for this commit is not evidence of anything
+    run = runs[0]
+    j = gh("api", f"repos/{{owner}}/{{repo}}/actions/runs/{run['databaseId']}/jobs")
+    if j.returncode or not (jobs := json.loads(j.stdout).get("jobs")):
+        return None
+    never_started = run["conclusion"] == "failure" and not jobs[0].get("steps")
+    state = ("unknown" if never_started else
+             {"success": "green", "failure": "red"}.get(run["conclusion"], "unknown"))
+    art = {"schema": "plc.ci-status/1", "sha": sha, "state": state,
+           "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+           "detail": "job never started" if never_started else f"concluded {run['conclusion']}",
+           "source": "gh", "url": run.get("url")}
+    (root / ".claude").mkdir(parents=True, exist_ok=True)
+    (root / ".claude" / "ci-status.json").write_text(json.dumps(art, indent=2) + "\n")
+    return art
+
+if __name__ == "__main__":
+    root = Path(sys.argv[1] if len(sys.argv) > 1 else ".")
+    sha = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"],
+                         capture_output=True, text=True).stdout.strip()
+    print(observe(root, sha) or "no run for this commit; nothing recorded")
+```
+
+**A blocked run is recorded `unknown`, never `red`.** Nothing was learned about the commit, and
+"red" reports the code as failing when no code ran — which is the outcome this page already forbids
+by name two sections up.
+
+**Three limits, measured rather than reasoned. Read them before trusting the snippet.**
+
+1. **`conclusion: failure` does not mean the code failed.** `gh run list` reported it for three
+   consecutive runs on this repo that never executed at all.
+2. **The shape is not the whole answer, and neither is the text.** Two unrelated blocked repos
+   produced two *different* structured shapes for the same cause, and only the annotation text
+   explained both. But the text is not stable either: this page quoted the message as
+   *"recent **GitHub Actions** payments have failed"* until 2026-08-31, when a live run
+   (a zero-step run, 2s) returned *"recent **account** payments have failed"* — corrected in
+   the table above. **A matcher built on either signal alone will be wrong somewhere**; the snippet
+   uses the shape because it fails toward `unknown`, which is the safe direction.
+3. **`gh` has no request timeout of its own** (`cli/go-gh`'s `Timeout` defaults to zero). A
+   routable-but-silent host hung a call past ten seconds. The `timeout=20` above is what
+   keeps that out of anything interactive — do not drop it.
+
+**The open question that item leaves open, restated rather than answered:** whether a snippet nobody
+copies differs meaningfully from no producer at all. Same question asked of every "an adopter
+would see X" claim here. If you run this, say so in that item — that is its exit criterion.
 
 ### Local 3×-green verify protocol (the substitute for CI runs)
 

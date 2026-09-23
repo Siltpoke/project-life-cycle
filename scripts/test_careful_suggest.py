@@ -31,8 +31,18 @@ def block() -> dict:
 def _clean_env() -> dict:
     """The environment minus every GIT_* variable that redirects where git reads and writes.
 
-    A git hook exports GIT_DIR (and friends), and GIT_DIR beats `-C`. Any fixture spawned from a
-    hook inherits it, so `git -C <tmp> commit` lands in the real repository.
+    p33 CORRECTION. This docstring used to read: "A git hook exports GIT_DIR (and friends), and
+    GIT_DIR beats `-C`. Any fixture spawned from a hook inherits it, so `git -C <tmp> commit` lands
+    in the real repository." The second sentence reproduces. The FIRST DOES NOT: measured
+    2026-08-31 on git 2.50.1 across pre-commit, prepare-commit-msg, commit-msg, post-commit,
+    pre-push and post-checkout, no hook type exports GIT_DIR, and nothing in this repository
+    exports it either. The old wording is quoted rather than deleted so the surviving conclusion
+    keeps its support and a correction does not read as an oversight.
+
+    What remains true: with GIT_DIR set by ANY means, `git -C <tmp> commit` lands in the repository
+    GIT_DIR names. the incident is real history; its stated mechanism is not, and its actual
+    cause is recorded as unknown rather than guessed at. This filter is therefore standing
+    insurance against an unidentified vector — cheap, and labelled as insurance. The earlier filings record it.
     """
     return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
 
@@ -55,10 +65,11 @@ def make_repo(tmp_path: Path, files: dict, claude_md: str = "# project\n") -> Pa
         p = root / rel
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(body, encoding="utf-8")
-    # NEVER COMMIT INTO THE REPOSITORY UNDER TEST -- and the reason is specific (proved).
-    # A git hook exports GIT_DIR, and GIT_DIR OVERRIDES `-C`. A fixture that inherits it commits
-    # into the repository the hook is running for: the fixture's tree lands on the real
-    # branch and every real file comes out as a deletion. `git()` below strips the whole GIT_*
+    # NEVER COMMIT INTO THE REPOSITORY UNDER TEST. p33: this comment used to justify itself with
+    # "a git hook exports GIT_DIR" -- false, see `_clean_env` above; git exports it to no hook type.
+    # What IS measured is the consequence once GIT_DIR is set by any means: the fixture's tree lands
+    # on the real branch and every real file comes out as a deletion. `git()` below strips the whole
+    # GIT_*
     # family from the environment, and the assertion is on `--absolute-git-dir` rather than on
     # `--show-toplevel`, because the top level follows the cwd while the commit follows GIT_DIR --
     # an assertion on the top level passes while the commit still goes to the wrong place.

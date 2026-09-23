@@ -14,7 +14,7 @@ Works in [Claude Code](#claude-code-setup), [Codex](#codex-setup), [Qoder](#qode
 
 ```bash
 # 1. Register this repo as a Claude Code marketplace
-claude plugin marketplace add Victoriakaey/project-life-cycle
+claude plugin marketplace add Siltpoke/project-life-cycle
 
 # 2. Install the skill
 claude plugin install project-lifecycle@project-life-cycle
@@ -86,7 +86,7 @@ qodercli plugins install /path/to/project-life-cycle
 Or register the repo as a marketplace and install by name:
 
 ```bash
-qodercli plugins marketplace add Victoriakaey/project-life-cycle
+qodercli plugins marketplace add Siltpoke/project-life-cycle
 qodercli plugins install project-lifecycle
 ```
 
@@ -141,7 +141,7 @@ codebuddy --plugin-dir /path/to/project-life-cycle
 Or register the repo as a marketplace and install by name — run these as slash commands inside the CodeBuddy TUI:
 
 ```
-/plugin marketplace add Victoriakaey/project-life-cycle
+/plugin marketplace add Siltpoke/project-life-cycle
 /plugin install project-lifecycle@project-life-cycle
 ```
 

@@ -1,0 +1,5 @@
+{
+  "valid": false,
+  "rule": "deps-acyclic",
+  "why": "A one-node cycle. A checker that only compares adjacent pairs reports this correctly and still lets 08 through — the two cases are not interchangeable."
+}

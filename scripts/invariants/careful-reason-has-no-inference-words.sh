@@ -27,14 +27,40 @@ command -v git >/dev/null 2>&1 || { printf 'COULD NOT RUN: git is not on PATH\n'
 # Deliberately including the ones an author reaches for first when trying to be helpful.
 BANNED="sensitive risky dangerous insecure unsafe critical suspicious probably likely"
 
-# A GIT HOOK RUNS WITH GIT_DIR SET, AND GIT_DIR OVERRIDES `-C` (proved, not
-# guessed). This script only READS from its fixture, but a read against the wrong repository is
-# just a quieter version of the same defect: it would answer about the real tree and call that a
-# pass. Cleared here for the same reason it is cleared where a commit happens.
+# GIT_DIR OVERRIDES `-C`, AND THE ENVIRONMENT IS THEREFORE CLEARED BEFORE ANY FIXTURE IS BUILT.
+#
+# p33 CORRECTION -- what this comment used to say, and why the sentence changed. It read:
+# "A GIT HOOK RUNS WITH GIT_DIR SET, AND GIT_DIR OVERRIDES `-C` (root cause of a measured incident, proved not
+# guessed)." The second clause is true and reproducible. The FIRST IS FALSE, and it is corrected
+# here rather than deleted, because deleting it would leave the surviving conclusion unsupported.
+#
+# Measured 2026-08-31 on git 2.50.1 (Apple Git-155), across pre-commit, prepare-commit-msg,
+# commit-msg, post-commit, pre-push and post-checkout: NO hook type exports GIT_DIR or
+# GIT_WORK_TREE. Commit-family hooks export GIT_INDEX_FILE (relative); pre-push exports only
+# GIT_EDITOR, GIT_EXEC_PATH, GIT_PREFIX. Nothing in this repository exports it either -- the chain
+# is pre-push -> close-gate-prepush.sh -> close-gate.sh -> invariants, and the only variable
+# close-gate.sh exports is AC_MERGE_BASE. The proof the old wording cited,
+# `scratchpad/prove_gitdir.sh`, no longer exists; what it most likely established is the
+# conditional half, with the antecedent assumed. A claim wider than its mechanism, inside a fix
+# written for that class.
+#
+# WHAT REMAINS TRUE, AND IS WHY THIS SCRIPT STILL CLEARS THE ENVIRONMENT. With GIT_DIR set --
+# by whatever means -- `git -C <tmp> commit` writes into the repository GIT_DIR names, and an
+# assertion on `--show-toplevel` still PASSES because the worktree follows the cwd while the
+# commit follows GIT_DIR. Reproduced end to end: the decoy's HEAD moved and every real file came
+# out as a deletion. the incident is real history; only its stated mechanism is unproven, and
+# the actual cause of the 2026-08-19 commits is recorded as UNKNOWN rather than guessed at.
+#
+# So this stays, as insurance against an injection vector not yet identified -- stated as
+# insurance, not sold as a fix for a measured failure path.
 # Clear the WHOLE GIT_* family, not a list of six names. An enumerated list is a claim that git
 # will never add another variable able to redirect a read or a write, and nothing announces the
 # day that stops being true -- a claim wider than its mechanism. The python
 # fixtures already filter by prefix (`not k.startswith("GIT_")`); this is parity with them.
+#
+# This script only READS from its fixture, but a read against the wrong repository is
+# just a quieter version of the same defect: it would answer about the real tree and call that a
+# pass. Cleared here for the same reason it is cleared where a commit happens.
 #
 # Measured, with a probe first proven able to detect a real bypass (removing the protection moves
 # a decoy repository's HEAD): with GIT_DIR, GIT_CONFIG_COUNT/core.worktree and GIT_NAMESPACE all

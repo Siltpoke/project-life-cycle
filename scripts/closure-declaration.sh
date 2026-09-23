@@ -3,14 +3,31 @@
 # phase documents and prints it as records. It decides NOTHING about pass or fail; the
 # verdict for "no declaration at all" belongs to the gate, not here.
 #
-# Usage: closure-declaration.sh extract <file>...
+# Usage: closure-declaration.sh extract [--corpus] [--require-steps] <file>...
 #
 # Prints one TAB-separated record per line, on stdout:
 #     closed<TAB><id><TAB><reason-or-hyphen>
 #     left-open<TAB><id><TAB><reason>
+#     closed-step<TAB><station-id>.s<N><TAB><reason-or-hyphen>
+#     closed-step<TAB>none<TAB>-
 #     none<TAB>-<TAB>-
 # No block found across every file given: prints nothing, exits 0. That is not an error
 # here — the gate raises it.
+#
+# --corpus (the station-plan work) lifts the one-block rule so the whole corpus -- live documents AND
+# docs/archive/** -- can be read in one pass, and appends a FOURTH field, <path>:<openline>,
+# so a dangling step reference can name where it was written. There is deliberately no
+# second parser: one grammar with two implementations is the encoder-divergence class this
+# repo has already paid for (memory p45), so the corpus scan extends this reader instead.
+#
+# --require-steps (the station-plan work) fails a block that carries no `closed-step:` line at
+# all. It is a FLAG rather than the default, and that is a real tension worth stating: the
+# spec says every block must carry a step line, while the same plan requires that every
+# declaration already written still parses. Fifteen blocks predate this format and cannot
+# retroactively grow a step line, so the rule cannot live in the grammar. It lives at the
+# gate, which is the only caller that knows a declaration is being WRITTEN now rather than
+# read from history. --corpus and --require-steps therefore contradict each other and are
+# refused together rather than silently resolved.
 #
 # Any malformed input is a NAMED failure on stderr with a non-zero exit, never a silent
 # zero. This is the shape scripts/ac-evidence.sh already had to close: a declaration the
@@ -39,7 +56,7 @@ WRAP_FENCE='^(````+|~~~+)'
 
 die() { printf '%s: %s\n' "$PROG" "$1" >&2; exit 1; }
 
-usage() { printf 'usage: %s extract <file>...\n' "$PROG" >&2; exit 2; }
+usage() { printf 'usage: %s extract [--corpus] [--require-steps] <file>...\n' "$PROG" >&2; exit 2; }
 
 # ---------------------------------------------------------------------------
 # Locate every real block across every file. Emits "path<TAB>openline<TAB>closeline".
@@ -70,6 +87,22 @@ locate_blocks() {
 }
 
 cmd_extract() {
+  local corpus=0 requiresteps=0
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --corpus)        corpus=1;       shift ;;
+      --require-steps) requiresteps=1; shift ;;
+      --) shift; break ;;
+      -*) die "unknown option '$1'" ;;
+      *) break ;;
+    esac
+  done
+  # Refused rather than resolved. --corpus reads declarations written before the step
+  # format existed; --require-steps demands one. Picking a winner here would make the
+  # stricter flag silently inert, which is the shape of defect this phase exists to fix.
+  if [ "$corpus" -eq 1 ] && [ "$requiresteps" -eq 1 ]; then
+    die "--corpus and --require-steps contradict each other: the corpus contains declarations written before \`closed-step:\` existed"
+  fi
   [ "$#" -ge 1 ] || usage
 
   # Readability is checked HERE, in the script's own shell, not inside locate_blocks --
@@ -107,6 +140,20 @@ cmd_extract() {
   # No declaration anywhere. Not this script's error to raise.
   [ "$n" -eq 0 ] && return 0
 
+  # Corpus mode: every block is parsed, each record carrying the path and opening line it
+  # came from. The loop is fed by a HEREDOC, never a pipe -- a pipe would put the loop in a
+  # subshell and `rc` would die with it, the fail-open this repo has filed twice.
+  if [ "$corpus" -eq 1 ]; then
+    local rc=0 bpath bopen bclose
+    while IFS="$(printf '\t')" read -r bpath bopen bclose; do
+      [ -n "${bpath:-}" ] || continue
+      parse_body "$bpath" "$bopen" "$bclose" "$bpath:$bopen" 0 || rc=1
+    done <<EOF
+$blocks
+EOF
+    return "$rc"
+  fi
+
   # Exactly one block across the WHOLE resolved set. Two is an error, never a merge —
   # ambiguity resolved by picking a winner is how a declaration silently loses half its
   # entries. The message names every path and line so the author does not have to hunt.
@@ -121,7 +168,7 @@ cmd_extract() {
   open="$(printf '%s\n' "$blocks" | cut -f2)"
   close="$(printf '%s\n' "$blocks" | cut -f3)"
 
-  parse_body "$path" "$open" "$close"
+  parse_body "$path" "$open" "$close" "" "$requiresteps"
 }
 
 # ---------------------------------------------------------------------------
@@ -133,29 +180,62 @@ cmd_extract() {
 # failure can see why, and for no other purpose.
 # ---------------------------------------------------------------------------
 parse_body() {
-  local path="$1" startln="$2" endln="$3"
+  local path="$1" startln="$2" endln="$3" src="${4:-}" requiresteps="${5:-0}"
   # `close` is an awk BUILT-IN function name and cannot be a variable: BSD awk rejects the
   # program outright. The rename to startln/endln is not style. It is also why these -v
   # names must be kept in step with the locals above -- an earlier revision renamed only
   # the locals, leaving `-v startln` unset, so every line fell outside the range, the
   # parser printed ZERO records and exited 0. That is indistinguishable from "this file has
   # no block", which is a legitimate outcome, so nothing would have complained.
-  awk -v path="$path" -v startln="$startln" -v endln="$endln" '
+  awk -v path="$path" -v startln="$startln" -v endln="$endln" \
+      -v src="$src" -v requiresteps="$requiresteps" '
     function trim(s) { sub(/^[[:space:]]+/, "", s); sub(/[[:space:]]+$/, "", s); return s }
     # Strip the optional separator between id and reason. Both the em dash and a double
     # hyphen are accepted: references/close-gate.md writes one, keyboards produce the other, and a format
     # that rejects the reason for its punctuation would be teaching authors to omit it.
     function dereason(s) { s = trim(s); sub(/^(--|—)[[:space:]]*/, "", s); return trim(s) }
+    # In corpus mode every record carries where it came from as a FOURTH field. Appending
+    # rather than prefixing is deliberate: a downstream `cut -f3` for the reason keeps
+    # meaning the same thing in both modes, so adding the mode cannot silently re-number
+    # the fields an existing reader depends on.
+    BEGIN { sfx = (src == "" ? "" : "\t" src) }
     NR <= startln || NR >= endln { next }
     { line = trim($0) }
     line == "" { next }
     {
-      if (line ~ /^closes:[[:space:]]*none[[:space:]]*$/) { seen_none = 1; nrec++; print "none\t-\t-"; next }
-      if (line ~ /^(closed|left-open):[[:space:]]*[A-Za-z][A-Za-z0-9._-]*([[:space:]].*)?$/) {
+      if (line ~ /^closes:[[:space:]]*none[[:space:]]*$/) { seen_none = 1; nid++; print "none\t-\t-" sfx; next }
+      # `closed-step: none` must be matched BEFORE the general entry branch: `none` is a
+      # legal id under the shared regex, so falling through would record a step token
+      # literally named `none` and the shape check below would then reject the sentence the
+      # format asks authors to write.
+      if (line ~ /^closed-step:[[:space:]]*none[[:space:]]*$/) {
+        seen_step = 1; seen_step_none = 1; nstep++
+        print "closed-step\tnone\t-" sfx
+        next
+      }
+      if (line ~ /^(closed|left-open|closed-step):[[:space:]]*[A-Za-z][A-Za-z0-9._-]*([[:space:]].*)?$/) {
         kind = line; sub(/:.*$/, "", kind)
         rest = line; sub(/^[^:]*:[[:space:]]*/, "", rest)
         id = rest; sub(/[[:space:]].*$/, "", id)
         reason = dereason(substr(rest, length(id) + 1))
+        # A step token lives in a DIFFERENT NAMESPACE from a backlog id, and the shape is
+        # what separates them: `<station-id>.s<N>`. Without this check `closed-step: B<n>`
+        # -- the right keyword with the wrong namespace -- parses clean here and surfaces
+        # much later as a dangling reference, blaming the station plan for a typo the
+        # author made here. A refinement this script adds to the grammar, like the `closes: none`
+        # standalone rule below, not something the grammar already said.
+        #
+        # The dot is why the token uses one: the existing id character class already
+        # contains `.` and does not contain `/`, so this needed a keyword, not a new regex.
+        if (kind == "closed-step" && id !~ /^[A-Za-z][A-Za-z0-9._-]*\.s[0-9]+$/) {
+          printf "%s: %s:%d declares `closed-step: %s`, which is not a <station-id>.s<N> step token\n", "closure-declaration.sh", path, NR, id > "/dev/stderr"
+          bad = 1; next
+        }
+        # Two counters, because there are two families. `nid` is what the `closes: none`
+        # standalone rule below reads; folding steps into it made `closes: none` plus a
+        # step token report a contradiction, and the design says in as many words that the
+        # standalone rule governs its own family only. Caught by the test that states it.
+        if (kind == "closed-step") { seen_step = 1; nstep++ } else { nid++ }
         # A left-open entry with no reason is malformed. A statement of deliberate
         # non-action with no stated reason is indistinguishable from having forgotten —
         # which is the defect this declaration exists to prevent.
@@ -175,13 +255,15 @@ parse_body() {
           printf "%s: %s:%d has a TAB inside its reason; the record format is TAB-separated, so use spaces\n", "closure-declaration.sh", path, NR > "/dev/stderr"
           bad = 1; next
         }
-        if (id in kindof && kindof[id] != kind) {
+        # The contradiction check is scoped to the backlog-id namespace. A step token can
+        # never collide with a backlog id (it must contain `.s<N>`), so widening this map
+        # would only add a comparison that can never fire.
+        if (kind != "closed-step" && id in kindof && kindof[id] != kind) {
           printf "%s: %s:%d names `%s` as %s, but it is already declared %s in the same block\n", "closure-declaration.sh", path, NR, id, kind, kindof[id] > "/dev/stderr"
           bad = 1; next
         }
-        kindof[id] = kind
-        nrec++
-        printf "%s\t%s\t%s\n", kind, id, (reason == "" ? "-" : reason)
+        if (kind != "closed-step") { kindof[id] = kind }
+        printf "%s\t%s\t%s%s\n", kind, id, (reason == "" ? "-" : reason), sfx
         next
       }
       printf "%s: %s:%d is not a declaration entry: %s\n", "closure-declaration.sh", path, NR, line > "/dev/stderr"
@@ -192,8 +274,22 @@ parse_body() {
       # ids is a contradiction, not a union, and a parser that quietly took the union
       # would let a typo delete the claim. This script enforces that on top of
       # the grammar itself.
-      if (seen_none && nrec > 1) {
+      if (seen_none && nid > 1) {
         printf "%s: %s:%d-%d mixes `closes: none` with entries that name ids; it must stand alone\n", "closure-declaration.sh", path, startln, endln > "/dev/stderr"
+        bad = 1
+      }
+      # Same refinement, applied to the step family on its own terms. `closes: none` is
+      # about backlog ids and says nothing about steps, so the two sentinels are checked
+      # separately -- a phase can legitimately close no backlog id and still close steps.
+      if (seen_step_none && nstep > 1) {
+        printf "%s: %s:%d-%d mixes `closed-step: none` with entries that name steps; it must stand alone\n", "closure-declaration.sh", path, startln, endln > "/dev/stderr"
+        bad = 1
+      }
+      # That criterion. Silence must not be able to mean `closed nothing`: that is precisely
+      # how the three tools surveyed for this phase lose a position, and the reason this is
+      # a named failure rather than a default.
+      if (requiresteps == 1 && !seen_step) {
+        printf "%s: %s:%d-%d carries no `closed-step:` line; name the station steps this phase closed, or state `closed-step: none`\n", "closure-declaration.sh", path, startln, endln > "/dev/stderr"
         bad = 1
       }
       if (bad) exit 1
@@ -271,8 +367,28 @@ cmd_reconcile() {
         # claim about the ledger, so there is nothing to reconcile.
         printf 'ok        %s declared left-open; no ledger event required\n' "$id"
         ;;
+      closed-step)
+        # EXCLUDED, and the exclusion is required rather than an optimisation (p36 spec
+        # 2.2 rule 3). This loop compares ids against the backlog ledger; a step token is a
+        # position inside a station plan, a different namespace entirely, so every step
+        # would come back as "no event in the ledger".
+        #
+        # MEASURED, NOT ASSUMED, and it changes what this branch is worth. Before the
+        # default below existed, `closed-step` fell off the end of the case and was ignored
+        # ANYWAY -- the exclusion the design calls required was already happening by
+        # accident, and a branch that changes no behaviour is decoration no test can bind.
+        # The default is what makes this line load-bearing.
+        :
+        ;;
       none)
         printf 'ok        this phase declares it closed nothing\n'
+        ;;
+      *)
+        # A record kind this loop does not recognise is a NAMED failure, never a silent
+        # skip. Without it, a fifth entry kind added to the grammar would be dropped here
+        # without a word -- the shape of defect that made `closed-step` need an explicit
+        # branch in the first place.
+        die "reconcile: unknown record kind '$kind' from the extractor"
         ;;
     esac
   done <<EOF

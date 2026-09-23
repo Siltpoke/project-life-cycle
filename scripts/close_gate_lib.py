@@ -6,6 +6,7 @@ so the only honest way to test it is to extract the fenced block and run it.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -122,8 +123,50 @@ def extract_evidence_runner_script(md_path: Path) -> str:
     return match.group(1)
 
 
+def clean_env() -> dict:
+    """The environment minus every GIT_* variable that can redirect where git reads or writes.
+
+    p33 — WHY THE WHOLE FAMILY, AND WHY THIS IS INSURANCE RATHER THAN A FIX FOR A MEASURED PATH.
+    With GIT_DIR set, `git -C <tmp>` and `cwd=<tmp>` are both overridden and the commit lands in
+    the repository GIT_DIR names — reproduced end to end, decoy HEAD moved, every real file a
+    deletion. What is NOT true is the sentence this repo's guards used to carry: git does not
+    export GIT_DIR to hooks. Measured 2026-08-31 on git 2.50.1 across six hook types; none does,
+    and nothing in this repository exports it either. the incident is real; its stated
+    mechanism is not, and its actual cause is recorded as unknown.
+
+    So this is a cheap standing defence against an injection vector nobody has identified, and it
+    is labelled as such. Filtering by PREFIX rather than by a list of names is deliberate: an
+    enumerated list is a claim that git will never add another redirecting variable, and nothing
+    announces the day that stops being true.
+    """
+    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+
+def assert_fixture_is_its_own_repo(root: Path) -> None:
+    """Refuse to let a throwaway fixture commit into anything but itself.
+
+    THE ASSERTION IS ON `--absolute-git-dir`, NOT ON `--show-toplevel`. The worktree follows the
+    cwd while the commit follows GIT_DIR, so a top-level assertion PASSES while the commit still
+    goes to the wrong repository — measured, and it is why the first version of this guard did not
+    work. The git dir is what decides where a commit lands, so it is what gets checked.
+
+    Kept alongside `clean_env()` rather than instead of it: a guard whose only protection is
+    another line's correctness is not a guard. Measured — each of the two stops the injected case
+    on its own, and only removing BOTH moves a decoy's HEAD.
+    """
+    gd = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--absolute-git-dir"],
+        capture_output=True, text=True, env=clean_env(),
+    ).stdout.strip()
+    want = str((root / ".git").resolve())
+    assert gd == want, (
+        f"fixture {root} resolves to git dir {gd!r}, not {want!r}; refusing to commit — this is "
+        "the assertion that stops a test writing into the repository under test"
+    )
+
+
 def _git(repo: Path, *args: str) -> None:
-    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, env=clean_env())
 
 
 def make_fixture_repo(tmp_path: Path, manifest: dict | None, files: dict[str, str]) -> Path:
@@ -141,6 +184,7 @@ def make_fixture_repo(tmp_path: Path, manifest: dict | None, files: dict[str, st
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(body, encoding="utf-8")
     _git(repo, "add", "-A")
+    assert_fixture_is_its_own_repo(repo)   # p33 — before the first commit, never after
     _git(repo, "commit", "-qm", "init")
     # origin/main == HEAD, so `origin/main..HEAD` is empty unless a test adds commits
     _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")

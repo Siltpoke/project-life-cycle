@@ -150,7 +150,7 @@ CI validator rejects mismatched manifest versions; never bypass.
 
 ## Repo layout pointers
 
-- `skills/project-lifecycle/SKILL.md` — entry point, 10-step per-phase workflow.
+- `skills/project-lifecycle/SKILL.md` — entry point, 11-step per-phase workflow.
 - `skills/project-lifecycle/references/` — per-topic discipline files.
 - `skills/project-lifecycle/references/changelog.md` — canonical discipline spec; mirrored in this CONTRIBUTING.md.
 - `commands/` — slash commands shipped with the plugin. Add via `scripts/commands-manifest.txt`.

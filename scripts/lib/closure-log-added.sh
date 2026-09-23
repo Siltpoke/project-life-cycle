@@ -25,7 +25,21 @@
 closure_log_split() {
   _cls_log="$1"; _cls_base="$2"; _cls_added="$3"
 
-  _cls_ref="$(git merge-base HEAD main 2>/dev/null || true)"
+  # THE BASE IS origin/main, WITH LOCAL main ONLY AS A FALLBACK, and that order is a fix
+  # rather than a preference. This used to read `git merge-base HEAD main`, and a local `main`
+  # ref goes stale the moment you work from a worktree or stop checking main out -- which is
+  # the normal way this repo is used. Measured at p36 close: local `main` sat four merged PRs
+  # behind `origin/main`, so three ids closed by OTHER phases were counted
+  # as "added by this branch" and the gate demanded this phase declare them. A silently wrong
+  # BASE makes a correct check ask a wrong question, and the answer looks like the author
+  # forgot something.
+  #
+  # Every other base in this repo already resolves against origin/main (see
+  # scripts/invariants/roadmap-station-blocks-placement.sh, which says so in as many words).
+  # The fallback keeps a clone with no remote working -- including this feature's own test
+  # fixtures, which build a repo that has `main` and no `origin`.
+  _cls_ref="$(git merge-base HEAD origin/main 2>/dev/null || true)"
+  [ -n "$_cls_ref" ] || _cls_ref="$(git merge-base HEAD main 2>/dev/null || true)"
   if [ -n "$_cls_ref" ] && git cat-file -e "$_cls_ref:$_cls_log" 2>/dev/null; then
     git show "$_cls_ref:$_cls_log" > "$_cls_base"
   else

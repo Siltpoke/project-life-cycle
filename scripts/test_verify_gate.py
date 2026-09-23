@@ -11,6 +11,7 @@ incidental SHA mismatch masking the check actually under test). The sole excepti
 test_wrong_sha_report_blocks, which isolates the SHA check on purpose.
 """
 from __future__ import annotations
+from close_gate_lib import assert_fixture_is_its_own_repo
 
 import json
 import re
@@ -27,6 +28,10 @@ def _git(repo: Path, *args: str) -> None:
 
 
 def _commit(repo: Path, msg: str) -> str:
+    # p33 — refuse to commit into anything but this fixture. One line here covers every
+    # call site this helper serves; see close_gate_lib for why the check is on the git dir
+    # and not the top level, and why it is insurance rather than a fix for a measured path.
+    assert_fixture_is_its_own_repo(repo)
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", msg)
     return subprocess.run(

@@ -11,6 +11,7 @@ whole criterion set is about git's own answers, and its exit-code contract (0 ig
 128 fatal) is the thing under test.
 """
 
+from close_gate_lib import assert_fixture_is_its_own_repo
 import os
 import subprocess
 from pathlib import Path
@@ -59,6 +60,10 @@ def run_guard(root: Path, rel: str):
 
 
 def track(root: Path, rel: str):
+    # p33 — refuse to commit into anything but this fixture. One line here covers every
+    # call site this helper serves; see close_gate_lib for why the check is on the git dir
+    # and not the top level, and why it is insurance rather than a fix for a measured path.
+    assert_fixture_is_its_own_repo(root)
     p = root / rel
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text("- [ ] a task\nnonce: abc123\n")
