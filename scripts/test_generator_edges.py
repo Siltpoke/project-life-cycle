@@ -120,7 +120,7 @@ def test_a_dash_in_writes_is_not_a_path(tmp_path):
 def test_a_changed_read_selects_the_tests_that_run_the_script(tmp_path):
     """A declared script whose input changed behaves differently, so a test that RUNS it is in
     scope even if it never reads the script's output. This is what gives a declaration with
-    `writes = -` (a pure reader, like the invariant test_b247 shells out to) any meaning."""
+    `writes = -` (a pure reader, like the invariant test_roadmap_lead_length.py shells out to) any meaning."""
     m = (MAP_HEADER + "scripts/test_runs_it.py\tscripts/reader.sh\tsubprocess\tyes\n"
          + "scripts/test_unrelated.py\tdocs/b.md\tdirect\tyes\n")
     e = EDGE_HEADER + "scripts/reader.sh\tdocs/a.md\t-\n"

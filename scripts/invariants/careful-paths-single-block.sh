@@ -39,7 +39,7 @@ fi
 # guessed)." The second clause is true and reproducible. The FIRST IS FALSE, and it is corrected
 # here rather than deleted, because deleting it would leave the surviving conclusion unsupported.
 #
-# Measured 2026-08-31 on git 2.50.1 (Apple Git-155), across pre-commit, prepare-commit-msg,
+# Measured on a recent git, across pre-commit, prepare-commit-msg,
 # commit-msg, post-commit, pre-push and post-checkout: NO hook type exports GIT_DIR or
 # GIT_WORK_TREE. Commit-family hooks export GIT_INDEX_FILE (relative); pre-push exports only
 # GIT_EDITOR, GIT_EXEC_PATH, GIT_PREFIX. Nothing in this repository exports it either -- the chain

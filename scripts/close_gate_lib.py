@@ -130,7 +130,7 @@ def clean_env() -> dict:
     With GIT_DIR set, `git -C <tmp>` and `cwd=<tmp>` are both overridden and the commit lands in
     the repository GIT_DIR names — reproduced end to end, decoy HEAD moved, every real file a
     deletion. What is NOT true is the sentence this repo's guards used to carry: git does not
-    export GIT_DIR to hooks. Measured 2026-08-31 on git 2.50.1 across six hook types; none does,
+    export GIT_DIR to hooks. Measured on a recent git across six hook types; none does,
     and nothing in this repository exports it either. the incident is real; its stated
     mechanism is not, and its actual cause is recorded as unknown.
 

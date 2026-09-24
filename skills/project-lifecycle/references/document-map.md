@@ -36,7 +36,7 @@ confusion this page is for.
 
 **They occupy the same slot: the read-first status document. Both cannot be it.**
 
-**Measured 2026-09-02, rather than recalled:**
+**Measured, rather than recalled:**
 
 - This repository has **no** `STATUS.md` and no `docs/STATUS.md`. It reads `RESUME.md`.
 - Its manifest does **not** set `status_doc`, so it runs on the shipped default —

@@ -280,7 +280,7 @@ def test_an_open_counts_as_a_read_exactly_when_it_can_read_existing_content(mode
     between `r+` and a silently missing input. The prototype called `r+` a write -- harmless
     while writes were kept, a silent miss the moment they are dropped."""
     import importlib.util
-    spec = importlib.util.spec_from_file_location("_b289_tracer_under_test", TRACER)
+    spec = importlib.util.spec_from_file_location("_tracer_under_test", TRACER)
     tracer = importlib.util.module_from_spec(spec)
     env_before = os.environ.pop("PLC_TRACE_OUT", None)
     try:

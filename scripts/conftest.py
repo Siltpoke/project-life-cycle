@@ -18,6 +18,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 # forward, and entries that have stopped failing are dropped -- adding a test here that would pass
 # is a silent loss of coverage, which is why the list shrank the last two times it was measured.
 #
+# 4.1.1 dropped four. Two were freed by a fix in this release; the other two were freed by
+# RESTORING CONTENT TO THE CHANGELOG. They had been failing because this changelog's entry for
+# the breaking change named the key without showing a value you could paste, and the rows exist
+# to catch exactly that. A row that goes red because a notice is thin is not a row to skip.
+#
 # Ids are matched WITHOUT their parameters, so a parametrised test listed here is skipped for
 # every parameter, including any that would pass on their own.
 # ---------------------------------------------------------------------------------------------
@@ -67,11 +72,7 @@ _NEEDS_MAINTAINER_RECORDS = {
     "scripts/test_ledger_writers.py::test_the_gate_records_the_checks_it_ran",
     "scripts/test_no_icloud_guard.py::test_the_manifest_description_matches_the_mechanism",
     "scripts/test_obituary.py::test_each_surface_says_the_constraint_was_lifted",
-    "scripts/test_release_notice.py::test_the_notice_carries_a_fix_that_can_be_pasted",
     "scripts/test_release_notice.py::test_the_notice_says_the_phrasing_constraint_is_GONE",
-    "scripts/test_release_notice.py::test_the_notice_states_who_is_unaffected",
-    "scripts/test_release_notice.py::test_the_pasteable_literal_is_actually_pasteable",
-    "scripts/test_release_notice.py::test_the_unreleased_section_names_the_key",
     "scripts/test_roadmap_parsers_unchanged.py::test_control_fifth_column",
     "scripts/test_roadmap_parsers_unchanged.py::test_control_heading_inside_the_table",
     "scripts/test_roadmap_parsers_unchanged.py::test_control_one_character_in_a_mainline_row",

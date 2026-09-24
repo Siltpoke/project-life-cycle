@@ -83,7 +83,7 @@ run_lychee() {
 }
 
 # `--container-daemon-socket -` DISABLES mounting the host's Docker socket into the container,
-# and without it this script does not run at all on a Docker Desktop host. Measured 2026-09-03:
+# and without it this script does not run at all on a Docker Desktop host. Measured:
 #
 #     failed to start container: error while creating mount source path
 #     '/host_mnt/<your home>/.docker/run/docker.sock': operation not supported

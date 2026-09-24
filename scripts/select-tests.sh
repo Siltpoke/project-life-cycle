@@ -94,7 +94,7 @@ else
   #   stale="$(paste ... | awk '$1 != $2 { ...; exit }')"
   # and under `set -euo pipefail` awk's early `exit` closed the pipe while paste was still writing:
   # paste died of SIGPIPE, pipefail made the substitution 141, and `set -e` killed the script BEFORE
-  # `full` could print anything. MEASURED 2026-09-12 on the real repo: 1 of 3 runs exited 141 with an
+  # `full` could print anything. MEASURED on the real repo: 1 of 3 runs exited 141 with an
   # EMPTY stdout -- which a caller reads as "run no tests", the one failure direction the design forbids. It
   # fired on the staleness path, i.e. on every change to a code input, and it grows more likely the
   # more inputs the fingerprint has (6 of 6 at 20k lines).

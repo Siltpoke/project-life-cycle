@@ -8,7 +8,14 @@ subject IS the tracked document -- the notice is the deliverable, so the documen
 
 WHAT THIS CANNOT DO, stated rather than left to be assumed: it checks that the notice is present and
 carries the parts a surprised adopter would need. It cannot check that the notice is TRUE, or that
-anyone read it. A `[Unreleased]` entry is a claim about a release that has not happened.
+anyone read it.
+
+IT LOOKS FOR THE NOTICE, NOT FOR A SECTION NAME. The first version read `[Unreleased]` and nothing
+else, and `/release` renames that heading to the version being cut -- so CUTTING THE RELEASE TURNED
+ALL FIVE ROWS RED, on a notice that was written, shipped and correct. Measured, on main,
+right after v4.1.0 went out; no gate reported it, because the close-gate's diff mode only runs the
+suite when a change touches a declared product path. A test whose subject is a document has to
+follow the document when the document legitimately moves.
 """
 from __future__ import annotations
 
@@ -20,11 +27,23 @@ CHANGELOG = ROOT / "CHANGELOG.md"
 KEY = "validator_input_paths_rationale"
 
 
-def _unreleased() -> str:
+def _notice_section() -> str:
+    """The section carrying the notice: `[Unreleased]` before the release is cut, the version
+    section after. Falls back to `[Unreleased]` when the key is in neither, so a notice that was
+    never written still fails every row below rather than silently matching some other section."""
     text = CHANGELOG.read_text(encoding="utf-8")
-    start = text.index("\n## [Unreleased]")
-    nxt = text.find("\n## ", start + 1)
-    return text[start : nxt if nxt != -1 else len(text)]
+    sections = []
+    for m in re.finditer(r"^## \[[^\]]+\]", text, re.M):
+        nxt = text.find("\n## ", m.start() + 1)
+        sections.append(text[m.start() : nxt if nxt != -1 else len(text)])
+    for sec in sections:
+        if KEY in sec:
+            return sec
+    return next((s for s in sections if s.startswith("## [Unreleased]")), "")
+
+
+# Kept as the name the rows below read, so this fix is one function rather than six call sites.
+_unreleased = _notice_section
 
 
 def test_the_unreleased_section_names_the_key() -> None:

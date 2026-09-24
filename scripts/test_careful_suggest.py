@@ -34,7 +34,7 @@ def _clean_env() -> dict:
     p33 CORRECTION. This docstring used to read: "A git hook exports GIT_DIR (and friends), and
     GIT_DIR beats `-C`. Any fixture spawned from a hook inherits it, so `git -C <tmp> commit` lands
     in the real repository." The second sentence reproduces. The FIRST DOES NOT: measured
-    2026-08-31 on git 2.50.1 across pre-commit, prepare-commit-msg, commit-msg, post-commit,
+    on a recent git across pre-commit, prepare-commit-msg, commit-msg, post-commit,
     pre-push and post-checkout, no hook type exports GIT_DIR, and nothing in this repository
     exports it either. The old wording is quoted rather than deleted so the surviving conclusion
     keeps its support and a correction does not read as an oversight.

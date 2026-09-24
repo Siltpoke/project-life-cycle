@@ -10,6 +10,12 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 Nothing yet.
 
+## [4.1.1] - 2026-09-24
+
+### Fixed
+
+- A test-only fix, recorded because the version exists: cutting a release used to turn this repository's own release-notice tests red. They read the CHANGELOG's `[Unreleased]` section by name, and cutting a release renames that heading to the version being cut — so the release broke them, on a notice that was written and correct. They now look for the section carrying the key. **Nothing an adopter runs changed in this release.**
+
 ## [4.1.0] - 2026-09-23
 
 ### Added
@@ -30,7 +36,16 @@ Nothing yet.
 
 ### Changed
 
-- **BREAKING** — if your `.claude/close-gate.json` narrows `test_evidence_inputs`, you must now say why, in a companion `validator_input_paths_rationale` with `surface_total`, `basis` (one of `tracked-files` / `all-files` / `glob-set` / `explicit-path-list`) and `why`. **`why` is free prose in any language and any script — the gate reads none of it** and only checks that it is there. Do not write `surface_kept`: the gate derives how many files your narrowing matches and refuses a manifest that declares it. **Nothing changes if you do not narrow** — with `test_evidence_inputs` absent or empty the check does not fire. A single blank glob does fire; that is a declared narrowing, merely a broken one. Migration: add the member to your manifest (it is a new JSON property, so the member before it needs a trailing comma) and set `surface_total` to your own number. There is no migration window; the escape hatch is deleting `test_evidence_inputs`, and it is not free — that also drops the freshness check back to an mtime comparison, which git does not preserve across a checkout and so false-passes on any fresh clone or CI runner. New projects get the key from `/init-harness` with a placeholder the gate deliberately refuses.
+- **BREAKING** — if your `.claude/close-gate.json` narrows `test_evidence_inputs`, you must now say why, in a companion `validator_input_paths_rationale` with `surface_total`, `basis` (one of `tracked-files` / `all-files` / `glob-set` / `explicit-path-list`) and `why`. **`why` is free prose in any language and any script — the gate reads none of it** and only checks that it is there. Do not write `surface_kept`: the gate derives how many files your narrowing matches and refuses a manifest that declares it. **Nothing changes if you do not narrow** — with `test_evidence_inputs` absent or empty the check does not fire. A single blank glob does fire; that is a declared narrowing, merely a broken one. Migration: add the member to your manifest (it is a new JSON property, so the member before it needs a trailing comma) and set `surface_total` to your own number.
+
+  ```json
+  "validator_input_paths_rationale": {
+    "surface_total": 3020,
+    "basis": "tracked-files",
+    "why": ["the narrowed set is exactly the validator's inputs; nothing else is read"]
+  },
+  ```
+ There is no migration window; the escape hatch is deleting `test_evidence_inputs`, and it is not free — that also drops the freshness check back to an mtime comparison, which git does not preserve across a checkout and so false-passes on any fresh clone or CI runner. New projects get the key from `/init-harness` with a placeholder the gate deliberately refuses.
 - `scripts/local-ci.sh` now starts a container on a Docker Desktop host. It could not before: the runner bind-mounts the host's Docker socket by default, and Docker Desktop keeps that socket at a path its file-sharing layer refuses, so the job died before a single step ran — **printing in the same shape as a finished run**, with a failure line, the usual summary, a real link-check result, and a test tally that was simply empty. **Read the tallies, not the exit code**: an empty tally line means nothing ran. Known gap on Apple Silicon: the containerised markdown link-check step hard-fails, because the pinned link checker covers `x86_64_linux` and `aarch64_darwin` only. Your links are still checked, by the host-native checker this script runs itself.
 - `/catchup` prints a station's position as `steps 1/5`, with `blocked-by:` as its own field, never merged with anything that would read as a priority. A roadmap row with no plan block is parsed exactly as before, byte for byte.
 - Install commands in both READMEs and all four plugin manifests now name the `Siltpoke` organisation instead of the old personal namespace. Nothing you already installed breaks — the old path redirects — but a redirect is not a guarantee: the old path becomes free for anyone to claim, and an install command that silently starts resolving elsewhere is not a failure you would be told about.
@@ -335,7 +350,8 @@ Initial release.
 - Adds a research protocol for locking design decisions, backed by a second, independent reviewer check.
 - Adds Architectural Decision Records, a domain glossary convention, and delivery templates (issue breakdown, changelog, PR body).
 
-[Unreleased]: https://github.com/Siltpoke/project-life-cycle/compare/v4.1.0...HEAD
+[Unreleased]: https://github.com/Siltpoke/project-life-cycle/compare/v4.1.1...HEAD
+[4.1.1]: https://github.com/Siltpoke/project-life-cycle/compare/v4.1.0...v4.1.1
 [4.1.0]: https://github.com/Siltpoke/project-life-cycle/compare/v4.0.0...v4.1.0
 [4.0.0]: https://github.com/Siltpoke/project-life-cycle/compare/v3.7.0...v4.0.0
 [3.7.0]: https://github.com/Siltpoke/project-life-cycle/compare/v3.0.0...v3.7.0

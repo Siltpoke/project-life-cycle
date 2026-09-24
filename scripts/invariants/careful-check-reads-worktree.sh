@@ -40,7 +40,7 @@ command -v jq  >/dev/null 2>&1 || { printf 'COULD NOT RUN: jq is not on PATH\n' 
 # end to end: the decoy's HEAD moved, the fixture's tree landed on its branch, and every real file
 # came out as a deletion.
 #
-# THE FIRST CLAUSE IS FALSE. Measured 2026-08-31 on git 2.50.1 (Apple Git-155) across pre-commit,
+# THE FIRST CLAUSE IS FALSE. Measured on a recent git across pre-commit,
 # prepare-commit-msg, commit-msg, post-commit, pre-push and post-checkout: no hook type exports
 # GIT_DIR or GIT_WORK_TREE. Commit-family hooks export GIT_INDEX_FILE (relative); pre-push exports
 # only GIT_EDITOR, GIT_EXEC_PATH and GIT_PREFIX. Nothing in this repository exports it either: the
