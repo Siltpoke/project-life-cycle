@@ -298,7 +298,8 @@ commands/                                  ← slash commands shipped with the s
 ├── capture.md                             /capture — pin a stated intent (the "why") into the cold cognition log (≤2 questions → docs/cognition-log.d/; supersede-confirm on same subject; auxiliary)
 ├── cognition-distill.md                   /cognition-distill — regenerate hot docs/cognition.md from the cold intent-log (four sections + deterministic guards; runs outside the close-gate; auxiliary)
 ├── tasklist.md                            /tasklist — render current-phase progress from .claude/tasklist.md (tasklist contract) in the terminal (collapsed line, --tree for full glyphed overview; portable bash, read-only; auxiliary)
-└── plc-status.md                          /plc-status — render the lifecycle ledger (observed / claimed / missing / not applicable / unknown per stage; --run for one run's timeline, --all for the matrix; jq only, read-only; auxiliary)
+├── plc-status.md                          /plc-status — lifecycle ledger: per mandated stage, observed / claimed-only / missing / not-applicable / unrecoverable (read-only; jq the one dependency; auxiliary)
+└── experiment.md                          /experiment — write this phase's experiment proposal one section at a time, stopping at each (per-phase step 3.5; writes a file, never runs the experiment)
 
 CHANGELOG.md                              Keep a Changelog 1.1.0 — per-version log of what shipped. [Unreleased] at top.
 CONTRIBUTING.md                           Commit/PR/CHANGELOG/label discipline applied at the repo boundary.

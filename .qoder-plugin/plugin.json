@@ -1,6 +1,6 @@
 {
   "name": "project-lifecycle",
-  "version": "4.1.0",
+  "version": "4.1.1",
   "description": "End-to-end coordinator for traceable, multi-phase software project execution.",
   "author": {
     "name": "Jiaqi Duan",

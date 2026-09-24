@@ -267,7 +267,8 @@ commands/                                  ← skill 自带的斜杠命令（由
 ├── capture.md                             /capture —— 把一个陈述出来的意图（"为什么"）钉进冷 cognition log（≤2 问 → docs/cognition-log.d/；同主题 supersede 确认；辅助）
 ├── cognition-distill.md                   /cognition-distill —— 从冷 intent-log 重生热 docs/cognition.md（四 section + 确定性 guard；在 close-gate 之外运行；辅助）
 ├── tasklist.md                            /tasklist —— 在终端渲染当前 phase 进度（读 .claude/tasklist.md，tasklist 契约；折叠行，--tree 展开全 glyph 概览；可移植 bash，只读；辅助）
-└── plc-status.md                          /plc-status —— 渲染生命周期账本（每个 stage 是 observed / claimed / missing / not applicable / unknown；--run 看单个 run 的时间线，--all 看矩阵；只依赖 jq，只读；辅助）
+├── plc-status.md                          /plc-status —— 生命周期账本：每个必经 stage 是 observed / 只是 claimed / missing / 不适用 / 不可恢复（只读；唯一依赖 jq；辅助）
+└── experiment.md                          /experiment —— 一节一停地写本 phase 的实验提案（per-phase 步骤 3.5；只出文件，不跑实验）
 
 CHANGELOG.md                              Keep a Changelog 1.1.0 —— 按版本记录交付内容。[Unreleased] 在最上。
 CONTRIBUTING.md                           Commit / PR / CHANGELOG / label 纪律，在 repo 边界落地。
