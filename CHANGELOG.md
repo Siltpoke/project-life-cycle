@@ -2,7 +2,9 @@
 
 All notable changes to the `project-lifecycle` plugin are documented here.
 
-The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning 2.0.0](https://semver.org/). Newest release is listed first. Comparison links below cover the release points this repository carries a tag for.
+The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning 2.0.0](https://semver.org/). Newest release is listed first.
+
+**This file records every release; the repository's history is sampled.** The plugin was developed in a private repository and published here from it, and rather than replay every release as a commit, this repository carries a snapshot at a handful of milestones — the tags and releases you can see. So a version documented below may have no tag, no release page and no diff link: `2.0.0` is real and is described here, and there is nothing to click. Comparison links appear only between release points this repository carries a tag for.
 
 ---
 
