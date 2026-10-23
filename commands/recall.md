@@ -34,16 +34,29 @@ The selection logic is a tested, **read-only** helper — do NOT re-derive it in
 it never writes):
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/save_session.py" resume            # newest for this repo
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/save_session.py" resume 2026-07-16  # a date
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/save_session.py" resume /path/to.md  # explicit file
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/plc-python.sh" "${CLAUDE_PLUGIN_ROOT}/scripts/save_session.py" resume            # newest for this repo
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/plc-python.sh" "${CLAUDE_PLUGIN_ROOT}/scripts/save_session.py" resume 2026-07-16  # a date
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/plc-python.sh" "${CLAUDE_PLUGIN_ROOT}/scripts/save_session.py" resume /path/to.md  # explicit file
 ```
+(Prerequisite: `bash` on PATH — `plc-python.sh` is a shell wrapper that finds a working Python and
+runs the script through it, because on Windows a bare `python3` is often an App Execution Alias
+rather than an interpreter. If no interpreter works it prints `COULD NOT RUN` naming each candidate
+it tried, and exits 3.)
+
 It prints `{"found": false}` or `{"found": true, "path", "project", "stale_days", "stale",
 "cross_project"}`. (Do NOT pipe a Stop payload into the script or run it bare — that is the *write*
 hook path; the `resume` subcommand is the read-only side. The subcommand keeps the name `resume`
 because it is internal — only the user-facing command is `/recall`.)
 
-1. **`found: false`** → say plainly "no PLC session digest for this repo yet — the save hook may not be
+1. **`found: false`** → **two causes, and the second one leaves no other trace.** Either the
+   save hook is not installed, **or it is installed and could not start a Python interpreter** — on
+   Windows `python3` is commonly an App Execution Alias rather than an interpreter, and the Stop hook
+   is specified to exit 0 regardless, so a machine with no working Python produces exactly this
+   `found: false` and nothing else. Name both. If the hook IS wired, running
+   `bash "${CLAUDE_PLUGIN_ROOT}/scripts/plc-python.sh" -c "print(1)"` by hand separates them:
+   `COULD NOT RUN`, naming each candidate it tried, means the interpreter is the problem rather than
+   the wiring. The original wording is kept below because it is still half the answer —
+   say plainly "no PLC session digest for this repo yet — the save hook may not be
    installed; see `/init-harness`" and stop.
 2. **`cross_project: true`** → no digest exists for this repo; name the fallback's `project` and let the
    user confirm before you brief from it (never silently cross projects — the classic wrong-project pick).

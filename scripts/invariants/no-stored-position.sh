@@ -26,10 +26,10 @@
 # thought of. A shape -- "a number over a number", "N of M", "N%" -- survives translation.
 #
 # AND THEN THE SHAPE WAS TOO WIDE, WHICH IS THE SAME DEFECT ONE LEVEL DOWN. Face 2's first
-# version scanned EVERY mainline row. Against this repo's real roadmap it produced 16 findings
-# and all 16 were wrong: `23/24`, `40/55`, `57/105`, `6 of 24` are how this project routinely
-# writes TEST RESULTS ("23 of 24 mutants killed", "40 red of 55"). A fraction in prose is not a
-# stored position -- this is R2-5's false red, reproduced by the author who was fixing R2-5.
+# version scanned EVERY mainline row. Against a real roadmap every finding it produced
+# was wrong: fractions such as `3/4` or `6 of 8` are how a roadmap routinely
+# writes TEST RESULTS ("3 of 4 mutants killed"). A fraction in prose is not a
+# stored position -- this is the false red, reproduced by the author who was fixing it.
 #
 # The narrowing is principled, not a threshold nudged until the noise stopped. POSITION IS A
 # PROPERTY OF A STATION, and a station is a row that HAS A PLAN BLOCK. A row no block binds to
@@ -131,10 +131,10 @@ face2=$(
       }
       # THE PERCENTAGE ARM IS GONE, and this is the measurement that removed it rather
       # than a judgement that it felt noisy. The moment a second row got a plan block --
-      # the readability line, at this phase close -- the arm produced FOUR findings on
-      # that one row and none of them was a position: two acceptance thresholds
-      # (`>= 20%`, `>= 30%`), one measured rate (`1.72%`), one ratio (`43x`). That is
-      # R2-5 recurring a third time: first as an English word scan, then as a fraction
+      # one more row, at a phase close -- the arm produced several findings on
+      # that one row and none of them was a position: acceptance thresholds
+      # (such as `>= 20%`), a measured rate, a ratio. That is
+      # the false red recurring again: first as an English word scan, then as a fraction
       # shape over every row, now as a bare percentage.
       #
       # AND THE NARROWING IS PRINCIPLED, not a threshold nudged until the noise stopped.

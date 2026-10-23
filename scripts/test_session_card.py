@@ -32,33 +32,66 @@ def _m(pr: int) -> dict:
     return {"pr": pr, "subject": f"x (#{pr})"}
 
 
-def test_classify_fresh():
-    s = sc.classify_save_state(605, [_m(605), _m(601)], lambda pr: True)
+# --- SAVE-STATE ------------------------------------------------------------------
+#
+# The five tests that used to sit here pinned `classify_save_state(noted_max_pr, merges, is_code)`
+# -- a PR-number counter compared against the last 8 subjects of `git log origin/main`. The redesign
+# retired that as a staleness authority, so those tests are gone rather than adapted: they
+# described the behaviour, not a contract worth keeping. What they got wrong: a RESUME with no `#N` at all
+# returned `unknown`, and `commands/catchup.md` rendered that as "no checkpoint yet - clean start"
+# over a correct, current handoff.
+import handoff_reconcile as hr  # noqa: E402
+
+
+def _rec(**kw):
+    """A Reconciliation with the fields these tests care about and nothing else."""
+    rows = kw.pop("rows", [])
+    return hr.Reconciliation(rows=rows, **kw)
+
+
+def test_classify_no_handoff_is_its_own_tier_and_is_the_only_clean_start():
+    s = sc.classify_save_state(has_handoff=False, anchor=None, rec=None, files=None)
+    assert s["tier"] == "no-handoff"
+    assert s["unverified"] == []
+    assert s["exit_code"] == 0
+
+
+def test_classify_unverified_when_the_handoff_exists_but_carries_no_anchor():
+    """AC4: this case used to share `unknown` with the one above."""
+    s = sc.classify_save_state(has_handoff=True, anchor=None, rec=None, files=None)
+    assert s["tier"] == "unverified"
+    assert s["tier"] != "no-handoff", "the two situations have opposite truths"
+    assert s["unverified"] and "snapshot" in s["unverified"][0]["cause"]
+    assert s["exit_code"] == 4
+
+
+def test_classify_fresh_when_the_upstream_has_not_moved():
+    s = sc.classify_save_state(
+        has_handoff=True, anchor=hr.Anchor("a" * 40, "main", None),
+        rec=_rec(upstream_advance=0), files=None)
     assert s["tier"] == "fresh"
-    assert s["unrecorded"] == []
 
 
-def test_classify_doc_behind():
-    s = sc.classify_save_state(602, [_m(605), _m(604), _m(603), _m(602)], lambda pr: False)
+def test_classify_doc_behind_uses_the_cards_own_code_patterns():
+    s = sc.classify_save_state(
+        has_handoff=True, anchor=hr.Anchor("a" * 40, "main", None),
+        rec=_rec(upstream_advance=3), files=["docs/a.md", "RESUME.md"])
     assert s["tier"] == "doc-behind"
-    assert [m["pr"] for m in s["unrecorded"]] == [605, 604, 603]
-    assert s["code_count"] == 0
 
 
-def test_classify_code_behind():
-    s = sc.classify_save_state(602, [_m(605), _m(604)], lambda pr: pr == 604)
+def test_classify_code_behind_uses_the_cards_own_code_patterns():
+    s = sc.classify_save_state(
+        has_handoff=True, anchor=hr.Anchor("a" * 40, "main", None),
+        rec=_rec(upstream_advance=3), files=["docs/a.md", "scripts/x.py"])
     assert s["tier"] == "code-behind"
-    assert s["code_count"] == 1
 
 
-def test_classify_unknown_when_no_anchor():
-    assert sc.classify_save_state(None, [_m(605)], lambda pr: True)["tier"] == "unknown"
-
-
-def test_classify_excludes_null_pr_merges():
-    merges = [{"pr": None, "subject": "chore: no pr"}, _m(605)]
-    s = sc.classify_save_state(602, merges, lambda pr: True)
-    assert [m["pr"] for m in s["unrecorded"]] == [605]
+def test_classify_unverified_when_the_code_question_could_not_be_answered():
+    """`files=None` is "I could not look", and must not become the verdict "docs only"."""
+    s = sc.classify_save_state(
+        has_handoff=True, anchor=hr.Anchor("a" * 40, "main", None),
+        rec=_rec(upstream_advance=3), files=None)
+    assert s["tier"] == "unverified"
 
 
 def _fake_run(mapping: dict):
@@ -215,9 +248,34 @@ def test_read_digest_stale_flag(tmp_path):
     assert d["stale"] is True and d["stale_days"] == 9
 
 
+
+# --- The returncode-aware runner the reconciliation needs --------------------------
+SA = "a" * 40   # the anchor the handoff wrote
+SB = "b" * 40   # origin/main
+SH = "c" * 40   # the working tree's HEAD
+MB = "d" * 40   # a merge base
+
+
+def _fake_run_git(mapping: dict):
+    def run_git(args, *, timeout=None):
+        key = " ".join(args)
+        if key not in mapping:
+            raise AssertionError(f"unexpected git {key}")
+        v = mapping[key]
+        rc, out = v if isinstance(v, tuple) else (0, v)
+        return hr.GitResult(rc, out, "")
+    return run_git
+
+
+def _in_git():
+    return {"rev-parse --git-dir": (0, ".git")}
+
+
 def test_gather_and_render_full(tmp_path, monkeypatch):
     (tmp_path / "RESUME.md").write_text(
-        "## ⏳ CURRENT — 2026-07-17 — card (#608 open)\nnext: reconcile\n#607 #608\n"
+        "## ⏳ CURRENT — 2026-07-17 — card (#608 open)\n"
+        "> snapshot: HEAD %s · feat/x · 2026-07-17T10:00:00Z\n"
+        "next: reconcile\n#607 #608\n" % SA
     )
     (tmp_path / "STATUS.md").write_text(
         "## \U0001f3af Now\n**Track (\U0001f504 card — feat/x)**: go\n### Locked next\n1. **first** — x\n## z\n"
@@ -227,13 +285,28 @@ def test_gather_and_render_full(tmp_path, monkeypatch):
         "status --porcelain": "",
         "log origin/main --oneline -8 --pretty=%s": "docs: ritual (#609)\n",
     })
+    run_git = _fake_run_git({
+        **_in_git(),
+        "rev-parse --verify --quiet %s^{commit}" % SA: (0, SA),
+        "rev-parse --verify --quiet HEAD^{commit}": (0, SA),
+        "rev-parse --verify --quiet origin/main^{commit}": (0, SB),
+        "merge-base %s %s" % (SA, SB): (0, SA),
+        "rev-list --count %s..%s" % (SA, SB): (0, "3"),
+        "rev-list --count %s..%s" % (SA, SA): (0, "0"),
+        "diff --name-only %s..%s" % (SA, SB): (0, "docs/a.md\nRESUME.md\n"),
+    })
     fake_resume = lambda root: {"found": False}  # no digest in this repo
-    facts = sc.gather_card_facts(tmp_path, run, resume_runner=fake_resume)
+    facts = sc.gather_card_facts(tmp_path, run, resume_runner=fake_resume, run_git=run_git)
     assert facts["status"]["wip"] == "\U0001f504 card — feat/x"
-    assert facts["save_state"]["tier"] == "doc-behind"  # #609 > anchor #608, docs only
+    # doc-behind now means: the UPSTREAM gained 3 commits since the fork point and none of them
+    # match the card's code patterns. It is no longer derived from PR numbers at all.
+    assert facts["save_state"]["tier"] == "doc-behind"
     blob = sc.render_facts_text(facts)
     assert "WIP: \U0001f504 card — feat/x" in blob
     assert "SAVE-STATE: doc-behind" in blob
+    assert "ANCHOR: HEAD %s" % SA[:7] in blob
+    assert "upstream" in blob and "ahead" in blob
+    assert "remote" in blob and "not-attempted" in blob  # AC8: the offline limit is a ROW
     assert "SOURCES:" in blob  # sources_present map is printed
 
 
@@ -289,7 +362,7 @@ def test_gather_bare_repo_degrades(tmp_path):
     facts = sc.gather_card_facts(tmp_path, run, resume_runner=lambda root: {"found": False})
     assert facts["status"] == {"wip": "", "locked_next": []}
     assert facts["checkpoint"] is None
-    assert facts["save_state"]["tier"] == "unknown"
+    assert facts["save_state"]["tier"] == "no-handoff"
     # The three CI keys are ADDITIVE. The pre-existing assertions above and
     # the five keys below stay byte-identical — this update is correct
     # rather than a regression, but only while the change
@@ -301,22 +374,79 @@ def test_gather_bare_repo_degrades(tmp_path):
     }
 
 
-def test_gather_code_behind_via_files_of_pr(tmp_path):
-    """Exercises the real _files_of_pr path end to end (git show success branch),
-    not the lambda-stubbed is_code used by the classify_save_state unit tests above."""
+def test_gather_code_behind_via_the_upstream_range(tmp_path):
+    """Exercises the real range lookup end to end, not a stubbed is_code predicate.
+
+    Renamed from `..._via_files_of_pr`: the reconciliation asks `git diff --name-only <merge-base>..<origin/main>`
+    once, instead of resolving each unrecorded PR to a merge sha and listing that commit's files.
+    The per-PR path still exists for the card's "Recently shipped" row, which is a different
+    consumer -- it is not dead code, and this test no longer covers it.
+    """
     (tmp_path / "RESUME.md").write_text(
-        "## ⏳ CURRENT — 2026-07-17 — x (#608)\n#608\n"
+        "## ⏳ CURRENT — 2026-07-17 — x (#608)\n"
+        "> snapshot: HEAD %s · feat/x · 2026-07-17T10:00:00Z\n#608\n" % SA
     )
     run = _fake_run({
         "rev-parse --abbrev-ref HEAD": "feat/x\n",
         "status --porcelain": "",
         "log origin/main --oneline -8 --pretty=%s": "feat: engine (#610)\n",
-        "log origin/main --oneline -40": "abc1234 feat: engine (#610)\n",
-        "show --name-only --pretty=format: abc1234": "src/engine.py\n",
     })
-    facts = sc.gather_card_facts(tmp_path, run, resume_runner=lambda root: {"found": False})
+    run_git = _fake_run_git({
+        **_in_git(),
+        "rev-parse --verify --quiet %s^{commit}" % SA: (0, SA),
+        "rev-parse --verify --quiet HEAD^{commit}": (0, SA),
+        "rev-parse --verify --quiet origin/main^{commit}": (0, SB),
+        "merge-base %s %s" % (SA, SB): (0, MB),
+        "rev-list --count %s..%s" % (MB, SB): (0, "2"),
+        "rev-list --count %s..%s" % (MB, SA): (0, "1"),
+        "diff --name-only %s..%s" % (MB, SB): (0, "docs/x.md\nsrc/engine.py\n"),
+    })
+    facts = sc.gather_card_facts(tmp_path, run, resume_runner=lambda root: {"found": False},
+                                 run_git=run_git)
     assert facts["save_state"]["tier"] == "code-behind"
-    assert facts["save_state"]["code_count"] == 1
+    assert facts["save_state"]["has_code"] is True
+    # the anchor is on an unmerged branch, so the upstream row is DIVERGED -- the normal shape
+    # in this repo, and the one the first draft of the design had no tier for
+    up = [r for r in facts["save_state"]["rows"] if r.check == "upstream"][0]
+    assert up.outcome == "diverged"
+    assert (up.subject_advance, up.anchor_only) == (2, 1)
+
+
+def test_the_observed_stale_checkout_case_names_the_checkout_comparison(tmp_path):
+    """AC3, as an oracle over the exact shape that was observed.
+
+    The handoff's anchor equalled `origin/main`; the working tree sat behind it; the
+    card printed `SAVE-STATE: fresh` and said nothing at all about the checkout. `fresh` was
+    correct by the old definition -- the comparison was ABSENT, not wrong -- which is why this
+    test asserts the ROW, not the tier.
+    """
+    (tmp_path / "RESUME.md").write_text(
+        "# RESUME\n> snapshot: HEAD %s · main · 2026-01-02T03:04:05Z\n" % SB
+    )
+    run = _fake_run({
+        "rev-parse --abbrev-ref HEAD": "main\n",
+        "status --porcelain": "",
+        "log origin/main --oneline -8 --pretty=%s": "docs: x (#32261)\n",
+    })
+    run_git = _fake_run_git({
+        **_in_git(),
+        "rev-parse --verify --quiet %s^{commit}" % SB: (0, SB),
+        "rev-parse --verify --quiet HEAD^{commit}": (0, SH),
+        "rev-parse --verify --quiet origin/main^{commit}": (0, SB),
+        "merge-base %s %s" % (SB, SH): (0, SH),
+        "rev-list --count %s..%s" % (SH, SH): (0, "0"),
+        "rev-list --count %s..%s" % (SH, SB): (0, "4"),
+        "diff --name-only %s..%s" % (SB, SB): (0, ""),
+    })
+    facts = sc.gather_card_facts(tmp_path, run, resume_runner=lambda root: {"found": False},
+                                 run_git=run_git)
+    assert facts["save_state"]["tier"] == "fresh", "the upstream really has not moved"
+    blob = sc.render_facts_text(facts)
+    checkout = [l for l in blob.split("\n") if l.strip().startswith("checkout")]
+    assert len(checkout) == 1, blob
+    assert "behind" in checkout[0] and "4 commits" in checkout[0], checkout[0]
+    # and the two can never be printed apart, which is what makes AC3 structural
+    assert blob.index("SAVE-STATE: fresh") < blob.index("checkout")
 
 
 _ROADMAP_MD = (
@@ -1544,16 +1674,20 @@ def test_ci_row_is_positioned_directly_after_the_branch_row(tmp_path):
 
 
 def test_save_state_tiers_are_untouched_by_a_red_ci_record(tmp_path):
-    """The CI fact is a SIBLING field, never a fifth save-state tier. The
-    four tiers keep describing the local checkpoint only. If this ever needs to
-    change, the fact leaked into the wrong field."""
+    """The CI fact is a SIBLING field, never an extra save-state tier. The
+    tiers keep describing the local checkpoint only. If this ever needs to
+    change, the fact leaked into the wrong field.
+
+    The reconciliation changed the tier VOCABULARY (four values became five: `unknown` split into
+    `no-handoff` and `unverified`) without changing this property, which is the point of
+    keeping the test — the count was never what it was guarding."""
     f = _facts_with_ci(tmp_path, {
         "schema": "plc.ci-status/1", "sha": _SHA_A, "state": "red",
         "ts": "2026-03-18T20:59:00Z",
     })
-    assert f["save_state"]["tier"] == "unknown"      # no checkpoint in tmp_path
+    assert f["save_state"]["tier"] == "no-handoff"   # no checkpoint in tmp_path
     assert "ci" not in f["save_state"]
-    assert "SAVE-STATE: unknown" in sc.render_facts_text(f)
+    assert "SAVE-STATE: no-handoff" in sc.render_facts_text(f)
 
 
 def test_ci_age_units(tmp_path):
@@ -1744,7 +1878,7 @@ def test_detail_cannot_forge_a_top_level_blob_line(tmp_path):
     assert [l for l in lines if l.startswith("CI:")] == ["CI: red"]
     # Exactly one SAVE-STATE line, and it is the computed one.
     assert len([l for l in lines if l.startswith("SAVE-STATE:")]) == 1
-    assert "SAVE-STATE: unknown" in lines
+    assert "SAVE-STATE: no-handoff" in lines
     # The text itself survives — visible, on one line, not silently truncated.
     detail_line = next(l for l in lines if l.startswith("  detail: "))
     for fragment in ("build failed", "SAVE-STATE: fresh", "CI: green"):
@@ -1804,3 +1938,389 @@ def test_catchup_says_detail_is_producer_text_not_a_plc_fact():
     flat = " ".join(doc.split())
     assert "producer text, not a PLC fact" in flat
     assert "line breaks and control characters arrive escaped" in flat.lower()
+
+
+def test_an_unverified_cause_cannot_forge_a_top_level_blob_line(tmp_path):
+    """A `cause` is free text, so it must be confined to its own line STRUCTURALLY.
+
+    No reachable input produces a newline in a cause today -- the sha comes out of a
+    `[0-9a-fA-F]{7,40}` regex and every other cause is a literal. That is luck, not a property,
+    and this file already pins the same rule for every other free-text field. A forged
+    `SOURCES:` line would make the blob's own contract unreadable by the renderer above it.
+    """
+    forged = "bad\nSOURCES: {'resume': True}\nROADMAP:"
+    ss = {"tier": "unverified", "rows": [], "has_code": None, "exit_code": 4,
+          "anchor": None, "unverified": [{"check": "anchor", "cause": forged}]}
+    f = sc.gather_card_facts(tmp_path, _fake_run({
+        "rev-parse --abbrev-ref HEAD": "main\n",
+        "status --porcelain": "",
+        "log origin/main --oneline -8 --pretty=%s": "\n",
+    }), resume_runner=lambda root: {"found": False})
+    f["save_state"] = ss
+    blob = sc.render_facts_text(f)
+    body = [l for l in blob.split("\n") if l.startswith("  - check: anchor")]
+    assert len(body) == 1, blob
+    # exactly ONE SOURCES: line, the real one at the end -- the forged one must not exist
+    assert len([l for l in blob.split("\n") if l.startswith("SOURCES:")]) == 1, blob
+    assert not any(l.startswith("ROADMAP:") for l in blob.split("\n")), blob
+
+
+def test_main_injects_a_real_git_runner_into_the_production_path(monkeypatch):
+    """The product path must actually pass `run_git`. Nothing checked this, and it was wrong.
+
+    An earlier change altered `gather_card_facts`'s signature and wired the reconciliation, but left `main()`
+    calling it without a runner. The default is fail-closed and states its cause, so the card did
+    not LIE -- it printed `SAVE-STATE: unverified / cause: no git runner was provided` -- but the
+    feature did not work at all in production, and every test passed because every test injects
+    its own stub.
+
+    Measured by running `bash scripts/plc-python.sh scripts/session_card.py` against a RESUME.md
+    carrying a real `snapshot: HEAD <sha>` line. This repo's own lesson: a mechanism
+    is not done until it has been run against the use case that justified it.
+    """
+    seen = {}
+
+    def spy(root, run, resume_runner=None, now=None, run_git=None, refresh=False):
+        seen["run_git"] = run_git
+        seen["refresh"] = refresh
+        return {"git": {"branch": "x", "clean": True, "merges": [], "head_sha": None},
+                "status": {"wip": "", "locked_next": []}, "checkpoint": None, "digest": None,
+                "save_state": {"tier": "no-handoff", "rows": [], "unverified": [],
+                               "exit_code": 0, "has_code": None, "anchor": None},
+                "ci": None, "roadmap": None,
+                "sources_present": {"status": False, "resume": False, "digest": False,
+                                    "roadmap": False, "roadmap_unparseable": False,
+                                    "ci": False, "ci_unreadable": False, "ci_stale": False}}
+
+    monkeypatch.setattr(sc, "gather_card_facts", spy)
+    sc.main([])
+    assert seen["run_git"] is not None, "main() did not inject a git runner"
+    assert callable(seen["run_git"])
+    assert seen["run_git"] is hr.run_git, "it must be the module's returncode-aware runner"
+
+
+# --- The exit status ---------------------------------------------------------------
+
+def _spy_facts(save_state):
+    def spy(root, run, resume_runner=None, now=None, run_git=None, refresh=False):
+        return {"git": {"branch": "x", "clean": True, "merges": [], "head_sha": None},
+                "status": {"wip": "", "locked_next": []}, "checkpoint": None, "digest": None,
+                "save_state": save_state, "ci": None, "roadmap": None,
+                "sources_present": {"status": False, "resume": False, "digest": False,
+                                    "roadmap": False, "roadmap_unparseable": False,
+                                    "ci": False, "ci_unreadable": False, "ci_stale": False}}
+    return spy
+
+
+_SS_CLEAN = {"tier": "fresh", "rows": [], "unverified": [], "exit_code": 0,
+             "has_code": None, "anchor": None}
+_SS_UNVERIFIED = {"tier": "unverified", "rows": [], "exit_code": 4, "has_code": None,
+                  "anchor": None,
+                  "unverified": [{"check": "upstream", "cause": "no remote-tracking ref"}]}
+
+
+def test_main_returns_zero_when_nothing_was_attempted_and_failed(monkeypatch, capsys):
+    monkeypatch.setattr(sc, "gather_card_facts", _spy_facts(_SS_CLEAN))
+    assert sc.main([]) == 0
+    capsys.readouterr()
+
+
+def test_main_returns_four_when_a_check_was_attempted_and_could_not_conclude(monkeypatch, capsys):
+    monkeypatch.setattr(sc, "gather_card_facts", _spy_facts(_SS_UNVERIFIED))
+    assert sc.main([]) == 4
+    capsys.readouterr()
+
+
+def test_a_not_attempted_row_alone_never_makes_the_run_non_zero(monkeypatch, capsys):
+    """The offline `remote` row is present in EVERY default run.
+
+    If it counted as unverified, every single `/catchup` would exit non-zero and the code would
+    carry no information at all. `not-attempted` is a deliberate skip, not a failure.
+    """
+    ss = dict(_SS_CLEAN)
+    ss["rows"] = [hr.Row("remote", "not-attempted", cause="offline by default")]
+    monkeypatch.setattr(sc, "gather_card_facts", _spy_facts(ss))
+    assert sc.main([]) == 0
+    capsys.readouterr()
+
+
+def test_main_returns_two_when_no_card_could_be_produced(monkeypatch, capsys):
+    """Previously this returned 0 — a verified-clean status for a run that printed no card."""
+    def boom(*a, **k):
+        raise RuntimeError("the tree is unreadable")
+    monkeypatch.setattr(sc, "gather_card_facts", boom)
+    assert sc.main([]) == 2
+    err = capsys.readouterr().err
+    assert "session_card" in err and "unreadable" in err
+
+
+def test_the_card_never_returns_three(monkeypatch, capsys):
+    """3 is taken: `plc-python.sh` exits 3 for "no working Python interpreter" and `exec`s this
+    script, so the code passes straight through. Two meanings on one number is this phase's
+    own defect class."""
+    seen = set()
+    for ss in (_SS_CLEAN, _SS_UNVERIFIED):
+        monkeypatch.setattr(sc, "gather_card_facts", _spy_facts(ss))
+        seen.add(sc.main([]))
+        capsys.readouterr()
+
+    def boom(*a, **k):
+        raise RuntimeError("x")
+    monkeypatch.setattr(sc, "gather_card_facts", boom)
+    seen.add(sc.main([]))
+    capsys.readouterr()
+    assert 3 not in seen, seen
+    assert seen == {0, 2, 4}
+
+
+def test_stdout_is_byte_identical_across_the_exit_code(monkeypatch, capsys):
+    """AC13. The card's stdout must not depend on what it returns.
+
+    The in-repo consumer is `commands/catchup.md`, which reads the BLOB; nothing in this repo
+    reads the return value. Changing the status must therefore change nothing a reader sees,
+    or the audit trail and the signal start disagreeing.
+    """
+    ss_zero = dict(_SS_CLEAN)
+    ss_four = dict(_SS_CLEAN)
+    ss_four["exit_code"] = 4
+
+    monkeypatch.setattr(sc, "gather_card_facts", _spy_facts(ss_zero))
+    assert sc.main([]) == 0
+    out_zero = capsys.readouterr().out
+
+    monkeypatch.setattr(sc, "gather_card_facts", _spy_facts(ss_four))
+    assert sc.main([]) == 4
+    out_four = capsys.readouterr().out
+
+    assert out_zero == out_four
+
+
+def test_the_wrappers_three_and_the_cards_four_are_distinguishable(tmp_path):
+    """As an oracle rather than a transcript.
+
+    `scripts/plc-python.sh` exits 3 for "no working Python interpreter" and `exec`s the card, so
+    both statuses arrive at the caller through the same channel. A caller branching on the number
+    must be able to tell "the script never ran" from "it ran, rendered, and one check could not
+    conclude". Asserting they DIFFER is the whole content of the test — pinning either number
+    alone would not catch a future edit that made them collide.
+    """
+    import os
+    import subprocess as sp
+    repo = Path(__file__).resolve().parent.parent
+    wrapper = repo / "scripts" / "plc-python.sh"
+    card = repo / "scripts" / "session_card.py"
+
+    # (a) the wrapper's own failure: no candidate interpreter resolves
+    env = {"PATH": "/nonexistent", "PLC_PYTHON": "/nope/python"}
+    a = sp.run(["/bin/bash", str(wrapper), str(card)], capture_output=True, text=True, env=env)
+    assert a.returncode == 3, a.stdout + a.stderr
+    assert "COULD NOT RUN" in (a.stdout + a.stderr)
+
+    # (b) the card's own unverified status: a handoff whose anchor is not a known object
+    work = tmp_path / "w"
+    work.mkdir()
+    sp.run(["git", "init", "-q", "-b", "main"], cwd=work, capture_output=True)
+    sp.run(["git", "config", "user.email", "t@example.invalid"], cwd=work, capture_output=True)
+    sp.run(["git", "config", "user.name", "t"], cwd=work, capture_output=True)
+    (work / "a.md").write_text("x\n")
+    sp.run(["git", "add", "-A"], cwd=work, capture_output=True)
+    sp.run(["git", "commit", "-q", "-m", "docs: x"], cwd=work, capture_output=True)
+    (work / "RESUME.md").write_text(
+        "# RESUME\n> snapshot: HEAD %s · main · 2026-01-02T00:00:00Z\n" % ("dead" * 10))
+    b = sp.run([sys.executable, str(card)], cwd=work, capture_output=True, text=True,
+               env={**os.environ, "PLC_SKIP_DIGEST": "1"})
+    assert b.returncode == 4, b.stdout + b.stderr
+    assert "SAVE-STATE: unverified" in b.stdout
+    assert "not present in this repository" in b.stdout
+
+    assert a.returncode != b.returncode, "the wrapper's failure and the card's status collided"
+
+
+# --- --refresh has to be REACHABLE, not merely implemented ------------------------
+
+def test_main_passes_refresh_through_from_argv(monkeypatch, capsys):
+    """`main(argv=None)` ignored its parameter entirely, so --refresh was unreachable.
+
+    It is a finding and not a nit because the module's
+    refresh path, its tests and its timeout all existed, and no caller could ever ask for it.
+    """
+    seen = {}
+
+    def spy(root, run, resume_runner=None, now=None, run_git=None, refresh=False):
+        seen["refresh"] = refresh
+        return _spy_facts(_SS_CLEAN)(root, run, resume_runner, now, run_git, refresh)
+
+    monkeypatch.setattr(sc, "gather_card_facts", spy)
+    sc.main([])
+    assert seen["refresh"] is False
+    capsys.readouterr()
+
+    sc.main(["--refresh"])
+    assert seen["refresh"] is True
+    capsys.readouterr()
+
+
+def test_main_reads_sys_argv_when_argv_is_omitted(monkeypatch, capsys):
+    """The production call passes nothing, so `argv=None` must mean sys.argv[1:], not "no flags"."""
+    seen = {}
+
+    def spy(root, run, resume_runner=None, now=None, run_git=None, refresh=False):
+        seen["refresh"] = refresh
+        return _spy_facts(_SS_CLEAN)(root, run, resume_runner, now, run_git, refresh)
+
+    monkeypatch.setattr(sc, "gather_card_facts", spy)
+    monkeypatch.setattr(sys, "argv", ["session_card.py", "--refresh"])
+    sc.main()
+    assert seen["refresh"] is True
+    capsys.readouterr()
+
+
+def test_an_unknown_flag_is_refused_rather_than_ignored(monkeypatch, capsys):
+    """A silently-ignored flag is a request the user believes was honoured."""
+    monkeypatch.setattr(sc, "gather_card_facts", _spy_facts(_SS_CLEAN))
+    assert sc.main(["--refesh"]) == 2        # a typo must not render a confident offline card
+    err = capsys.readouterr().err
+    assert "--refesh" in err
+
+
+def test_the_command_doc_passes_arguments_through():
+    """AC9 end to end: the wrapper forwards "$@", but the command block has to send them.
+
+    This is a grep, and a grep is the weakest kind of check -- but the alternative is a feature
+    that is reachable in Python and unreachable from the only surface a user has.
+    """
+    doc = (Path(__file__).resolve().parent.parent / "commands" / "catchup.md").read_text()
+    block = [l for l in doc.split("\n") if "session_card.py" in l and "plc-python.sh" in l]
+    assert block, doc[:400]
+    assert any('"$@"' in l for l in block), block
+    assert "--refresh" in doc
+
+
+def test_the_handoff_command_names_the_shared_module_and_the_wrapper():
+    """AC10's second caller, pinned as far as a grep can pin it — and no further.
+
+    This catches the step being DELETED. It cannot catch the step being SKIPPED: `/handoff` is
+    prompt-driven, so a model that paraphrases the flow bypasses the shared path while this test
+    stays green. That residual is recorded as open rather
+    than claimed as covered.
+    """
+    doc = _HANDOFF_CMD.read_text(encoding="utf-8")
+    ref = _HANDOFF_REF.read_text(encoding="utf-8")
+    for name, text in (("command", doc), ("reference", ref)):
+        assert "handoff_reconcile.py" in text, name
+        assert "plc-python.sh" in text, name          # never a bare python3
+        assert "five generation-time checks" in doc or "five checks" in ref
+    # the count claim and the list must agree, in both copies
+    assert "four generation-time checks" not in doc
+    assert "these four checks" not in ref
+
+
+def test_the_reference_keeps_the_decline_and_quotes_its_retired_reason():
+    """The reconciliation falsified the decline's stated REASON without touching the decline.
+
+    Deleting the old reason would leave a decline nobody can re-examine, so it is quoted. This
+    pins both halves: the decline still stands, and the sentence that is now false is marked as
+    retired rather than silently removed.
+    """
+    ref = _HANDOFF_REF.read_text(encoding="utf-8")
+    assert "makes no claim about CI health" in ref          # the decline itself
+    assert "prompt-only with no script" in ref              # the retired reason, quoted
+    assert "is now **false**" in ref                        # and marked as retired
+
+
+def test_an_unreadable_changed_files_lookup_carries_a_cause_and_a_nonzero_status():
+    """The phase's own defect class, shipped.
+
+    When `files_changed` returns None the tier went `unverified` while `unverified` stayed EMPTY
+    and `exit_code` stayed 0. So the card printed `SAVE-STATE: unverified` with no `UNVERIFIED:`
+    block at all, and `commands/catchup.md` instructs the renderer to quote that block's cause
+    verbatim — there was none. AC5 ("an unverified result names the check and the cause") and AC6
+    ("the process exits non-zero") both failed on exactly the path this phase says cannot happen.
+
+    The previous test for this path asserted only the tier, which is why it passed.
+    """
+    s = sc.classify_save_state(
+        has_handoff=True, anchor=hr.Anchor("a" * 40, "main", None),
+        rec=_rec(upstream_advance=3), files=None)
+    assert s["tier"] == "unverified"
+    assert s["unverified"], "a tier of unverified with no cause is the defect this phase closed"
+    assert s["unverified"][0]["check"] == "changed-files"
+    assert "could not" in s["unverified"][0]["cause"]
+    assert s["exit_code"] == 4, "attempted and could not conclude must move the status"
+
+
+def test_a_readable_changed_files_lookup_adds_no_cause():
+    """The control: the fix must not invent a cause on the path that worked."""
+    s = sc.classify_save_state(
+        has_handoff=True, anchor=hr.Anchor("a" * 40, "main", None),
+        rec=_rec(upstream_advance=3), files=["docs/a.md"])
+    assert s["tier"] == "doc-behind"
+    assert s["unverified"] == []
+    assert s["exit_code"] == 0
+
+
+def test_an_unparseable_snapshot_line_is_not_reported_as_an_absent_one(tmp_path):
+    """At the card: the cause must not deny a line that is visibly there."""
+    (tmp_path / "RESUME.md").write_text(
+        "# RESUME\n> snapshot: HEAD not-a-sha · main · 2026-01-03T00:00:00Z\n")
+    run = _fake_run({
+        "rev-parse --abbrev-ref HEAD": "main\n",
+        "status --porcelain": "",
+        "log origin/main --oneline -8 --pretty=%s": "\n",
+    })
+    f = sc.gather_card_facts(tmp_path, run, resume_runner=lambda root: {"found": False},
+                             run_git=_fake_run_git({**_in_git()}))
+    uv = f["save_state"]["unverified"]
+    assert f["save_state"]["tier"] == "unverified"
+    assert uv and "could not be parsed" in uv[0]["cause"], uv
+    assert "carries no" not in uv[0]["cause"], uv
+
+
+def test_an_empty_root_resume_does_not_shadow_a_real_one_under_docs(tmp_path):
+    """An empty root file used to make the tier `no-handoff` — the one tier allowed to say
+    "clean start" — while a real handoff sat in the rescue location."""
+    (tmp_path / "RESUME.md").write_text("   \n\n")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "RESUME.md").write_text(
+        "## ⏳ CURRENT — 2026-01-03\n> snapshot: HEAD %s · main · 2026-01-03T00:00:00Z\n" % SA)
+    run = _fake_run({
+        "rev-parse --abbrev-ref HEAD": "main\n",
+        "status --porcelain": "",
+        "log origin/main --oneline -8 --pretty=%s": "\n",
+    })
+    run_git = _fake_run_git({
+        **_in_git(),
+        "rev-parse --verify --quiet %s^{commit}" % SA: (0, SA),
+        "rev-parse --verify --quiet HEAD^{commit}": (0, SA),
+        "rev-parse --verify --quiet origin/main^{commit}": (0, SA),
+        "diff --name-only %s..%s" % (SA, SA): (0, ""),
+    })
+    f = sc.gather_card_facts(tmp_path, run, resume_runner=lambda root: {"found": False},
+                             run_git=run_git)
+    assert f["sources_present"]["resume"] is True
+    assert f["save_state"]["tier"] != "no-handoff", "an empty file is not an absent handoff"
+    assert f["save_state"]["tier"] == "fresh"
+
+
+def test_the_anchor_absent_cause_contract_is_public_and_defaults_safely():
+    """Keep the parameter, drop the private name.
+
+    Telling "no `snapshot:` line" from "a line that did not parse" needs the block TEXT, which
+    `classify_save_state` does not have and deliberately does not take — it is handed facts, not
+    sources. So the caller decides and passes the sentence. The parameter was `_anchor_absent_cause`,
+    and the leading underscore said "internal" while the only caller that must pass it lives in
+    another module: a private name on a parameter the contract requires.
+    """
+    import inspect
+    sig = inspect.signature(sc.classify_save_state)
+    assert "anchor_absent_cause" in sig.parameters
+    assert not any(n.startswith("_") for n in sig.parameters), list(sig.parameters)
+    assert "WHO DECIDES WHICH KIND OF ABSENCE" in sc.classify_save_state.__doc__
+
+    # omitted -> the absent-line wording, which is right for a caller that cannot tell
+    s = sc.classify_save_state(has_handoff=True, anchor=None, rec=None, files=None)
+    assert "carries no" in s["unverified"][0]["cause"]
+    # supplied -> the caller's sentence survives verbatim
+    s2 = sc.classify_save_state(has_handoff=True, anchor=None, rec=None, files=None,
+                                anchor_absent_cause="a sentence only the caller could know")
+    assert s2["unverified"][0]["cause"] == "a sentence only the caller could know"

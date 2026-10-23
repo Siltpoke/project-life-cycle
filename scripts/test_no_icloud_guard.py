@@ -2,7 +2,10 @@
 
 The guard used to scan `git ls-files` and therefore saw TRACKED FILES ONLY. Conflict copies inside
 a gitignored directory — a copy of an append-only ledger, a journal archive — stayed invisible, because
-`git ls-files` reports nothing about ignored or untracked paths.
+`git ls-files` reports nothing
+about ignored OR UNTRACKED paths. `docs/` was gitignored then as well; p39 made it tracked,
+and the second half is the half that still bites: a conflict copy is untracked by construction,
+wherever it lands.
 
 `test_a_copy_inside_a_gitignored_directory_is_caught` is the regression guard for exactly that.
 Reverting the scan to `git ls-files` makes it, and only it, go green when it should be red — which
@@ -50,7 +53,10 @@ def test_a_clean_repo_passes(tmp_path: Path) -> None:
 
 def test_a_copy_inside_a_gitignored_directory_is_caught(tmp_path: Path) -> None:
     """THE regression guard. This is the case a tracked-files-only scan leaves invisible for as
-    long as it lasts: inside a gitignored `docs/`, `git ls-files` can never name anything."""
+    whole phase. What made it invisible is `git ls-files`: it names TRACKED paths, so a conflict
+    copy — untracked by construction — is never in its output. `docs/` was also gitignored at the
+    time; p39 made it tracked, and this case is unchanged, because an untracked copy inside a
+    TRACKED directory is just as invisible to `ls-files`."""
     r = _repo(tmp_path)
     (r / "docs" / "note 2.md").write_text("stale\n", encoding="utf-8")
     res = _run(r)
@@ -120,7 +126,7 @@ def test_the_tracked_label_is_decided_by_a_literal_path(tmp_path: Path) -> None:
 @pytest.mark.parametrize("digit", ["2", "3", "9"])
 def test_every_digit_in_the_range_is_witnessed(tmp_path: Path, digit: str) -> None:
     """The widened range had no test above ` 2`, and the mutant proved it: changing both
-    `[2-9]` occurrences to `[2-2]` left all nine tests green. That is not academic — `.git/index 3`
+    `[2-9]` occurrences to `[2-2]` left every test green. That is not academic — `.git/index 3`
     is exactly the kind of copy a sync client leaves beside git's index, so a realistic
     case was the one nothing pinned.
     """

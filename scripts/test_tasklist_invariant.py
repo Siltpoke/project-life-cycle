@@ -138,9 +138,16 @@ def test_no_broad_tasklist_sweep_over_ls_files(tmp_path):
     """No broad sweep, asserted BEHAVIOURALLY rather than by grepping the script for a forbidden string.
 
     The false positive to rule out is concrete: this repo really does track
-    `scripts/tasklist-view.sh`, its test, and a command doc. A sweep for `*tasklist*` over
-    `git ls-files` would red on all three. The fixture plants exactly that shape — tracked files
-    whose names contain `tasklist` but which are not tasklists — and requires a PASS.
+    files whose names contain `tasklist` but which are not tasklists, and a sweep for `*tasklist*`
+    over `git ls-files` would red on all of them. The fixture plants exactly that shape and requires
+    a PASS.
+
+    Three paths that matched `*tasklist*` — `scripts/tasklist-view.sh`, its test, and the command doc
+    — were removed, so they are kept here as fixture names only. The fixture is written into
+    a temp repo by `mkrepo`, never read from this one, which is why this row keeps passing across
+    that removal. Tracked paths still match `*tasklist*` and none is a tasklist
+    artifact, the invariant's own script among them — so the shape this row guards is still real, not
+    a historical curiosity preserved by a fixture.
     """
     root = mkrepo(tmp_path)
     (root / "scripts").mkdir()

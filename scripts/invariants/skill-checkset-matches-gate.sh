@@ -15,11 +15,11 @@
 # drift on either side reds this, and no edit here is needed when a check is legitimately added.
 #
 # THE PARSE MUST SURVIVE INDENTATION, and that is not hypothetical. `^cs ` (column-0 anchor) would
-# match all twelve calls that exist today only because all twelve happen to be flush-left. The
+# match every call that exists today only because every one happens to be flush-left. The
 # experiment-gate check being added in this same phase has an `off` state that must skip its
 # `cs()` call entirely -- which means wrapping it in an `if` and indenting it. A column-0 anchor
 # would then go SILENTLY BLIND to the newest check, which is the one a fresh pin most needs to
-# see. Found by cross-check agent B before the code existed.
+# see. Found by a review before the code existed.
 #
 # WHAT IT DOES NOT DO, stated here rather than discovered later: it says nothing about whether a
 # row's DESCRIPTION or its MODE column is accurate. Only the id sets are compared. A row claiming

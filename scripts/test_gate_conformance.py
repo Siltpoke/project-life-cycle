@@ -49,7 +49,7 @@ NARROWING_KEY = "test_evidence_inputs"
 #
 # A "measurement-shaped" value, per AC3. Written here from that prose; the phrase happens to
 # read like this repo's own rationale, which is where AC3's wording came from in the first place.
-MEASUREMENT = ["2050 files, 77 tracked -- the narrowed set is exactly the validator's inputs"]
+MEASUREMENT = ["1200 files, 40 tracked -- the narrowed set is exactly the validator's inputs"]
 
 # A placeholder in the scaffolder's own house style. It carries NO two numbers and NOT the word
 # "track", which is precisely what must keep it from satisfying the requirement (the conformance design).
@@ -58,7 +58,7 @@ PLACEHOLDER = ["REPLACE_ME_WHY_THE_INPUT_SET_IS_NARROW"]
 # p30's replacement shape. `surface_kept` is deliberately ABSENT: the gate derives it, and writing
 # it is itself a failure (p30:AC2).
 OBJECT_SHAPE = {
-    "surface_total": 2050,
+    "surface_total": 1200,
     "basis": "tracked-files",
     "why": ["the narrowed set is exactly the validator's inputs"],
 }
@@ -363,12 +363,12 @@ def test_an_explicit_null_narrowing_does_not_fire(tmp_path: Path, gate: tuple[st
     [
         # p30:AC2 -- a declared kept-count is REFUSED, not ignored. Accepting-and-ignoring it lets a
         # stale copied number sit in the manifest looking authoritative while nothing reads it, which
-        # is the 77-vs-595 shape this phase exists to remove.
+        # is the stale-count shape this phase exists to remove.
         ("declares the derived member",
-         {"surface_total": 2050, "surface_kept": 77, "basis": "tracked-files", "why": ["x"]}),
+         {"surface_total": 1200, "surface_kept": 40, "basis": "tracked-files", "why": ["x"]}),
         # p30:AC1 -- each member checked for what it IS.
         ("surface_total is a numeric STRING",
-         {"surface_total": "2050", "basis": "tracked-files", "why": ["x"]}),
+         {"surface_total": "1200", "basis": "tracked-files", "why": ["x"]}),
         ("surface_total is zero",
          {"surface_total": 0, "basis": "tracked-files", "why": ["x"]}),
         ("surface_total is negative",
@@ -376,17 +376,17 @@ def test_an_explicit_null_narrowing_does_not_fire(tmp_path: Path, gate: tuple[st
         ("surface_total absent",
          {"basis": "tracked-files", "why": ["x"]}),
         ("basis is not in the enum",
-         {"surface_total": 2050, "basis": "whatever-i-felt-like", "why": ["x"]}),
+         {"surface_total": 1200, "basis": "whatever-i-felt-like", "why": ["x"]}),
         ("basis absent",
-         {"surface_total": 2050, "why": ["x"]}),
+         {"surface_total": 1200, "why": ["x"]}),
         ("why is an empty array",
-         {"surface_total": 2050, "basis": "tracked-files", "why": []}),
+         {"surface_total": 1200, "basis": "tracked-files", "why": []}),
         ("why is a bare string, not an array",
-         {"surface_total": 2050, "basis": "tracked-files", "why": "x"}),
+         {"surface_total": 1200, "basis": "tracked-files", "why": "x"}),
         ("why holds only whitespace",
-         {"surface_total": 2050, "basis": "tracked-files", "why": ["   "]}),
+         {"surface_total": 1200, "basis": "tracked-files", "why": ["   "]}),
         ("why holds a non-string",
-         {"surface_total": 2050, "basis": "tracked-files", "why": [7]}),
+         {"surface_total": 1200, "basis": "tracked-files", "why": [7]}),
     ],
 )
 def test_a_malformed_object_is_refused(
@@ -407,10 +407,10 @@ def test_every_declared_enum_value_is_accepted(
     `all-files` in particular MUST be accepted: p30:AC6's object-branch cheat string uses it, and if
     it were rejected on the enum predicate the mutant would never reach `surface_total` -- it would
     silently prove enum-rejection works while appearing to prove that forgery passes. A test green
-    for the wrong reason. Cross-check agent B found that the enum had never been written down at all.
+    for the wrong reason. A review found that the enum had never been written down at all.
     """
     name, script = gate
-    rationale = {"surface_total": 2050, "basis": basis, "why": ["prose"]}
+    rationale = {"surface_total": 1200, "basis": basis, "why": ["prose"]}
     repo = _repo(tmp_path, _manifest(narrowing=["src/**"], rationale=rationale))
     rows = _rows_naming_the_key(repo, script)
     assert not rows, f"[{name}] basis={basis} is a declared enum value and must pass:\n" + "\n".join(rows)
@@ -419,7 +419,7 @@ def test_every_declared_enum_value_is_accepted(
 def test_why_may_be_any_language_and_the_gate_reads_none_of_it(
     tmp_path: Path, gate: tuple[str, str]
 ) -> None:
-    """The whole point. These four are quoted from the filing table itself.
+    """The whole point. These four are representative.
 
     No CJK literal appears in this file: the CJK rule exempts `docs/` outright and nothing
     else, so the Chinese case is written with escapes. That is a constraint of where this file lives,
@@ -427,14 +427,14 @@ def test_why_may_be_any_language_and_the_gate_reads_none_of_it(
     """
     name, script = gate
     prose = [
-        "two thousand fifty markdown files, seventy seven tracked files",
-        "dos mil cincuenta archivos markdown; setenta y siete bajo git",
-        # "the whole repo has 2050 .md, git tracks 77" -- escaped, see the docstring
-        "\u5168\u4ed3 2050 \u4e2a .md\uff0cgit \u8ddf\u8e2a 77 \u4e2a",
+        "twelve hundred markdown files, forty tracked files",
+        "mil doscientos archivos markdown; cuarenta bajo git",
+        # "the whole repo has 1200 .md, git tracks 40" -- escaped, see the docstring
+        "\u5168\u4ed3 1200 \u4e2a .md\uff0cgit \u8ddf\u8e2a 40 \u4e2a",
         "All validator inputs are enumerated by path; the suite reads no other files",
     ]
     for text in prose:
-        rationale = {"surface_total": 2050, "basis": "tracked-files", "why": [text]}
+        rationale = {"surface_total": 1200, "basis": "tracked-files", "why": [text]}
         sub = tmp_path / f"r{prose.index(text)}"
         sub.mkdir(parents=True, exist_ok=True)
         repo = _repo(sub, _manifest(narrowing=["src/**"], rationale=rationale))
@@ -488,8 +488,8 @@ def test_the_row_names_only_the_predicate_that_failed(tmp_path: Path, gate: tupl
     name, script = gate
     cases = {
         "surface_total": {"basis": "tracked-files", "why": ["x"]},
-        "basis": {"surface_total": 2050, "why": ["x"]},
-        "why": {"surface_total": 2050, "basis": "tracked-files"},
+        "basis": {"surface_total": 1200, "why": ["x"]},
+        "why": {"surface_total": 1200, "basis": "tracked-files"},
     }
     for broken, rationale in cases.items():
         row = _row_for(tmp_path / broken, script, rationale)
@@ -506,7 +506,7 @@ def test_the_row_echoes_this_manifests_own_value(tmp_path: Path, gate: tuple[str
     """p30:AC9 -- "what this manifest has" must be THIS manifest's, not a generic example."""
     name, script = gate
     marker = "a-string-that-appears-in-no-template-anywhere"
-    rationale = {"surface_total": 2050, "basis": "nope", "why": [marker]}
+    rationale = {"surface_total": 1200, "basis": "nope", "why": [marker]}
     row = _row_for(tmp_path, script, rationale)
     assert marker in row, f"[{name}] the row does not echo the author's own text:\n{row}"
 
@@ -519,9 +519,9 @@ def test_a_control_character_never_reaches_the_terminal(tmp_path: Path, gate: tu
     the work in that sentence.
     """
     name, script = gate
-    complete = {"surface_total": 2050, "basis": "nope", "why": [f"a{ESC}[31mRED{ESC}[0m b"]}
+    complete = {"surface_total": 1200, "basis": "nope", "why": [f"a{ESC}[31mRED{ESC}[0m b"]}
     # 100 is the gate's declared truncation point; put the ESC where the cut lands.
-    split = {"surface_total": 2050, "basis": "nope", "why": ["x" * 99 + ESC + "[31mtail"]}
+    split = {"surface_total": 1200, "basis": "nope", "why": ["x" * 99 + ESC + "[31mtail"]}
     for label, rationale in (("complete", complete), ("split", split)):
         sub = tmp_path / label
         sub.mkdir(parents=True, exist_ok=True)
@@ -539,7 +539,7 @@ def test_an_over_length_value_is_actually_truncated(tmp_path: Path, gate: tuple[
     truncation at all.
     """
     name, script = gate
-    rationale = {"surface_total": 2050, "basis": "nope", "why": ["y" * 500]}
+    rationale = {"surface_total": 1200, "basis": "nope", "why": ["y" * 500]}
     row = _row_for(tmp_path, script, rationale)
     assert "[truncated]" in row, f"[{name}] a 500-character value was not truncated:\n{row[:400]}"
 
@@ -578,7 +578,7 @@ def test_the_row_says_the_old_language_bound_rule_is_gone(tmp_path: Path, gate: 
     lift from an oversight, so each failing row now says the requirement is gone.
     """
     name, script = gate
-    row = _row_for(tmp_path, script, {"surface_total": 2050, "basis": "nope", "why": ["x"]})
+    row = _row_for(tmp_path, script, {"surface_total": 1200, "basis": "nope", "why": ["x"]})
     assert "no longer requires Arabic numerals" in row, (
         f"[{name}] the row does not say the old constraint was lifted:\n{row}"
     )
@@ -599,7 +599,7 @@ def test_the_passing_row_says_which_number_it_did_not_audit(tmp_path: Path, gate
     rewording, and the property is that BOTH halves are stated, not that they are stated this way.
     """
     name, script = gate
-    rationale = {"surface_total": 2050, "basis": "tracked-files", "why": ["prose"]}
+    rationale = {"surface_total": 1200, "basis": "tracked-files", "why": ["prose"]}
     repo = _repo(tmp_path, _manifest(narrowing=["src/**"], rationale=rationale))
     passing = [
         ln for ln in _task(repo, script).stdout.splitlines()
@@ -614,7 +614,7 @@ def test_the_passing_row_says_which_number_it_did_not_audit(tmp_path: Path, gate
 
 
 def test_blank_strings_may_separate_paragraphs_in_why(tmp_path: Path, gate: tuple[str, str]) -> None:
-    """p30:AC1, refined by dogfooding -- `why` is prose, and prose has paragraphs.
+    """p30:AC1, refined in use -- `why` is prose, and prose has paragraphs.
 
     FOUND BY MIGRATING THIS REPOSITORY'S OWN MANIFEST, not by design. The first version of the rule
     required EVERY element to be non-blank, and it refused the twelve-line argument this repo
@@ -624,14 +624,14 @@ def test_blank_strings_may_separate_paragraphs_in_why(tmp_path: Path, gate: tupl
     The pair below is the whole rule: content among the blanks passes, blanks alone do not.
     """
     name, script = gate
-    ok_case = {"surface_total": 2050, "basis": "tracked-files",
+    ok_case = {"surface_total": 1200, "basis": "tracked-files",
                "why": ["first paragraph", "", "second paragraph"]}
     (tmp_path / "ok").mkdir(parents=True, exist_ok=True)
     repo = _repo(tmp_path / "ok", _manifest(narrowing=["src/**"], rationale=ok_case))
     assert not _rows_naming_the_key(repo, script), (
         f"[{name}] blank separators between real prose must be accepted"
     )
-    empty_case = {"surface_total": 2050, "basis": "tracked-files", "why": ["", "   ", ""]}
+    empty_case = {"surface_total": 1200, "basis": "tracked-files", "why": ["", "   ", ""]}
     (tmp_path / "empty").mkdir(parents=True, exist_ok=True)
     repo = _repo(tmp_path / "empty", _manifest(narrowing=["src/**"], rationale=empty_case))
     assert _failing_rows_naming_the_key(repo, script), (
@@ -665,13 +665,13 @@ def test_check_nine_is_byte_identical_across_locales(
     """
     name, script = gate
     rationale = {
-        "surface_total": 2050,
+        "surface_total": 1200,
         "basis": "tracked-files",
         # Written as \u escapes, not literals: `scripts/` is outside the CJK rule's only exemption
         # (`docs/`). The bytes reaching the gate are identical either way.
-        # Arabic-Indic 2050, fullwidth 77, CJK "whole repo", plus ASCII -- one string, four scripts.
+        # Arabic-Indic 1200, fullwidth 40, CJK "whole repo", plus ASCII -- one string, four scripts.
         # Under the OLD rule these are exactly the inputs whose verdict moved with the locale.
-        "why": ["\u0662\u0660\u0665\u0660 \uff17\uff17 \u5168\u4ed3 tracked 2050/77"],
+        "why": ["\u0661\u0662\u0660\u0660 \uff14\uff10 \u5168\u4ed3 tracked 1200/40"],
     }
     rows = {}
     for locale in ("C", "en_US.UTF-8"):

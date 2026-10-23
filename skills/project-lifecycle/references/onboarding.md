@@ -118,7 +118,7 @@ Read each one's frontmatter description. Don't run them yet — but know they ex
 
 ## When the project does NOT yet use this skill
 
-If you land in a project that doesn't have `CLAUDE.md` / `CONTEXT.md` / `docs/RESUME.md` (or root `RESUME.md`) / `docs/iteration-journal.md` (or root — either location counts), Day 1 becomes: Q&A about the codebase + propose adopting this skill. Don't force adoption — surface the gap with concrete pain ("we don't know which conventions the team follows, so my edits will drift") and let the team decide. If the team decides to adopt: run `/init-harness` — on brownfield repos it detects the missing plc artifacts and offers the one-time archaeology pass (baseline ROADMAP / glossary / backfilled-ADR drafts, all AI-inferred and human-reviewed via `docs/adoption-snapshot.md`) at CHECKPOINT 1; full contract in `references/archaeology.md`.
+If you land in a project with no plc artifacts at all — `bash "${CLAUDE_PLUGIN_ROOT}/scripts/archaeology-preflight.sh" detect` answers that, and the anchor list it reads is not restated here — Day 1 becomes: Q&A about the codebase + propose adopting this skill. Don't force adoption — surface the gap with concrete pain ("we don't know which conventions the team follows, so my edits will drift") and let the team decide. If the team decides to adopt: run `/init-harness` — on brownfield repos it detects the missing plc artifacts and offers the one-time archaeology pass (baseline ROADMAP / glossary / backfilled-ADR drafts, all AI-inferred and human-reviewed via `docs/adoption-snapshot.md`) at CHECKPOINT 1; full contract in `references/archaeology.md`.
 
 ## Anti-patterns
 

@@ -18,10 +18,15 @@ Do NOT use for bare actions (fix, rename, clean up) — that is noise.
    question with no resolvable bar is not yet capture-worthy.
 2. Determine the current branch: `git rev-parse --abbrev-ref HEAD`.
 3. Call the helper:
-   `python3 scripts/cognition_log.py append --intent "<why>" --subject "<what>"
+   `bash "${CLAUDE_PLUGIN_ROOT}/scripts/plc-python.sh" "${CLAUDE_PLUGIN_ROOT}/scripts/cognition_log.py" append --intent "<why>" --subject "<what>"
     --criterion "<good-enough bar, or an open question's resolution bar>" [--rejected "<alt+why>"] [--status tentative|firm]
     [--salience 1-5] [--supersedes "<prior-id>"] --quote "<verbatim user words>"
     --branch "<branch>" --author "<name>" --root "$(git rev-parse --show-toplevel)"`
+
+   Prerequisite: `bash` on PATH. `plc-python.sh` is a shell wrapper that finds a working
+   Python and runs the script through it, because on Windows a bare `python3` is often an
+   App Execution Alias rather than an interpreter. If no interpreter works it prints
+   `COULD NOT RUN` naming each candidate it tried, and exits 3.
 
    Pass user-supplied values (intent/subject/criterion/quote/etc.) literally as argv —
    the script uses argparse, not a shell, so do not wrap the call in a way that lets

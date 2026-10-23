@@ -34,7 +34,7 @@
 #   fallback:  {"engine","status":"fallback","fallback_reason":"<reason>"}
 #   status ∈ {succeeded, fallback}
 #   fallback_reason ∈ {unsupported-family, not-installed, not-authed,
-#                      spawn-failed, unparseable, empty-answer, timed-out}
+#                      spawn-failed, quota-exhausted, unparseable, empty-answer, timed-out}
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -201,12 +201,42 @@ fi
 
 # --- Gate 3: spawn (read-only, ephemeral, noninteractive, wall-clock cap) ---
 LASTMSG="$(mktemp)"
-trap 'rm -f "$LASTMSG"' EXIT
+# THE ENGINE'S DIAGNOSTIC IS KEPT, because the old code threw it away and then
+# guessed. stderr went to /dev/null and every non-zero exit was called `spawn-failed`.
+#
+# MEASURED: the runner reported
+# {"status":"fallback","fallback_reason":"spawn-failed"} and the real cause was
+# `ERROR: You've hit your usage limit. ... try again later.` on stderr,
+# exit 1, with the binary on PATH, logged in, and the process having run to completion.
+# Nothing about the spawn failed. The fallback was right; the reason it gave was not --
+# and it points the maintainer at the process, the sandbox and the arguments while the
+# actual remedy is to wait for the limit to reset. An earlier defect had the same shape: the auth probe read
+# stdout where codex writes stderr, so it ALWAYS fell back `not-authed`.
+ENGINE_ERR="$(mktemp)"
+trap 'rm -f "$LASTMSG" "$ENGINE_ERR"' EXIT
 timeout "$TIMEOUT" "$RESOLVED" exec --json --ephemeral -s read-only --skip-git-repo-check \
-  --output-schema "$SCHEMA" -o "$LASTMSG" - < "$PACKET" >/dev/null 2>&1
+  --output-schema "$SCHEMA" -o "$LASTMSG" - < "$PACKET" >/dev/null 2>"$ENGINE_ERR"
 rc=$?
 [ "$rc" -eq 124 ] && emit fallback "timed-out"
-[ "$rc" -ne 0 ] && emit fallback "spawn-failed"
+if [ "$rc" -ne 0 ]; then
+  # ONE pattern, and it is the one that was measured. Case-insensitive, substring, no
+  # anchoring: the sentence carries a reset timestamp that differs every time, so anchoring
+  # on the whole line would classify exactly one outage.
+  #
+  # DELIBERATELY NARROW, and the narrowness is the honest part. Quota exhaustion is not
+  # uniform -- a second shape has been observed, `exit 0` with NO output,
+  # which is indistinguishable from `empty-answer` by construction and is left to gate 4.
+  # Guessing at further wordings would be a claim wider than the measurement. Anything this
+  # cannot classify stays `spawn-failed`, where it is now a true statement rather than a
+  # default dressed as a diagnosis.
+  #
+  # `grep -q` inside an `if`: a non-match exits 1, and this script's `emit` path must be
+  # reached rather than skipped.
+  if grep -qi 'usage limit' "$ENGINE_ERR" 2>/dev/null; then
+    emit fallback "quota-exhausted"
+  fi
+  emit fallback "spawn-failed"
+fi
 
 # --- Gate 4: output parseable, field present, and the field has CONTENT ----
 # Three questions, asked separately and in this order, because they have different

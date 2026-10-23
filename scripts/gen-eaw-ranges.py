@@ -38,8 +38,8 @@ Unicode version equals the one in that header. On every other interpreter the
 comparison has no oracle, so it skipped -- and CI ran Python 3.12 against a table
 declaring 15.1.0, so the three comparison tests skipped on every CI run since the
 table landed. MEASURED, not argued: with `[4352,4447]` mutated to `[4352,4448]`,
-Python 3.10 (unidata 13.0.0) reports `11 passed, 3 skipped` and exits 0, while
-Python 3.13 (unidata 15.1.0) reports `3 failed`. A wrong table, and a green run.
+Python 3.10 (unidata 13.0.0) reports passes and skips and exits 0, while
+Python 3.13 (unidata 15.1.0) reports failures. A wrong table, and a green run.
 
 So the expectations are now EXPORTED here too, next to the table and from the same
 database read, and the comparison tests read the export instead of the live

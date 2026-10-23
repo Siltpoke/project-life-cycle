@@ -22,6 +22,5 @@ review.md
 handoff.md
 recall.md
 reconcile.md
-tasklist.md
 plc-status.md
 experiment.md

@@ -146,7 +146,7 @@ If 3+ matches → flag tz handling as project concern; add to "Don't do" list.
 
 ## Phase 1b — Archaeology pass (between detection and generation)
 
-On brownfield repos (no plc artifacts + substantial existing code), an opt-in read-only archaeology pass runs between Phase 1 detection and Phase 2 generation — detection contract, entry surfaces, agent fan-out, artifact set, and provenance rules all in `references/archaeology.md`. Its drafts join Phase 2's normal generate/merge set.
+On brownfield repos (no plc artifacts + substantial existing code — `bash "${CLAUDE_PLUGIN_ROOT}/scripts/archaeology-preflight.sh" detect` answers this and says why), an opt-in read-only archaeology pass runs between Phase 1 detection and Phase 2 generation — detection contract, entry surfaces, agent fan-out, artifact set, and provenance rules all in `references/archaeology.md`. Its drafts join Phase 2's normal generate/merge set.
 
 ## Merge strategy (when artifact already exists)
 
@@ -342,8 +342,7 @@ per-conversation by `session_id`, atomically (temp → `os.replace`), with a 30-
 retention cap. `/recall` reads it back. This is PLC's own automatic session-save half.
 
 **Additive merge — never clobber.** Read the existing `hooks.Stop` array and **append**;
-never remove a `say`/voice Stop, `close-gate-nudge`, or any other Stop hook. If a
-`save_session` entry already points at the script → leave alone (idempotent). This is a
+never remove a `say`/voice Stop, `close-gate-nudge`, or any other Stop hook. **Idempotent, and MIGRATING:** skip only when a present `save_session` entry already runs through the resolver — test for `plc-python.sh` inside its `command` string. An entry in the OLD form (`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/save_session.py"`) is **rewritten in place** to the resolver form below; it is neither left alone nor appended beside. A project bootstrapped before this change never re-reaches this step otherwise, so "already present" would quietly mean "already carrying the exact invocation this change exists to remove". This is a
 different event from the agent-chats `capture-hook` (`SessionEnd`), so the two coexist with
 no collision. The entry MUST be `async: true`, generous `timeout`, and the script **always
 exits 0** — a per-turn hook must never block or crash a session. Block to add:
@@ -352,9 +351,19 @@ exits 0** — a per-turn hook must never block or crash a session. Block to add:
 { "hooks": { "Stop": [
   { "matcher": "*",
     "hooks": [{ "type": "command",
-      "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/save_session.py\"",
+      "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/plc-python.sh\" --hook \"${CLAUDE_PLUGIN_ROOT}/scripts/save_session.py\"",
       "async": true, "timeout": 30 }] } ] } }
 ```
+
+**The entry goes through `plc-python.sh --hook`, and `bash` is the prerequisite** — the wrapper is
+a shell script that finds a working Python and runs the hook through it, because on Windows a bare
+`python3` is commonly an App Execution Alias rather than an interpreter, and a hook pointed at one
+fails with nothing to show for it. `--hook` keeps the always-exit-0 contract: the wrapper never
+`exec`s in this mode and exits 0 on every path. When no interpreter works it emits one
+`systemMessage` line on stdout, rate limited to once per `PLC_PYTHON_WARN_WINDOW` (default 6h), so
+the digest's absence is reported rather than silent. **What that does NOT cover, said plainly:** the
+wrapper discards the script's own exit status in hook mode, so it reports a missing interpreter,
+never a failing `save_session.py`.
 
 Skip generation only when the user opts out of automatic session capture.
 

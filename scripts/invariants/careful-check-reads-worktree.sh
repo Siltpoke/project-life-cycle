@@ -45,13 +45,13 @@ command -v jq  >/dev/null 2>&1 || { printf 'COULD NOT RUN: jq is not on PATH\n' 
 # GIT_DIR or GIT_WORK_TREE. Commit-family hooks export GIT_INDEX_FILE (relative); pre-push exports
 # only GIT_EDITOR, GIT_EXEC_PATH and GIT_PREFIX. Nothing in this repository exports it either: the
 # chain is pre-push -> close-gate-prepush.sh -> close-gate.sh -> invariants, and the only variable
-# close-gate.sh exports is AC_MERGE_BASE. The proof the old wording cited,
-# `scratchpad/prove_gitdir.sh`, no longer exists; what it most plausibly established is the
+# close-gate.sh exports is AC_MERGE_BASE. The proof the old wording cited no longer exists;
+# what it most plausibly established is the
 # conditional, with the antecedent assumed -- a claim wider than its mechanism, inside a fix
 # written for exactly that class.
 #
-# WHAT THAT INCIDENT ACTUALLY WAS IS UNKNOWN, AND SAID SO. Two delete-everything commits really did land on
-# 2026-08-19 and were reset. The reflog no longer holds them and the scratchpad proofs are gone.
+# WHAT THAT INCIDENT ACTUALLY WAS IS UNKNOWN, AND SAID SO. A delete-everything commit really did land and
+# was reset, and the proofs are gone.
 # Naming a mechanism now would produce a confident record nobody would re-check, so the question is
 # left open. Measured in the same session: with BOTH protections below removed and a realistic
 # environment, the decoy's HEAD does not move -- the danger is reachable only if something exports

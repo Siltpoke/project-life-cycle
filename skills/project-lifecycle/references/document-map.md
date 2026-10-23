@@ -26,11 +26,38 @@ confusion this page is for.
 | **`docs/qa-log.d/<date>-*.md`** | the phase, once, at brainstorm | a reader auditing a decision | when a choice needs its provenance | **truth** | **`docs/journal.d/`** · see above |
 | **`CHANGELOG.md`** | every PR that changes user-visible behaviour | an adopter upgrading | before upgrading, and at release | **truth** for the release story | **`docs/journal.d/`** · the CHANGELOG is what changed FOR YOU; the journal is what it cost us |
 | **`docs/CONTEXT.md`** | a human, rarely | a newcomer, or anyone hitting an unfamiliar word | when a term does not parse | **truth** for vocabulary | nothing — it defines words, it holds no state |
-| **`.claude/tasklist.md`** | the cadence, per phase | `/tasklist`, and the author mid-phase | to see which step is live | **truth for the current phase only** | **`RESUME.md`** · the tasklist is THIS PHASE's steps, RESUME is the session's moment. **Gitignored** — it carries a session nonce and never leaves the machine |
+| **`.claude/tasklist.md`** | the cadence, per phase | the author mid-phase, plus `hooks/tasklist-first.sh` (which checks that it exists, never renders it) — the `/tasklist` reader was removed | to see which step is live | **truth for the current phase only** | **`RESUME.md`** · the tasklist is THIS PHASE's steps, RESUME is the session's moment. **Gitignored** — it carries a session nonce and never leaves the machine |
 | **`docs/cognition.md`** | `/cognition-distill`, regenerated from `docs/cognition-log.d/` | anyone asking *why did we want this* | before re-litigating an old intent | **VIEW** — regenerated from the cold log, never edited | **`docs/journal.d/`** · cognition is INTENT, the journal is OUTCOME. **Absent here** — see below |
 | **`docs/STATUS.md`** | a human, in projects that keep one | that project's next session | the same slot as `RESUME.md` | **truth**, where it exists | **`RESUME.md`** — and this is the confusing one. See the ruling |
 
 ---
+
+## Where each one is visible from
+
+The table above says who writes and who reads each file. It does **not** say where the file
+*exists*, and two of these are `gitignored` — so they live in the main checkout only and are
+**absent from every worktree**, while every other row is tracked and visible from any checkout:
+
+| document | tracked? | visible from |
+|---|---|---|
+| **`RESUME.md`** (and `RESUME-archive.md`) | no — `.gitignore` anchors `/RESUME.md` | main checkout only |
+| **`.claude/tasklist.md`** | no | main checkout only |
+| everything else in the table | yes | any checkout or worktree |
+
+**Why this is a correctness surface, not a detail.** A read taken
+inside a worktree can report `RESUME.md` absent, and that false absence could retire the artifact
+of `/handoff` — a file that is in fact present, inside its
+hot cap, with `/catchup` as its consumer. Likewise a main checkout that is one commit behind can
+report backlog entries absent. **"I did not find it" is not "it does
+not exist"** — resolve a gitignored project-state artifact from the canonical location rather than
+assuming the current worktree, and re-read HEAD before trusting a tracked file's contents.
+
+**Distinct from "Two rows point at files that are not here" below.** That section is about a file
+this repo genuinely does not keep (`docs/STATUS.md`, absent by design; `docs/cognition.md`, absent
+because its upstream is starved). This section is about a file that **does** exist and is simply
+invisible from where you are standing. Collapsing the two is what produced both cases above:
+*artifact existence* and *artifact visibility from the current execution environment* are not the
+same question, and only the first one is answered by looking.
 
 ## `RESUME.md` vs `docs/STATUS.md` — the ambiguity, settled
 
@@ -41,16 +68,30 @@ confusion this page is for.
 - This repository has **no** `STATUS.md` and no `docs/STATUS.md`. It reads `RESUME.md`.
 - Its manifest does **not** set `status_doc`, so it runs on the shipped default —
   **`docs/STATUS.md`. The default names a file the reference implementation does not have.**
-- `scripts/close-gate.sh`, this repo's own gate, **does not implement `status_doc` at all**.
-  Only the adopter-facing gate in `references/close-gate.md` does, which means **the half that
-  reads the key has never been dogfooded here.**
+- `scripts/close-gate.sh`, this repo's own gate, **reads `status_doc`**
+  — and this bullet is a correction, kept in place rather than rewritten away, because the
+  sentence it replaces was true when it was measured and the ruling below still rests on it.
+  **It used to read:** *"does not implement `status_doc` at all. Only the adopter-facing gate in
+  `references/close-gate.md` does, which means the half that reads the key has never been
+  exercised here."* The canonical hot-cap rows have since been ported into this gate, and the status-doc
+  row came with them.
+  **The distinction that survives, and it is not a quibble:** the gate now READS the key, and
+  the row is **dormant here** — it resolves to `docs/STATUS.md`, which this repo does not have,
+  so `cap_file` returns early and prints nothing. *"The key is read"* and *"the row has been
+  exercised against a real status document"* are different claims, and only the first became
+  true. The row is kept rather than dropped for a reason that is about behaviour, not parity:
+  deleting it would mean a project that later adds a status doc gets **no cap on it silently**,
+  which is the shape the port exists to end.
+  **What this does NOT change:** the manifest still does not set `status_doc`, so the default
+  still names a file this repo does not have — see "Left open on purpose" below, which is
+  unaffected.
 - Thirteen references to `STATUS.md` remain across `skills/`, `commands/` and `scripts/`.
 
 **The ruling.** `RESUME.md` is the read-first document. `docs/STATUS.md` is what an adopter who
 already keeps a status file points `status_doc` at: a **configuration**, not an alternative this
 skill recommends.
 
-**Why the earlier conclusion is not simply executed.** an earlier decision concluded *"STATUS is not a portable
+**Why the earlier conclusion is not simply executed.** An earlier decision concluded *"STATUS is not a portable
 variant; drop the endorsement"* and was closed without action. Taken literally today it would
 **delete a real mechanism** — most of those thirteen mentions ARE the `status_doc` key, not a
 recommendation. The endorsement goes; the key stays, documented as a key.

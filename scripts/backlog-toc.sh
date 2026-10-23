@@ -10,9 +10,17 @@ F="docs/BACKLOG.md"
 # any earlier failure would report itself instead of the real problem, which is the typo. Nothing here
 # can leak, because nothing has been created yet.
 RELABEL=0
+CHECK=0
 for _a in "$@"; do
   case "$_a" in
     --relabel) RELABEL=1 ;;
+    # `--check` writes NOTHING. It builds exactly what a real run would write and
+    # compares it against the file on disk, so `generator-edges-declared.sh` can ask "is this
+    # index what the generator produces today" at gate time. Before this flag existed the only
+    # way to find out was to run the generator for real and read the diff afterwards, which is
+    # how entries sat `open` in the committed index while the closure ledger
+    # said otherwise.
+    --check) CHECK=1 ;;
     *) printf 'backlog-toc: unknown argument: %s\n' "$_a" >&2
        printf 'backlog-toc: nothing was written; %s is unchanged.\n' "$F" >&2
        exit 2 ;;
@@ -464,18 +472,128 @@ fi
 
     # priority stays hand-written, and the header says so. There is nothing to derive it from:
     # it is a human ordering, not a fact about the repo.
+    #
+    # TWO DEFECTS, ONE LINE OF CODE. The table above mapped three glyphs and tested them
+    # as a substring of the WHOLE heading.
+    #
+    #   1. `🔴` reached no branch, so `prio` stayed empty and the cell rendered BLANK -- the
+    #      heaviest entries in the file read exactly like entries nobody had prioritised. Exit 0, nothing printed.
+    #   2. A glyph that is not in the table at all was the same silence. A state word such as `🔵 DEFERRED` sitting in
+    #      a heading's priority slot is a real inconsistency and was unreportable.
+    #
+    # AND THE OBVIOUS FIX IS WRONG, measured rather than feared: a substring test lets a glyph
+    # MENTIONED IN PROSE win. Take a heading whose trailing segment opens with 🟠 and then names 🔴 inside its
+    # own parenthetical, and another whose title contains 🔴 while its priority segment is 🟢. Both
+    # are right today only because 🟠 and 🟢 are tested first; adding a `*"🔴"*` branch
+    # promotes both, invisibly, since a wrong priority looks exactly like a right one.
+    #
+    # So the oracle is a glyph that OPENS one of the heading's ` -- ` segments -- the one
+    # position a prose mention cannot reach. Prefix patterns, not `${seg:0:1}`: bash substring
+    # arithmetic is byte-based under a C locale, and this repo has already paid for a
+    # byte-vs-character slip in a CJK-bearing generator.
+    #
+    # IT IS "SOME SEGMENT", NOT "THE LAST SEGMENT", and that correction was bought by reading
+    # the regenerated diff rather than by a test. The first attempt here took the last segment
+    # (`${h##* -- }`) and it dropped priorities that the defective substring `case` had
+    # been getting right:
+    #       one   -- `🟡 (note: ... **step 2 -- the first part ...`   more ` -- ` AFTER the glyph
+    #       two   -- `... -- 🟡 SOON (small; ...) -- added later`   glyph is second-to-last
+    #       three -- `## B9001 -- 🟠 ESCALATED -- some later title ...`    glyph is FIRST
+    # A fix for a silent downgrade that silently downgrades other rows is the defect, not
+    # a fix for it, and the fixture missed it because every heading in it put the glyph last --
+    # a hole in the SHAPE of the scenario, not in the axis being varied (a lesson learned before).
+    # The walk below therefore scans segments left to right and stops at the first one that
+    # OPENS with a glyph. Pure parameter expansion: this loop body runs once per heading and
+    # the surrounding code already refuses to fork per row.
+    #
+    # The WORD beside the glyph is not a usable key. Severity words come in several spellings, some
+    # of them non-English, and the same word can label 🟠 in one document and 🔴 in another.
+    # The glyph ranks; the word is decoration. Normalising the words is NOT done here -- it needs
+    # every heading rewritten, which is a different change -- but the two documents now agree
+    # on the thing that carries meaning: 🔴 is the top tier in both.
     prio=""
-    case "$h" in
-      *"🟠"*) prio="🟠 high" ;;
-      *"🟡"*) prio="🟡 med" ;;
-      *"🟢"*) prio="🟢 low" ;;
-    esac
+    prio_seg="${h#\#\# }"
+    while :; do
+      case "$prio_seg" in
+        "🔴"*) prio="🔴 crit" ;;
+        "🟠"*) prio="🟠 high" ;;
+        "🟡"*) prio="🟡 med" ;;
+        "🟢"*) prio="🟢 low" ;;
+        # Recognised as a priority-slot glyph, deliberately NOT ranked. `?` is the honest
+        # cell: it says "a glyph is here and it is not one of the four", which a blank cannot
+        # say, and it stays distinguishable from an entry that simply set no priority (which
+        # keeps its blank cell and earns no warning -- otherwise the fix just swaps one
+        # indiscriminate cell for one indiscriminate complaint). Warn-only on purpose: the
+        # generator rewrites the file in place, and aborting mid-write over a heading typo is
+        # the worse failure.
+        "🔵"*|"🟣"*|"🟤"*|"⚫"*|"⚪"*)
+          prio="?"
+          printf 'backlog-toc: %s carries a priority glyph this table does not rank (%s) -- cell rendered `?`.\n' \
+            "$id" "${prio_seg%% *}" >&2
+          ;;
+      esac
+      if [ -n "$prio" ]; then break; fi
+      # Not this segment: advance past the next ` -- `, or stop when there is none left. Each
+      # pass strictly shortens the string, so the walk terminates on every input.
+      case "$prio_seg" in
+        *" — "*) prio_seg="${prio_seg#*" — "}" ;;
+        *) break ;;
+      esac
+    done
     title="$(plc_utf8_head "$(printf '%s' "$rest" | sed -E 's/ \(surfaced[^)]*\)//; s/ —.*//')" 105)"
     printf '| **%s** | %s | %s | %s |\n' "$id" "$state" "$prio" "$title"
   done
   printf '\n---\n\n'
 } > "$TOC"
 
-cat "$TOC" "$BODY" > "$F.new" && mv "$F.new" "$F"
+# WHERE THE STAGING FILE LIVES, and why --check does not put it in docs/.
+# The first version of --check staged to "$F.new" like a real run does. That is a large file
+# written INTO docs/, untracked and not gitignored, from a mode three shipped surfaces described as
+# "writes nothing" -- and `link-check-reaches-deep` fails on untracked files under docs/ that are
+# not on its declared-safe list, so an interrupted --check could redden an unrelated invariant.
+# In check mode the staging file goes to TMPDIR instead. In write mode it stays beside the target,
+# because `mv` within one filesystem is what makes the install atomic.
+if [ "$CHECK" -eq 1 ]; then
+  NEW="$(mktemp "${TMPDIR:-/tmp}/backlog-toc.XXXXXX")" || {
+    rm -f "$TOC" "$BODY" "$STATES"
+    printf 'backlog-toc: mktemp failed; nothing was written and %s is unchanged.\n' "$F" >&2
+    exit 10
+  }
+else
+  NEW="$F.new"
+fi
+
+# THE `&&` HERE IS LOAD-BEARING AND SPLITTING IT COST A LEDGER.
+# This was `cat ... > "$F.new" && mv "$F.new" "$F"` on one line. Adding --check split it, and
+# because this script runs `set -uo pipefail` with NO `-e`, a failed `cat` stopped guarding the
+# `mv`: the truncated staging file was installed over docs/BACKLOG.md and the script still printed
+# `TOC regenerated` and exited 0. MEASURED, not reasoned: with $BODY made unreadable just before
+# this line, the file was truncated while origin/main's one-liner left it untouched.
+# docs/BACKLOG.md is its own source -- $BODY is extracted FROM it at :84 -- so a clobber destroys
+# content that exists nowhere else in the working tree. Fail closed, and name the file that was NOT
+# written.
+# `if ! cmd; then rc=$?` reads the status of the NEGATION, which is always 0 -- the first version of
+# this fix printed "cat exited 0" while reporting a failure. Capture before testing.
+cat_rc=0
+cat "$TOC" "$BODY" > "$NEW" || cat_rc=$?
+if [ "$cat_rc" -ne 0 ]; then
+  rc="$cat_rc"
+  rm -f "$TOC" "$BODY" "$STATES" "$NEW"
+  printf 'backlog-toc: could not assemble the new %s (cat exited %s).\n' "$F" "$rc" >&2
+  printf '  Nothing was written; %s is unchanged.\n' "$F" >&2
+  exit 10
+fi
+if [ "$CHECK" -eq 1 ]; then
+  if cmp -s "$NEW" "$F"; then
+    rm -f "$TOC" "$BODY" "$STATES" "$NEW"
+    printf 'backlog-toc --check: %s is what the generator produces today (%s entries)\n' "$F" "$COUNT"
+    exit 0
+  fi
+  rm -f "$TOC" "$BODY" "$STATES" "$NEW"
+  printf 'backlog-toc --check: %s DIFFERS from what the generator produces today.\n' "$F" >&2
+  printf '  Nothing was written. Regenerate with: /bin/bash scripts/backlog-toc.sh\n' >&2
+  exit 1
+fi
+mv "$NEW" "$F"
 rm -f "$TOC" "$BODY" "$STATES"
 printf 'TOC regenerated: %s entries, next free id B%s\n' "$COUNT" "$((MAXID + 1))"

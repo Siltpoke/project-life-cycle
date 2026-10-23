@@ -37,9 +37,19 @@ Eight fields, split **core (required)** vs **progressive (omit-if-empty)**. MOME
    matches HEAD is *not* evidence that anything is green. This is an explicit decline, stated
    rather than left to inference: an anchor either carries the CI fact **or** declines it, and
    silence is not an option, because a staleness field that quietly says nothing about CI is exactly
-   how a welcome-back surface ends up implying everything is fine. Declining is the choice because
-   `/handoff` is prompt-only with no script; the CI state on record is carried by `/catchup`, which
-   reads `.claude/ci-status.json` and reports the comparison.
+   how a welcome-back surface ends up implying everything is fine. The CI state on record is carried
+   by `/catchup`, which reads `.claude/ci-status.json` and reports the comparison.
+
+   **The decline's stated REASON changed, and the old one is quoted rather than dropped**,
+   because a justification that silently evaporates leaves a decline nobody can re-examine. It used
+   to read *"Declining is the choice because `/handoff` is prompt-only with no script"* — and a later change
+   gave `/handoff` a deterministic step (`scripts/handoff_reconcile.py`, invoked through
+   `scripts/plc-python.sh`), so that sentence is now **false**. The decline itself is unchanged and
+   still correct, for the reason that was always the real one: the anchor answers a question about
+   *this repository's own history*, and nothing it can read locally is evidence about a service
+   somewhere else. Having a script does not change what a sha knows. What that step adds is the
+   LOCAL half the anchor was always missing — whether the commit being stamped has already fallen
+   behind the upstream.
 
 ### Progressive — render only when non-empty; an empty field is **omitted entirely**, never a literal "None" line
 
@@ -97,7 +107,7 @@ yet exist (first `/handoff` in a project), **create it** with the snapshot; ther
 Enforcement lives **here, at the point the artifact is born** — not in a downstream close-gate grep. A
 grep can only check that field headers are *present* (trivially true from any stale prior snapshot); it
 cannot catch the two real failure modes (fabrication, staleness), and a green-but-blind gate launders
-confidence. Run these four checks **before writing**:
+confidence. Run these five checks **before writing**:
 
 1. **Core check** — are all 3 core fields truthfully fillable? If any is not → **refuse to write**;
    surface which core field is unresolvable. No partial-core snapshot.
@@ -108,6 +118,21 @@ confidence. Run these four checks **before writing**:
 4. **Staleness stamp** — compute the anchor: `git rev-parse HEAD`, `git rev-parse --abbrev-ref HEAD`,
    and a timestamp. If not in a git repo / no HEAD resolvable → record `no-git` and still write core
    fields 1-2.
+5. **Reconcile the stamp** — run the shared module and record what it says beside the anchor:
+
+   ```bash
+   bash "${CLAUDE_PLUGIN_ROOT}/scripts/plc-python.sh" "${CLAUDE_PLUGIN_ROOT}/scripts/handoff_reconcile.py"
+   ```
+
+   It prints the `snapshot:` line itself — the anchor is assembled by code rather than by
+   concatenating three command outputs by hand — followed by one line per comparison. **An anchor
+   that is ALREADY behind the upstream is recorded, not omitted**, which is the normal case on a
+   phase branch. Exit **0** = every attempted comparison concluded · **4** = one could not,
+   and its cause is on the line that failed · **2** = there was no HEAD to stamp, in which case
+   check 4's `no-git` path owns the outcome. It makes **no network call**: the row about the real
+   remote reads `not-attempted` by design, and `/catchup --refresh` is where that one is asked.
+   The same module is what `/catchup` reads the anchor back with, so the writer and the reader
+   cannot drift apart — a test pins the round trip.
 
 ## Archive-before-overwrite
 
@@ -154,7 +179,7 @@ not a gate-gaming stub — but `phase-done` greps for all six fields, so fill `R
 ## Commit behavior
 
 Write `RESUME.md` (+ the conditional FACT), then commit **where those paths are tracked**. In a repo where
-`RESUME.md` / `docs/` are gitignored, the writes
+`RESUME.md` is gitignored, the writes
 are **local files**: report the local-only reality ("wrote RESUME.md locally; gitignored, not committed"),
 **never a phantom "committed" claim**. Authored generically so downstream projects (tracked docs) get a
 real `docs(handoff): snapshot` commit.

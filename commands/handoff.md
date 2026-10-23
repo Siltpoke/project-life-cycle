@@ -31,9 +31,21 @@ committed vs written-local.
    next-action / staleness-anchor) + progressive (state-so-far / decisions / what-NOT-to-retry /
    blockers / gotchas). Actively scan for the what-NOT-to-retry field (reverted edits, abandoned
    approaches), not just forward progress. See `handoff-snapshot.md` §"The snapshot schema".
-2. **Self-validate.** Run the four generation-time checks — core-check (refuse if any core field is
+2. **Self-validate.** Run the five generation-time checks — core-check (refuse if any core field is
    unfillable), fabrication-guard (mark-absent, never invent), progressive-prune (drop empties, no
-   "None"), staleness-stamp (`git rev-parse HEAD` + branch + timestamp; `no-git` fallback). See
+   "None"), staleness-stamp (`git rev-parse HEAD` + branch + timestamp; `no-git` fallback), and
+   reconcile-the-stamp:
+
+   ```bash
+   bash "${CLAUDE_PLUGIN_ROOT}/scripts/plc-python.sh" "${CLAUDE_PLUGIN_ROOT}/scripts/handoff_reconcile.py"
+   ```
+
+   That one step is deterministic rather than assembled by hand: it prints the `snapshot:` line and
+   one line per comparison, and an anchor that has **already fallen behind the upstream is recorded
+   rather than omitted**. Exit `0` = every attempted comparison concluded · `4` = one could not, and
+   its cause is on its own line · `2` = no HEAD to stamp, so the `no-git` path owns it. It reaches no
+   network; the row about the real remote reads `not-attempted` by design. The same module is what
+   `/catchup` reads the anchor back with, so the writer and the reader cannot drift apart. See
    `handoff-snapshot.md` §"Generation-time self-validation".
 3. **Archive, then write RESUME.md.** First, if `RESUME.md` exists and is non-empty, prepend its outgoing
    snapshot verbatim (newest-first, `---`-separated) to the cold sibling `RESUME-archive.md` — never loaded

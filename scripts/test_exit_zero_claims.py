@@ -122,9 +122,32 @@ def test_the_changelog_entry_is_marked_superseded_not_rewritten():
     """The released `[3.7.0]` entry keeps its sentence — it is an accurate record of what
     that version shipped — and carries a superseded marker instead. Rewriting it would
     back-date later behaviour into a version that never had it."""
-    text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    line = next(l for l in text.splitlines() if "the adapter always exits 0" in l)
-    assert "SUPERSEDED" in line, "the released entry states a contract that no longer holds"
+    # THE ARCHIVE IS PART OF THE CORPUS. `retention-drain.sh` rolls released CHANGELOG sections
+    # into `docs/archive/CHANGELOG/<YYYY-MM>.md` verbatim, by design, so the `[3.7.0]` entry this
+    # row is about leaves `CHANGELOG.md` on the first drain that passes it:
+    # a drain moved it to `docs/archive/CHANGELOG/<YYYY-MM>.md`, and this row did not fail
+    # with a message -- `next()` raised a bare StopIteration, which names no file, no cause and
+    # no remedy. Reading hot + archive is what makes the row track the entry rather than the path.
+    sources = [ROOT / "CHANGELOG.md"] + sorted(
+        (ROOT / "docs" / "archive" / "CHANGELOG").glob("20*.md")
+    )
+    present = [q for q in sources if q.is_file()]
+    assert present, "no CHANGELOG to read: neither CHANGELOG.md nor docs/archive/CHANGELOG/*.md"
+    text = "\n".join(q.read_text(encoding="utf-8") for q in present)
+
+    # An explicit assertion instead of `next()`, so "the entry is nowhere" is a sentence rather
+    # than a StopIteration traceback. The two outcomes it keeps apart -- entry absent vs entry
+    # present but unmarked -- have different remedies, and a bare next() reports neither.
+    matches = [l for l in text.splitlines() if "the adapter always exits 0" in l]
+    assert matches, (
+        "the released entry naming the exit-0 contract is in none of %d CHANGELOG source(s); it "
+        "is not gone until this list is wrong -- check whether a drain rolled it into "
+        "docs/archive/CHANGELOG/<YYYY-MM>.md" % len(present)
+    )
+    assert all("SUPERSEDED" in l for l in matches), (
+        "the released entry states a contract that no longer holds (%d occurrence(s), %d marked)"
+        % (len(matches), sum("SUPERSEDED" in l for l in matches))
+    )
 
 
 def test_the_copy_paste_block_carries_the_exit_codes():

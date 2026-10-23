@@ -22,10 +22,16 @@
 #     already-generous "asks by SHAPE" self-description. One invariant, one named constraint.
 #
 #   * It does NOT sweep `git ls-files` for `*tasklist*`. A blind reviewer's false-positive objection
-#     was accepted as binding: this repo tracks `scripts/tasklist-view.sh`, its test, and a command
-#     doc, and a broad sweep would red on all of them. The tracked-anywhere check is pinned to the
-#     RESOLVED configured path plus the known default location. There is one default:
-#     `.claude/tasklist.md`.
+#     was accepted as binding: this repo tracks files NAMED like a tasklist that are not one, and a
+#     broad sweep would red on all of them. The examples that objection named were
+#     `scripts/tasklist-view.sh`, its test, and a command doc; all three were removed, and the
+#     constraint does not rest on them. Tracked paths still match
+#     `*tasklist*` and not one is a tasklist artifact -- `scripts/tasklist-guard-dir.sh`,
+#     `scripts/test_tasklist_invariant.py`, `skills/project-lifecycle/hooks/tasklist-first.sh`,
+#     files under `docs/`, and THIS SCRIPT. A sweep would red on the checker's own file, so the
+#     examples moving does not reopen the question -- it sharpens it. The tracked-anywhere check is
+#     pinned to the RESOLVED configured path plus the known default location. There is one
+#     default: `.claude/tasklist.md`.
 #
 #   * It does NOT ask for `.gitignore` to be "un-anchored". That would be wrong:
 #     per git's own documentation a pattern containing a slash anywhere but the trailing position is

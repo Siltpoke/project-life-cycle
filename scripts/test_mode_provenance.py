@@ -183,3 +183,139 @@ def test_a_tree_that_is_not_a_git_work_tree_is_could_not_run(tmp_path):
     p = subprocess.run(["bash", str(INV)], capture_output=True, text=True, cwd=tmp_path, env=env)
     assert p.returncode == 3, p.stdout + p.stderr
     assert "COULD NOT RUN" in p.stderr
+
+# --------------------------------------------------- the record after a drain
+#
+# A phase's Q&A fragment does not stay in the hot zone. `retention-drain.sh drain qa-log` compiles
+# it into the archive verbatim and removes the hot copy, and unlike the journal there is no
+# post-merge-only rule holding that off until after the merge -- so at the moment `close-gate.sh
+# phase` runs, this phase's record can legitimately live only in `docs/archive/**`.
+#
+# MEASURED, on a real close: the drain prescribed by the discipline moved
+# `docs/qa-log.d/<date>-feat-phase-<id>-....md` into
+# `docs/archive/brainstorming-qa-log/part-<x>.md`, and this invariant then exited 3 --
+# `COULD NOT RUN: this branch adds phase documents but no Q&A log fragment` -- while the
+# provenance line it was looking for sat in that archive file, readable.
+# The record was never missing; the check could not reach it. So the defect is not the
+# drain, it is that the check could only ever validate a phase BEFORE its drain, which is every
+# phase for a few hours and no phase afterwards.
+#
+# THE SLICE IS NOT OPTIONAL AND THESE FIXTURES PROVE IT: every archive below carries a SECOND
+# phase's block holding two `source: project-default` lines. A check that read the whole file
+# instead of this phase's slice would red on P2, so a pass here is evidence the slice happened.
+
+MARKER = "<!-- " + "fragment: docs/qa-log.d/%s.md -->"
+OTHER = "2026-01-01-feat-phase-bzzz-someone-else"
+
+
+def _archive_repo(tmp_path, *, phase="bxxx-something", files=None, registry=True):
+    """A phase working branch whose Q&A fragment exists ONLY in the archive, as after a drain."""
+    r = tmp_path / "r"
+    r.mkdir()
+    for args in (
+        ["init", "-q", "-b", "main"],
+        ["config", "user.email", "t@example.invalid"],
+        ["config", "user.name", "t"],
+    ):
+        subprocess.run(["git", "-C", str(r), *args], check=True, capture_output=True)
+    (r / "seed.txt").write_text("x\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(r), "add", "-A"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(r), "commit", "-qm", "base"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(r), "checkout", "-qb", f"feat/phase-{phase}"],
+                   check=True, capture_output=True)
+
+    d = r / "docs/superpowers/specs"
+    d.mkdir(parents=True)
+    (d / f"2026-01-15-phase-{phase}-design.md").write_text("# spec\n", encoding="utf-8")
+
+    seg = r / "docs/archive/brainstorming-qa-log"
+    seg.mkdir(parents=True)
+    slug = f"2026-01-15-feat-phase-{phase}"
+    noise = (f"\n{MARKER % OTHER}\n\n## Q1\n\n" + GOOD + GOOD + "\nprose\n")
+    default = {"part-aa.md": noise + f"\n{MARKER % slug}\n\n## Q1\n\n" + GOOD + "\nprose\n"}
+    for name, text in (files if files is not None else default).items():
+        (seg / name).write_text(text, encoding="utf-8")
+
+    if registry:
+        (r / ".claude").mkdir()
+        (r / ".claude/stage-registry.json").write_text(
+            '{"stages":[{"stage_id":"qa_log","retro_evidence":'
+            '[{"kind":"fragment-marker","roots":["docs/archive/brainstorming-qa-log/*.md"]}]}]}\n',
+            encoding="utf-8")
+
+    subprocess.run(["git", "-C", str(r), "add", "-A"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(r), "commit", "-qm", "work"], check=True, capture_output=True)
+    return r
+
+
+def _run_archive(repo, **extra):
+    env = dict(os.environ)
+    env.update({
+        "PROVENANCE_ROOT": str(repo),
+        "PROVENANCE_QA_DIR": str(repo / "docs/qa-log.d"),
+        "PROVENANCE_CLAUDE_MD": str(repo / "CLAUDE.md"),
+        "PROVENANCE_BASE": "main",
+    })
+    env.update(extra)
+    return subprocess.run(["bash", str(INV)], capture_output=True, text=True, cwd=repo, env=env)
+
+
+def test_a_drained_fragment_is_read_out_of_the_archive(tmp_path):
+    """THE row. Before this, a phase that had done exactly what the discipline prescribes could not
+    be validated at all."""
+    p = _run_archive(_archive_repo(tmp_path))
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert "1 provenance line" in p.stdout, p.stdout
+    assert "part-aa.md" in p.stdout, "the message must name the file the record was read from"
+
+
+def test_the_slice_is_what_is_read_not_the_whole_archive_file(tmp_path):
+    """The positive control for the row above, stated as its own row rather than left implicit in a
+    fixture: the foreign block carries two default confirmations, so reading the file whole reds."""
+    repo = _archive_repo(tmp_path)
+    archive = repo / "docs/archive/brainstorming-qa-log/part-aa.md"
+    assert archive.read_text(encoding="utf-8").count("source: project-default") == 3
+    p = _run_archive(repo)
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert "1 default confirmation" in p.stdout, p.stdout
+
+
+def test_two_archive_copies_of_one_phase_are_refused_not_picked_from(tmp_path):
+    """Ambiguity costs a FAIL, never a PASS -- the error direction the sentinel's own header sets.
+    Two compiled copies of one phase means the record has two answers and nothing choosing."""
+    phase = "bxxx-something"
+    slug = f"2026-01-15-feat-phase-{phase}"
+    block = f"\n{MARKER % slug}\n\n## Q1\n\n" + GOOD + "\nprose\n"
+    repo = _archive_repo(tmp_path, files={"part-aa.md": block, "part-ab.md": block})
+    p = _run_archive(repo)
+    assert p.returncode == 1, p.stdout + p.stderr
+    assert "part-aa.md" in p.stderr and "part-ab.md" in p.stderr
+
+
+def test_a_fenced_marker_naming_the_phase_is_reported_not_skipped(tmp_path):
+    """The sentinel answers 2 for a sentinel-shaped line it rejected as fenced. Treating that as
+    'not here' is how a document that QUOTES a marker silently becomes the record."""
+    phase = "bxxx-something"
+    slug = f"2026-01-15-feat-phase-{phase}"
+    fenced = "# archive\n\n```\n\n" + (MARKER % slug) + "\n```\n\nprose\n"
+    repo = _archive_repo(tmp_path, files={"part-aa.md": fenced})
+    p = _run_archive(repo)
+    assert p.returncode == 1, p.stdout + p.stderr
+    assert "fenced" in p.stderr.lower(), p.stderr
+
+
+def test_with_no_hot_fragment_and_nothing_in_the_archive_it_still_cannot_run(tmp_path):
+    """The escape must not have widened: a phase that never wrote a record is still verdict 3."""
+    repo = _archive_repo(tmp_path, files={"part-aa.md": "# archive\n\nprose\n"})
+    p = _run_archive(repo)
+    assert p.returncode == 3, p.stdout + p.stderr
+    assert "no Q&A log fragment" in p.stderr
+
+
+def test_an_unreadable_registry_is_could_not_run_not_a_pass(tmp_path):
+    """The archive roots are DECLARED in the stage registry. Without it the check cannot know
+    where a drained fragment lands, and guessing a path is how a check starts passing vacuously."""
+    repo = _archive_repo(tmp_path, registry=False)
+    p = _run_archive(repo)
+    assert p.returncode == 3, p.stdout + p.stderr
+    assert "stage-registry" in p.stderr or "registry" in p.stderr

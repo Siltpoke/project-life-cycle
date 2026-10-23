@@ -218,6 +218,21 @@ def _roadmap_section(first_line_idx: int) -> str:
 # exactly the forbidden thing is the next reader's shortcut back into the defect.
 
 
+def _run_lc_c(script: Path, *args: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
+    """`_run` under `LC_ALL=C`. p169: a byte-based tool misbehaves identically on GNU userland
+    in EVERY locale, and `LC_ALL=C` is the one setting that reproduces it on BSD too -- so a
+    portability assertion that does not pin the locale measures one shell, not the
+    property."""
+    return subprocess.run(
+        ["bash", str(script), *args],
+        cwd=str(cwd or ROOT),
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "LC_ALL": "C"},
+    )
+
+
 def _run(script: Path, *args: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["bash", str(script), *args],
@@ -873,9 +888,11 @@ def _states_at_migration() -> dict[str, str]:
 
 
 def test_ac20_report_matches_the_premigration_snapshot_not_itself() -> None:
-    """AC20 — the report is compared against the pre-migration snapshot, never against itself:
-    deriving "ids whose state changed" from the report would have the
-    report compare against itself.
+    """AC20 — the right operand is the pre-migration snapshot. When this was written `docs/` was gitignored
+    (the count WAS 0, before p39), so "ids whose state changed in this PR" was not derivable
+    from the PR; deriving it from the report would have the report compare against itself. **The
+    premise has since been retired — `docs/` is tracked as of p39 — but the conclusion stands on
+    its own:** a report that is its own right operand proves nothing, whatever the diff can see.
 
     The comparison is on the open/closed BIT, not literal: the
     two vocabularies are disjoint by construction, so a literal comparison reads every id as changed and
@@ -989,10 +1006,105 @@ def test_ac18_marker_glyphs_are_banned_but_prose_is_not(tmp_path: Path) -> None:
     assert _run(TITLE_INV, str(marked)).returncode == 1, "the probe cannot fail — its green is vacuous"
 
 
+def _p172_is_quoted(line: str) -> bool:
+    """True for a markdown blockquote line, with or without a leading comment marker.
+
+    A SCANNER THAT CANNOT TELL "ASSERTING X" FROM "QUOTING SOMEONE WHO ASSERTED X" reports the
+    repository's own historical record as a defect, and the cheapest way to make it green is to
+    falsify that record. This is not hypothetical: on its first run the p172 guard flagged
+    `test_backlog_ledger.py`'s comment block that opens *"THE PREMISE OF THIS BLOCK WAS RETIRED
+    BY p39, AND CI IS WHAT SAID SO. It used to open:"* and then quotes the retired premise
+    verbatim. That block is CORRECT -- the quote is what makes the correction legible -- and
+    "fixing" it would have deleted the evidence. This repository files the same shape as a
+    lesson of its own: a text scanner cannot distinguish USING a token from TALKING ABOUT one.
+
+    Shape, not position: a `>` marker is the author saying "these are not my words here". Keyed
+    on neither line numbers nor paths, both of which go stale on the next edit.
+    """
+    stripped = line.lstrip()
+    for marker in ("#", "//"):
+        if stripped.startswith(marker):
+            stripped = stripped[len(marker):].lstrip()
+            break
+    return stripped.startswith(">")
+
+
+def test_p169_the_diagnostic_truncates_characters_not_bytes(tmp_path: Path) -> None:
+    """p169 -- the FAIL diagnostic was `cut -c1-140`, and `cut -c` is byte-based.
+
+    MEASURED, and the first measurement was WRONG IN THE REASSURING DIRECTION. Run on a
+    macOS shell the defect does not reproduce at all: BSD `cut -c` is character-aware
+    under a UTF-8 locale, so the diagnostic came out valid and untruncated and the bug looked
+    absent. It is GNU coreutils where `cut -c` counts bytes **regardless of locale** -- the
+    exact finding `scripts/utf8-text.sh` was written for -- so the portable oracle is
+    `LC_ALL=C`, which reproduces on either userland. Under it, the heading below emitted a
+    dangling `\xe9` lead byte: invalid UTF-8, terminal mojibake, the same shape as a
+    dangling-lead-byte failure CI has caught before.
+
+    The subject here is only a transient stderr diagnostic -- nothing is written to disk, which
+    is why this is low-stakes. It is fixed because the character-safe helper already sits one
+    directory over, not because it is dangerous.
+
+    The padding is load-bearing and is not a magic number: the diagnostic's prefix is
+    `<lineno>:## B1009 - ` and the title is 3-byte characters, so with no padding byte 140 lands
+    exactly on a character boundary and the cut is clean BY LUCK. One ASCII byte of padding
+    moves the boundary into the middle of a character. A fixture without it passes against the
+    defect.
+    """
+    _need(TITLE_INV, "the title-marker invariant")
+    subject = tmp_path / "cjk.md"
+    title = "X" + "\u4e2d\u6587\u6807\u9898\u5f88\u957f" * 10
+    subject.write_text(
+        f"# Backlog\n\n## B1009 \u2014 {title} \u2014 \u2705 DONE 2026-01-01\n\nbody\n",
+        encoding="utf-8",
+    )
+    res = subprocess.run(
+        ["bash", str(TITLE_INV), str(subject)],
+        cwd=str(tmp_path),
+        capture_output=True,
+        text=False,
+        check=False,
+        env={**os.environ, "LC_ALL": "C"},
+    )
+    assert res.returncode == 1, "the probe cannot fail -- a green here would be vacuous"
+    try:
+        res.stderr.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise AssertionError(
+            f"the diagnostic is not valid UTF-8 -- truncated mid-character: {exc}; "
+            f"tail={res.stderr[-8:]!r}"
+        ) from None
+
+
+def test_p169_the_diagnostic_is_still_bounded(tmp_path: Path) -> None:
+    """The other half: character-safety must not become "print the whole line".
+
+    A truncation that stops truncating is a different defect with the same green, and the
+    reason the bound exists is that `$OFFENDERS` can hold every offending heading in a
+    large file. The bound is asserted in CHARACTERS, because that is now the unit.
+    """
+    _need(TITLE_INV, "the title-marker invariant")
+    subject = tmp_path / "long.md"
+    tail = "\u5c3e\u5df4"  # must survive nowhere -- it sits far past the cut
+    body = "\u4e2d\u6587" * 200
+    heading = "## B1009 \u2014 " + body + tail + " \u2014 \u2705 DONE 2026-01-01"
+    subject.write_text("# Backlog\n\n" + heading + "\n\nbody\n", encoding="utf-8")
+    res = _run_lc_c(TITLE_INV, str(subject), cwd=tmp_path)
+    assert res.returncode == 1
+    diag = [ln for ln in res.stderr.splitlines() if ln.lstrip().startswith("3:##")]
+    assert diag, f"the offending heading was not echoed at all: {res.stderr!r}"
+    assert len(diag[0]) <= 140, f"the diagnostic is no longer bounded: {len(diag[0])} chars"
+    assert tail not in diag[0], "the cut did not happen -- the whole heading was printed"
+
+
 def test_ac18b_invariant_states_its_behaviour_when_docs_is_absent(tmp_path: Path) -> None:
     """Not an AC of its own, pinned here because a guard that
-    silently no-ops checks nothing. An absent backlog is a legitimate state, so the guard must
-    say what it did rather than pass silently."""
+    silently no-ops is a known failure shape. When this was written `docs/` was gitignored (the count WAS
+    0, before p39), so 'absent' was the normal state on every other clone. **That is
+    no longer why the branch matters:** `docs/` is tracked now, so an absent `docs/BACKLOG.md`
+    means a broken or partial tree rather than a fresh clone — and a guard that says nothing in
+    that case is still indistinguishable from one that ran and found nothing, which is the
+    property actually being pinned."""
     _need(TITLE_INV, "the title-marker invariant")
     # stdin is fed a git-style ref line on purpose. The guard used to treat a piped stdin as its
     # subject, so this test passed only because pytest replaces stdin — under `-s` with a real
@@ -1136,7 +1248,7 @@ _SYNTH_DOING = "▶"   # doing glyph
 def _synthetic_roadmap(*, doing: bool, taint: str = "") -> str:
     """A whole synthetic roadmap, in English, with or without a station in flight.
 
-    Zero rows of the author's real roadmap take part. Using the live file as the golden oracle
+    Zero rows of the repository's real roadmap take part. Using the live file as the golden oracle
     while repairing a test that reads the live file would be the defect performing its own
     acceptance.
 
@@ -1171,7 +1283,7 @@ def _synthetic_card(root: Path, roadmap_md: str) -> str:
     `gather_card_facts` already takes its root and its git runner as arguments, so the fixture
     is supplied by passing them rather than by rebinding a module constant. That removes the
     cross-test-pollution risk instead of mitigating it: a module-level rebind would leak into
-    the sibling tests below that read the author's real roadmap on purpose, and could be green
+    the sibling tests below that read the repository's real roadmap on purpose, and could be green
     in both directions depending on execution order.
     """
     docs = root / "docs"
@@ -1356,7 +1468,7 @@ def test_meta_author_local_artifacts_are_all_or_nothing() -> None:
     mode = _author_local_mode()
     assert not mode.startswith("mixed"), (
         f"author-local artifacts are partly present ({mode}). Expected either all of "
-        f"{sorted(AUTHOR_LOCAL)} (the author's machine) or none of them (a clone). "
+        f"{sorted(AUTHOR_LOCAL)} (a full working checkout) or none of them (a clone). "
         "Restore the missing one, or the ACs that read it are silently not running."
     )
 
@@ -1412,10 +1524,12 @@ def test_meta_every_live_ac_still_has_at_least_one_test() -> None:
     green, the count went up, and nothing said a word — `test_meta_no_test_name_is_defined_twice`
     only catches names that appear twice, never names that stopped appearing.
 
-    So the live AC list is written down here as a literal rather than derived. Deriving it from
-    the spec would be better in principle and worse in practice: the spec is not in every
-    checkout, and a coverage check that cannot read its
-    own reference silently covers nothing.
+    So the live AC list is written down here as a literal rather than derived. The reason has
+    changed and the decision has not. It used to be that deriving it from the spec was impossible
+    on other machines, because `docs/` was untracked until p39 and the spec was absent on
+    every other clone; `docs/` is tracked now and that objection is gone. What survives is the
+    part that never depended on it: a coverage check that cannot read its own reference silently
+    covers nothing — the shape this phase has already had to answer for
     `ac14` is listed as its two halves because they are separate claims: (a) alone can be
     green while the card still prints a stale next-stop.
     """

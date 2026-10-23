@@ -40,7 +40,7 @@ def _clean_env() -> dict:
     keeps its support and a correction does not read as an oversight.
 
     What remains true: with GIT_DIR set by ANY means, `git -C <tmp> commit` lands in the repository
-    GIT_DIR names. the incident is real history; its stated mechanism is not, and its actual
+    GIT_DIR names. The incident is real history; its stated mechanism is not, and its actual
     cause is recorded as unknown rather than guessed at. This filter is therefore standing
     insurance against an unidentified vector — cheap, and labelled as insurance. The earlier filings record it.
     """

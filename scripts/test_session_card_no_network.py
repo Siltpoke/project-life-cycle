@@ -20,11 +20,17 @@ REPO = Path(__file__).resolve().parent.parent
 GUARD = REPO / "scripts" / "invariants" / "session-card-no-network.sh"
 
 
-def _tree(tmp_path: Path, body: str | None = None) -> Path:
-    """A minimal work-tree-shaped directory holding a copy of session_card.py.
+def _tree(tmp_path: Path, body: str | None = None,
+          reconcile_body: str | None = None) -> Path:
+    """A minimal work-tree-shaped directory holding a copy of BOTH guarded files.
 
     Not a git repo: the guard takes the root as its argument, so it never needs
     one. That keeps every case here independent of the real index.
+
+    The guard has a SECOND target (`scripts/handoff_reconcile.py`), so the
+    tree carries a copy of that too. The alternative -- letting the guard skip a
+    target that is absent -- was rejected: a missing target is `COULD NOT RUN`,
+    never a silent pass, which is the whole reason this guard has a third verdict.
     """
     (tmp_path / "scripts").mkdir(parents=True, exist_ok=True)
     dst = tmp_path / "scripts" / "session_card.py"
@@ -32,6 +38,11 @@ def _tree(tmp_path: Path, body: str | None = None) -> Path:
         shutil.copyfile(REPO / "scripts" / "session_card.py", dst)
     else:
         dst.write_text(body, encoding="utf-8")
+    rec = tmp_path / "scripts" / "handoff_reconcile.py"
+    if reconcile_body is None:
+        shutil.copyfile(REPO / "scripts" / "handoff_reconcile.py", rec)
+    else:
+        rec.write_text(reconcile_body, encoding="utf-8")
     return dst
 
 
@@ -245,3 +256,154 @@ def test_importlib_with_whitespace_after_the_dot_goes_red(tmp_path):
     r = _run(tmp_path)
     assert r.returncode == 1, r.stdout
     assert "DYNAMIC IMPORT" in r.stdout
+
+
+# ---------------------------------------------------------------------------
+# The SECOND target. Each arm below was also demonstrated by hand, and
+# that is exactly why these exist: this file's own docstring says a pasted
+# transcript is a measurement, not an oracle. It proves the arm could go red
+# today and nothing about tomorrow.
+# ---------------------------------------------------------------------------
+
+def _rec_src() -> str:
+    return (REPO / "scripts" / "handoff_reconcile.py").read_text(encoding="utf-8")
+
+
+def test_clean_copy_of_the_reconcile_module_passes(tmp_path):
+    _tree(tmp_path)
+    r = _run(tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "reconcile (scripts/handoff_reconcile.py)" in r.stdout
+    assert "subprocess call sites: 1 (pinned 1)" in r.stdout
+    assert "network-capable git subcommands: 1 (pinned 1)" in r.stdout
+
+
+def test_a_missing_second_target_cannot_run_rather_than_passing(tmp_path):
+    """Fail-closed. An absent target must NOT be skipped into a clean bill of health."""
+    (tmp_path / "scripts").mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(REPO / "scripts" / "session_card.py",
+                    tmp_path / "scripts" / "session_card.py")
+    r = _run(tmp_path)
+    assert r.returncode == 3, r.stdout
+    assert "COULD NOT RUN" in r.stdout
+    assert "handoff_reconcile.py" in r.stdout
+    assert "PASS" not in r.stdout
+
+
+def test_a_second_network_capable_git_subcommand_goes_red(tmp_path):
+    """The arm that exists because every git command shares ONE process spawn."""
+    src = _rec_src()
+    assert src.count('"ls-remote"') == 1
+    _tree(tmp_path, reconcile_body=src + '\n_ALSO = ["push"]\n')
+    r = _run(tmp_path)
+    assert r.returncode == 1, r.stdout
+    assert "network-capable git subcommands named as string literals: 2 found, 1 expected" in r.stdout
+    assert "target: reconcile" in r.stdout
+
+
+def test_a_new_git_command_in_the_reconcile_module_goes_red(tmp_path):
+    src = _rec_src()
+    _tree(tmp_path, reconcile_body=src +
+          '\n\ndef _sneak(run_git):\n    return run_git(["status"], timeout=5.0)\n')
+    r = _run(tmp_path)
+    assert r.returncode == 1, r.stdout
+    # 9 is the baseline after `stamp_anchor`'s two calls were added; the number moved with
+    # the code and the pin, which is the only way this assertion stays an oracle.
+    assert "injected-runner call sites: 10 found, 9 expected" in r.stdout
+    assert "target: reconcile" in r.stdout
+
+
+def test_an_aliasing_import_in_the_reconcile_module_goes_red(tmp_path):
+    """The conservation law, re-proved on the target whose EXTRA is 1 rather than 0."""
+    src = _rec_src()
+    _tree(tmp_path, reconcile_body=src + "\nimport subprocess as sp\n")
+    r = _run(tmp_path)
+    assert r.returncode == 1, r.stdout
+    assert "`subprocess` token appears 4 times but only 3 are accounted for" in r.stdout
+
+
+def test_a_failure_in_the_second_target_is_actually_PRINTED(tmp_path):
+    """The regression this refactor itself introduced, and the reason this test exists.
+
+    The first draft called the per-target checker inside a command substitution,
+    which captured its stdout -- so every failure message went into a variable and
+    was discarded when the exit fired. The guard rejected the file while emitting
+    ZERO bytes. Silence that reads exactly like a pass is the failure mode this
+    whole guard was built to prevent, reproduced inside it.
+    """
+    src = _rec_src()
+    _tree(tmp_path, reconcile_body=src + '\n_ALSO = ["fetch"]\n')
+    r = _run(tmp_path)
+    assert r.returncode != 0
+    assert r.stdout.strip(), "the guard failed SILENTLY -- no stdout at all"
+    assert "FAIL session-card-no-network" in r.stdout
+
+
+def test_a_git_call_reached_through_an_alias_goes_red(tmp_path):
+    """The runner conservation arm, against the exact evasion that defeated the pin once.
+
+    Real git commands were added to the module while the pinned call-site count stayed put: the
+    runner had been bound to a two-letter local name and that name was called, so the literal
+    spelling the arm counts never appeared. The card's own alias arm already records half of this
+    lesson — "right about renaming the CALL and wrong about renaming the IMPORT" — and this is the
+    call half. Written as a test rather than a paragraph because the paragraph was already there
+    and did not stop it.
+    """
+    src = _rec_src()
+    _tree(tmp_path, reconcile_body=src + (
+        "\n\ndef _sneaky(run_git):\n"
+        "    rg = run_git\n"
+        "    return rg([\"status\", \"--porcelain\"], timeout=5.0)\n"))
+    r = _run(tmp_path)
+    assert r.returncode == 1, r.stdout
+    assert "`run_git` token appears 29 times but 27 are accounted for" in r.stdout
+    assert "ALIAS" in r.stdout
+
+
+
+# ---------------------------------------------------------------------------
+# The three mutants a review used to DEFEAT this
+# guard. All three printed PASS with every pinned number unchanged. They are
+# standing rows now, not a transcript, for the reason this file's docstring
+# gives: a measurement proves the check could go red on one day and nothing
+# about tomorrow.
+# ---------------------------------------------------------------------------
+
+def test_os_system_in_the_reconcile_module_goes_red(tmp_path):
+    src = _rec_src()
+    _tree(tmp_path, reconcile_body=src + (
+        '\n\ndef _sneak():\n    return os.system("git fetch origin")\n'))
+    r = _run(tmp_path)
+    assert r.returncode == 1, r.stdout
+    assert "spawns a process through the os module" in r.stdout
+    assert "target: reconcile" in r.stdout
+
+
+def test_os_popen_in_the_card_goes_red(tmp_path):
+    card = (REPO / "scripts" / "session_card.py").read_text(encoding="utf-8")
+    _tree(tmp_path, body=card + '\n\ndef _sneak():\n    return os.popen("curl http://x")\n')
+    r = _run(tmp_path)
+    assert r.returncode == 1, r.stdout
+    assert "spawns a process through the os module" in r.stdout
+    assert "target: card" in r.stdout
+
+
+def test_a_networking_module_hidden_in_a_comma_import_goes_red(tmp_path):
+    """`import os, urllib.request` anchored past the first name and slipped through."""
+    src = _rec_src()
+    assert "import os\n" in src
+    _tree(tmp_path, reconcile_body=src.replace("import os\n", "import os, urllib.request\n", 1))
+    r = _run(tmp_path)
+    assert r.returncode == 1, r.stdout
+    assert "a networking module is imported" in r.stdout
+
+
+def test_the_os_spawn_arm_does_not_fire_on_os_path_or_os_environ(tmp_path):
+    """The control. The module legitimately uses `os.environ` and `os.path`, and an arm that
+    reddened on those would be removed within a week — which is how a guard dies."""
+    src = _rec_src()
+    assert "os.environ" in src and "os.path" in src
+    _tree(tmp_path)
+    r = _run(tmp_path)
+    assert r.returncode == 0, r.stdout
+    assert "no os-level spawn" in r.stdout

@@ -47,9 +47,44 @@ DOCUMENTS = [
 ]
 
 
-def table_rows() -> list[list[str]]:
+# The heading whose table this test is about. The scan is BOUNDED to this section, and the bound is
+# the fix for a real failure rather than tidiness: this parser used to read every pipe-line in
+# the file, so when a second, unrelated 3-column table was added under a later heading
+# ("Where each one is visible from") its three data rows were judged against the
+# six-column rule and `test_every_row_is_complete` went red in CI. The page is allowed more than
+# one table; the test is not allowed to claim "every row of the document map" while measuring
+# "every pipe-line in the file". That gap between a check's claim and its reach is the defect
+# class this repo keeps filing, and it was sitting inside this test's own control.
+TABLE_HEADING = "## The table"
+
+
+def _table_section(body: str) -> str:
+    """The lines under TABLE_HEADING, up to the next `## ` heading.
+
+    Fails loudly rather than returning everything: a heading rename must red these rows, not
+    silently widen them back to the whole file -- which is the state this function replaced.
+    """
+    lines = body.split("\n")
+    try:
+        start = next(i for i, ln in enumerate(lines) if ln.strip() == TABLE_HEADING)
+    except StopIteration:  # pragma: no cover - asserted by test_the_table_section_is_found
+        raise AssertionError(
+            "%r not found in document-map.md; the row scan has no bounded section to read and "
+            "would otherwise fall back to the whole file" % TABLE_HEADING
+        )
+    end = next(
+        (i for i, ln in enumerate(lines[start + 1 :], start + 1) if ln.startswith("## ")),
+        len(lines),
+    )
+    return "\n".join(lines[start + 1 : end])
+
+
+def table_rows(body: str | None = None) -> list[list[str]]:
+    """Data rows of the document-map table. `body` is injectable so the positive control below can prove
+    a short row inside the bounded section still fails."""
+    src = _table_section(MAP.read_text(encoding="utf-8") if body is None else body)
     rows = []
-    for line in MAP.read_text(encoding="utf-8").split("\n"):
+    for line in src.split("\n"):
         t = line.strip()
         if not t.startswith("|") or re.match(r"^\|[-: |]+\|?$", t):
             continue
@@ -58,6 +93,40 @@ def table_rows() -> list[list[str]]:
             continue
         rows.append(cells)
     return rows
+
+
+def test_the_table_section_is_found() -> None:
+    """Asserted on its own, because every row-level assertion below is vacuous if the section
+    lookup silently returned nothing."""
+    assert _table_section(MAP.read_text(encoding="utf-8")).strip(), (
+        "the %r section parsed empty" % TABLE_HEADING
+    )
+
+
+def test_a_short_row_inside_the_bounded_section_still_fails() -> None:
+    """THE POSITIVE CONTROL for the bound, and the reason the bound is not just a way to make a
+    red test green. Narrowing a scan can disable it; this feeds a five-column row into the
+    bounded section and requires it to be reported."""
+    body = "\n".join(
+        [
+            TABLE_HEADING,
+            "",
+            "| document | a | b | c | d | e |",
+            "|---|---|---|---|---|---|",
+            "| **`short.md`** | 1 | 2 | 3 | 4 |",
+            "",
+            "## Where each one is visible from",
+            "",
+            "| document | tracked? | visible from |",
+            "|---|---|---|",
+            "| **`other.md`** | no | main checkout only |",
+        ]
+    )
+    rows = table_rows(body)
+    assert [r for r in rows if len(r) != 6], "a five-column row was not reported"
+    assert not [r for r in rows if r and r[0].startswith("**`other.md`")], (
+        "a row from the SECOND table reached the six-column rule -- the bound is not holding"
+    )
 
 
 def test_the_table_is_not_empty() -> None:
@@ -112,8 +181,12 @@ def test_the_resume_status_ambiguity_is_settled_not_restated() -> None:
 
 
 def test_the_claim_about_status_doc_is_true_of_this_repo() -> None:
-    """The ruling rests on four measured facts. If any stops being true, the ruling is stale and
-    the page is lying with confidence — the failure mode this whole phase family exists for."""
+    """The ruling rests on measured facts. If any stops being true, the ruling is stale and the
+    page is lying with confidence — the failure mode this whole phase family exists for.
+
+    One of those facts FLIPPED and this row is what caught it; see the long comment
+    at the status_doc assertions below for what changed, why the map was corrected instead of the
+    code reverted, and why the replacement is two assertions rather than one."""
     assert not (REPO / "docs" / "STATUS.md").exists()
     assert not (REPO / "STATUS.md").exists()
     assert (REPO / "RESUME.md").exists() or True  # gitignored; absence on a fresh clone is fine
@@ -121,8 +194,32 @@ def test_the_claim_about_status_doc_is_true_of_this_repo() -> None:
     assert "status_doc" not in manifest, (
         "this repo now sets status_doc; the map says it does not")
     local_gate = (REPO / "scripts" / "close-gate.sh").read_text(encoding="utf-8")
-    assert "status_doc" not in local_gate, (
-        "the local gate now implements status_doc; the map says only the adopter gate does")
+
+    # THIS ASSERTION WAS INVERTED, and the old one is quoted rather than deleted
+    # because the reason matters more than the direction. It used to be
+    # `assert "status_doc" not in local_gate` with the message "the local gate now implements
+    # status_doc; the map says only the adopter gate does" -- and it did its job: a later change ported the
+    # canonical hot-cap rows into this gate, the status-doc row came with them, a documented
+    # claim became false, and this row went RED in the full suite. No targeted subset saw it.
+    #
+    # The map was corrected rather than the port reverted, for a behavioural reason: dropping the
+    # row would mean a project that later adds a status doc gets no cap on it SILENTLY, which is
+    # the shape that change exists to end. So the claim is now the other way round, and it is asserted
+    # as TWO facts rather than one, because collapsing them would make this row weaker than the
+    # one it replaced:
+    #
+    #   (a) the gate READS the key -- the half the map used to call never-exercised
+    #   (b) the row is DORMANT here -- it resolves to docs/STATUS.md, which does not exist (the
+    #       first two assertions in this function), so `cap_file` returns early and prints
+    #       nothing. "The key is read" and "the row ran against a real status document" are
+    #       different claims and only (a) is true.
+    assert "status_doc" in local_gate, (
+        "the local gate no longer reads status_doc -- the port has been reverted or lost in a "
+        "merge, and the map's corrected bullet now overstates what this gate does")
+    assert 'cap_file "$_sd" status' in local_gate, (
+        "status_doc is mentioned in the local gate but no longer feeds a cap row -- the map says "
+        "the key is read BY the hot-cap row, and a mention that routes nowhere is the claim-wider"
+        "-than-mechanism shape this page exists to prevent")
     adopter_gate = (REPO / "skills" / "project-lifecycle" / "references"
                     / "close-gate.md").read_text(encoding="utf-8")
     assert "status_doc" in adopter_gate

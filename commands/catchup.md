@@ -7,10 +7,39 @@ description: Render a warm "welcome back" card on return to a repo (post-/clear)
 Gather the raw facts (deterministic, read-only), then render a card:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/session_card.py"
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/plc-python.sh" "${CLAUDE_PLUGIN_ROOT}/scripts/session_card.py" "$@"
 ```
 
-(When running from a checkout of this repository rather than the installed plugin, the script is `scripts/session_card.py`.) The script prints a
+`"$@"` is load-bearing, not boilerplate. `plc-python.sh` has always forwarded its own `"$@"`,
+but this block passed nothing, so `/catchup --refresh` was unreachable from the only surface a
+user has while being fully implemented one layer down. The one flag that exists:
+
+- **`--refresh`** — additionally ask the real remote whether your local `origin/main` is still
+  its tip, with one bounded, read-only `git ls-remote`. It fetches no objects and changes no
+  ref. Default runs stay byte-offline, which is why the `remote` row normally reads
+  `not-attempted`. An unknown flag is **refused** (exit 2), never ignored.
+
+(Prerequisite: `bash` on PATH — `plc-python.sh` is a shell wrapper that finds a working
+Python and runs the script through it, because on Windows a bare `python3` is often an App
+Execution Alias rather than an interpreter. If no interpreter works it prints `COULD NOT RUN`
+naming each candidate it tried, and exits 3.)
+
+**Exit status, and why a non-zero one is not necessarily a failure**. The wrapper
+`exec`s the card, so the card's own status reaches you unchanged:
+
+| Code | From | Meaning |
+|---|---|---|
+| 0 | the card | every check that was attempted reached a verdict — render normally |
+| 4 | the card | at least one check was attempted and could not conclude; **the card still printed every row it could trust** — render it, and surface the `UNVERIFIED:` causes |
+| 2 | the card | no card could be produced at all; nothing was printed to stdout |
+| 3 | **the wrapper** | no working Python interpreter — the card never ran |
+
+A **4 is not a crash**. Render the blob exactly as you would on a 0; the only difference is
+that the `UNVERIFIED:` block is non-empty and its causes must reach the reader. A **3 is not
+the card's** — it means the script never started, so there is no blob to render and the right
+response is to say the interpreter could not be found. Those two are deliberately different
+numbers: the card's status and the wrapper's failure used to be indistinguishable in a draft of
+this feature, which is the defect this design exists to remove, one layer up. The script prints a
 raw-facts blob ending in a `SOURCES:` map. Render a compact card as your NORMAL
 reply — never a hook/additionalContext payload. **Omit any row whose source is
 absent** (that is the whole behavior — a bare repo renders ~2 lines, not an empty
@@ -94,24 +123,56 @@ both directions, so neither this file nor the code can add a sixth alone.
   Attribute it — "the producer recorded: …" — and never restate something from
   inside `detail` as if the card had established it.
 
-Two limits to keep out of the wording, both accepted rather than fixed:
-`origin/main` is a LOCAL ref that may itself be behind, so `fresh` means "matches
-the local reference", never "matches the forge". And this row is not an alert —
-the card renders when a human comes back after a `/clear`, so it shortens no
-outage. It exists to stop the card implying everything is fine.
+Two limits. The first is kept out of the wording: this row is
+not an alert — the card renders when a human comes back after a `/clear`, so it
+shortens no outage; it exists to stop the card implying everything is fine.
+
+The other limit used to live here as a comment and **now has a row of its own**.
+`origin/main` is a LOCAL ref that may itself be behind, so `fresh` means
+"matches the local reference", never "matches the forge" — and a limit that only
+the source says is a limit nobody reads. The blob prints it as
+`remote  not-attempted  offline by default — run /catchup --refresh`, and that
+line is rendered, not summarised away.
 
 Voice rules:
 1. PR subjects → "what changed for you" — drop `feat:`/`fix:` prefix, filenames,
    SHAs. Collapse a run of sibling PRs into ONE line.
 2. Doc/ledger PRs do NOT go in "Recently shipped" — they explain why save-state
    looks behind, so mention them only in Save-state.
-3. Save-state leads with the action, then evidence:
-   - `SAVE-STATE: fresh` → "save is current".
-   - `doc-behind` → "basically current — glance at git".
-   - `code-behind` → "⚠️ N code PRs merged since your last checkpoint — run
-     `/reconcile` to land them in STATUS/ROADMAP before starting; then /handoff
-     to refresh the anchor".
-   - `unknown` → "no checkpoint yet — clean start".
+3. Save-state leads with the action, then evidence — and **names what it was
+   compared against**, because the tier alone cannot say. Every tier below
+   is derived from the handoff's `snapshot: HEAD <sha>` anchor, never from PR
+   numbers:
+   - `SAVE-STATE: fresh` → "save is current — the upstream has not moved since
+     your anchor". Say *the upstream*, not "everything": the `checkout` row
+     beside it may still be behind, and `fresh` with a behind checkout is a
+     normal, correct pair.
+   - `doc-behind` → "basically current — the upstream gained N commits since your
+     anchor, docs only; glance at git".
+   - `code-behind` → "⚠️ the upstream gained N commits since your anchor and at
+     least one touched code — run `/reconcile` to land them in STATUS/ROADMAP
+     before starting; then /handoff to refresh the anchor".
+   - `no-handoff` → "no checkpoint yet — clean start". **This is the only tier
+     that may say that.**
+   - `unverified` → "⚠️ there IS a handoff, and I could not check it — <the
+     cause, verbatim from the `UNVERIFIED:` block>". Never "clean start", never
+     "current". A handoff that cannot be read is not the same as no handoff, and
+     saying it is, is the defect this design closed: a current, correct
+     `RESUME.md` with no `#N` in it rendered as "no checkpoint yet — clean
+     start", and a session that believed it would re-derive everything from zero.
+   - `unknown` is **gone**. If you ever see it in a blob, the script predates
+     this change — say so rather than guessing which of the two it meant.
+3b. The `ANCHOR:` block is rendered as rows, not folded into the save-state
+   sentence. Each row says what it compared and how far apart the two are:
+   `checkout` = your working tree against the anchor, `upstream` = `origin/main`
+   against the anchor, `remote` = the real remote, which the default run does not
+   contact. The outcome word describes **that row's own subject**, so
+   `checkout behind 4` means your tree lacks 4 commits the anchor has, while
+   `upstream ahead 4` means `origin/main` gained 4 your anchor lacks.
+3c. A `not-attempted` row is NOT a failure and NOT a warning. It is a check that
+   was deliberately skipped, and it is why an offline run still exits zero. An
+   `unverified` row IS a check that ran and could not conclude — surface its
+   cause verbatim.
 4. "Last doing" is mechanical (from the digest); for the curated next-step +
    what-NOT-to-retry, point at RESUME.md / `/recall <date>` for a specific recall.
 5. Gotchas: "don't re-hit" + consequence, no mechanism. Human-relevant only —

@@ -44,8 +44,8 @@ fi
 # GIT_WORK_TREE. Commit-family hooks export GIT_INDEX_FILE (relative); pre-push exports only
 # GIT_EDITOR, GIT_EXEC_PATH, GIT_PREFIX. Nothing in this repository exports it either -- the chain
 # is pre-push -> close-gate-prepush.sh -> close-gate.sh -> invariants, and the only variable
-# close-gate.sh exports is AC_MERGE_BASE. The proof the old wording cited,
-# `scratchpad/prove_gitdir.sh`, no longer exists; what it most likely established is the
+# close-gate.sh exports is AC_MERGE_BASE. The proof the old wording cited no longer exists;
+# what it most likely established is the
 # conditional half, with the antecedent assumed. A claim wider than its mechanism, inside a fix
 # written for that class.
 #
@@ -53,8 +53,8 @@ fi
 # by whatever means -- `git -C <tmp> commit` writes into the repository GIT_DIR names, and an
 # assertion on `--show-toplevel` still PASSES because the worktree follows the cwd while the
 # commit follows GIT_DIR. Reproduced end to end: the decoy's HEAD moved and every real file came
-# out as a deletion. the incident is real history; only its stated mechanism is unproven, and
-# the actual cause of the 2026-08-19 commits is recorded as UNKNOWN rather than guessed at.
+# out as a deletion. The incident is real history; only its stated mechanism is unproven, and
+# the actual cause of those commits is recorded as UNKNOWN rather than guessed at.
 #
 # So this stays, as insurance against an injection vector not yet identified -- stated as
 # insurance, not sold as a fix for a measured failure path.

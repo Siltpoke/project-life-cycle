@@ -31,7 +31,12 @@ close-gate; if it fails, the gate is unaffected.
    - **Open-questions lines** stay marker-free — just `[stated]`, no freshness marker (an
      open question is unsettled, nothing to age).
 3. Run the deterministic guards:
-   `python3 scripts/cognition_render.py guards --hot docs/cognition.md --root "$(git rev-parse --show-toplevel)"`
+   `bash "${CLAUDE_PLUGIN_ROOT}/scripts/plc-python.sh" "${CLAUDE_PLUGIN_ROOT}/scripts/cognition_render.py" guards --hot docs/cognition.md --root "$(git rev-parse --show-toplevel)"`
+   Prerequisite: `bash` on PATH. `plc-python.sh` is a shell wrapper that finds a working Python
+   and runs the script through it, because on Windows a bare `python3` is often an App Execution
+   Alias rather than an interpreter. If no interpreter works it prints `COULD NOT RUN` naming each
+   candidate it tried, and exits 3. (The `python3` named in step 1 is prose about a module, not an
+   invocation, and is deliberately left alone.)
 4. Read the JSON guard report and append the confidence-surface footer to `docs/cognition.md`
    (coverage + gaps, evicted count, dead-path flags, stale count, snapshot path). For any fact
    line whose entry id is in the report's `stale_ids`, REPLACE its `(fresh/firm, Nd)` marker

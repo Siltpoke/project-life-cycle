@@ -291,11 +291,37 @@ scope_from_trailers() {
   [ -n "$raw" ] || return 0
   while IFS= read -r tok; do
     [ -n "$tok" ] || continue
-    case "$tok" in
-      *:AC*) out="$out$tok"$'\n' ;;
-      '#'*)  die "a \`Closes:\` trailer names an issue ($tok), not an acceptance criterion. Use \`Refs:\` for issues." ;;
-      *)     die "unparseable \`Closes:\` value: $tok" ;;
-    esac
+    # THIS STEP TOKENISES AND NO LONGER JUDGES, and the reason is WHERE THE VERDICT IS READ.
+    #
+    # It used to classify here, with `case "$tok" in *:AC*)` -- a CONTAINMENT test -- and `die` for
+    # anything else. Measured (while writing a commit): `Closes: p1:AC5,
+    # p1:AC6` on one line tokenises through `tr ' ' '\n'`, which splits on spaces and NOT on
+    # commas, so `p1:AC5,` reached the comparison with its comma attached, was accepted as a
+    # well-formed id, matched nothing in the story, and was reported as
+    # `ORPHAN  ...the current story declares no such criterion` -- a factual assertion about the
+    # USER STORY. A comma in the author's own commit message was reported as a defect in a
+    # different file.
+    #
+    # THE OBVIOUS FIX WAS ANCHORING THE GLOB HERE, AND IT MADE THINGS WORSE. Measured rather than
+    # reasoned: `scripts/close-gate.sh:1348` invokes this step as
+    #
+    #     ... scope-from-trailers ... > "$AC_IDS" 2>/dev/null || : > "$AC_IDS"
+    #
+    # so a `die` is SWALLOWED **and the id file is truncated**. With an anchored glob here the
+    # gate went from `ORPHAN -> report exits 1 -> RED` (wrong reason, right colour) to
+    # `die -> swallowed -> empty scope -> report exits 0 printing "no criteria claimed by any
+    # commit on this branch" -> GREEN`. A fix for a wrong message that turns a red into a
+    # reassuring green is worse than the message it replaces.
+    #
+    # So the token TRAVELS, and `report` -- where verdicts live, and where the gate reads them --
+    # names it. That move closes THREE silences, not one: this `die`, the swallow above, and
+    # `report`'s own `case "$id" in "$phase":AC*) ;; *) continue ;;`, which dropped every
+    # non-matching token without a word.
+    #
+    # WHAT DID NOT CHANGE: commas are still not separators. The convention is one `Closes:` per
+    # line, and the requirement is the malformed VERDICT rather than a new accepted input
+    # shape -- widening the parser would be a feature wearing a bug fix's clothes.
+    out="$out$tok"$'\n'
   done <<<"$raw"
   printf '%s' "$out" | sort -u
 }
@@ -362,8 +388,34 @@ report() {
     fi
     # An id a commit CLAIMS that the story does not declare must be reported. The intersection
     # below would silently drop it, and an unclaimed id must be reported distinctly.
+    # THREE VERDICTS, AND THE ORDER IS THE POINT.
+    #
+    # The grammar is checked BEFORE the phase filter. That filter used to be the first thing a
+    # token met -- `case "$id" in "$phase":AC*) ;; *) continue ;;` -- so a token that was not a
+    # well-formed id of this phase was DROPPED WITHOUT A WORD. Combined with the tokeniser
+    # `die`ing upstream and the gate swallowing that `die`, a comma in a `Closes:` trailer had
+    # three separate ways to end in silence.
+    #
+    # MALFORMED is a verdict about the COMMIT MESSAGE. ORPHAN is a claim about the USER STORY.
+    # Both are red, and the distinction exists because the gate printed the second when the first was true,
+    # sending the reader to the wrong file. The grammar is the one this file already applies at
+    # the story end, so the two sides of the comparison cannot disagree about what an id IS.
+    #
+    # `#NNN` keeps its own sentence rather than folding into MALFORMED: `Closes: #NNN` is
+    # habitual forge idiom and this repository files backlog items under its own ids, so the reader needs
+    # to be told it is the WRONG KIND of reference, not a typo.
     while IFS= read -r id; do
       [ -n "$id" ] || continue
+      case "$id" in
+        '#'*)
+          printf '  %-12s MALFORMED names an issue, not an acceptance criterion -- use `Refs:` for issues\n' "$id"
+          fail=1; continue ;;
+      esac
+      if ! printf '%s' "$id" | grep -qE '^[A-Za-z0-9_.-]+:AC[0-9]+(\.[0-9]+)?[a-z]?$'; then
+        printf '  %-12s MALFORMED not a bare criterion id; expected <phase>:AC<n>[.<n>][a-z], one `Closes:` per line, space-separated within a line -- a trailing comma is part of the token\n' "$id"
+        fail=1; continue
+      fi
+      # Another phase's well-formed id is not this phase's business, and is not an error.
       case "$id" in "$phase":AC*) ;; *) continue ;; esac
       if ! grep -qFx "$id" <<<"$declared"; then
         printf '  %-12s ORPHAN    claimed by a `Closes:` trailer, but the current story declares no such criterion\n' "$id"

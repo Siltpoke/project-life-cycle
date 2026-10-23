@@ -14,6 +14,10 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
+# The ONE shared reconciliation module. /catchup reads it from here; /handoff invokes its
+# CLI. Two callers, one code path, so the two commands cannot disagree about what "stale" means.
+import handoff_reconcile as hr
+
 _CODE_PATH = re.compile(r"^(src|tests|scripts|\.githooks)/|^public/static/|\.(ts|tsx|js|jsx|cjs|mjs)$")
 _CODE_FILE = re.compile(r"^(package\.json|bunfig\.toml|tsconfig.*|biome\.json|\.dependency-cruiser\.cjs)$")
 _PR_TRAILING = re.compile(r"\(#(\d+)\)\s*$")
@@ -55,13 +59,95 @@ def find_merge_sha(log_output: str, pr: int) -> str | None:
     return None
 
 
-def classify_save_state(noted_max_pr, merges, is_code):
-    if noted_max_pr is None:
-        return {"tier": "unknown", "unrecorded": [], "code_count": 0}
-    unrecorded = [m for m in merges if m["pr"] is not None and m["pr"] > noted_max_pr]
-    code_count = sum(1 for m in unrecorded if is_code(m["pr"]))
-    tier = "fresh" if not unrecorded else ("code-behind" if code_count else "doc-behind")
-    return {"tier": tier, "unrecorded": unrecorded, "code_count": code_count}
+def _unverified_state(check: str, cause: str) -> dict:
+    """One shape for "a handoff exists and I could not check it", built in one place.
+
+    There were three hand-copied literals of this dict — the unreadable-anchor branch, the
+    no-git branch, and the no-runner branch — so a fourth consumer or a new key meant editing
+    three sites and the third copy had already drifted a blank line out of shape.
+    """
+    return {"tier": "unverified", "rows": [], "exit_code": 4, "has_code": None,
+            "unverified": [{"check": check, "cause": cause}]}
+
+
+def classify_save_state(*, has_handoff, anchor, rec, files, anchor_absent_cause=None):
+    """The SAVE-STATE row, derived from the ANCHOR the handoff writes.
+
+    This replaced the previous derivation, which extracted `max(#N)` from the handoff's newest
+    block and compared it against PR numbers in the last 8 subjects of `git log origin/main`.
+    Two measured defects killed it. A handoff carrying no `#N` at all returned `unknown`, which
+    `commands/catchup.md` rendered as "no checkpoint yet - clean start" over a correct, current
+    handoff; and nothing in the old derivation could express where the WORKING TREE sat, so a
+    checkout behind the upstream read as `fresh`. The second one was an ABSENT
+    comparison rather than a wrong one, which is why more care with PR numbers could not fix it.
+
+    `has_handoff` and `anchor` are separate arguments on purpose: "there is no handoff" and
+    "there is a handoff I could not read" are opposite truths, and the old single `unknown`
+    covered both. Only the first may render as a clean start.
+
+    `files=None` means the code-vs-docs question could not be answered. It is NOT `files=[]`;
+    turning "I could not look" into the verdict "docs only" is the substitution this phase
+    exists to remove, so it yields `unverified` instead.
+
+    `anchor_absent_cause` — WHO DECIDES WHICH KIND OF ABSENCE, stated because the name alone does
+    not say it. `anchor=None` covers two situations with different causes: the handoff has no
+    `snapshot:` line at all (every older handoff), or it has one that did not parse. **Telling
+    them apart needs the block text, which this function does not have and deliberately does not
+    take** — it is handed facts, not sources. So the CALLER decides, using
+    `handoff_reconcile.snapshot_line_present`, and passes the sentence. Omitting it falls back to
+    the absent-line wording, which is the right default for a caller that genuinely cannot tell.
+
+    It was `_anchor_absent_cause` in the first version. The leading underscore said "internal",
+    which was false in the only way that matters: the one caller that must pass it lives in
+    another module. A private name on a parameter the contract requires is a claim about the API
+    that the API contradicts (so: keep the parameter, drop the
+    pretence).
+    """
+    anchor_absent_cause = (anchor_absent_cause
+                            or "the handoff carries no `snapshot: HEAD <sha>` line")
+    if not has_handoff:
+        # DELEGATED, not decided here. The first version returned the string itself, which made
+        # `classify_tier`'s `has_handoff` branch unreachable in production -- a path the module
+        # offered and its only caller bypassed. One function owns the vocabulary or no function
+        # does.
+        return {"tier": hr.classify_tier(upstream_advance=None, has_code=None,
+                                         has_handoff=False),
+                "rows": [], "unverified": [], "exit_code": 0, "has_code": None}
+    if anchor is None:
+        # Two different situations, and reporting them with one sentence was wrong in the second:
+        # the line may be absent (an older handoff), or
+        # present and unparseable (a branch name carrying the format's own separator).
+        return _unverified_state("anchor", anchor_absent_cause)
+    if rec is None or rec.no_git:
+        return _unverified_state("anchor", "no git repository to compare against")
+    has_code = None if files is None else is_code_merge(files)
+    unverified = [{"check": r.check, "cause": r.cause} for r in rec.unverified]
+    exit_code = rec.exit_code
+
+    # `files is None` means the range lookup was ATTEMPTED and failed, and it is not one of
+    # `rec.rows` — so neither the cause list nor the exit status knew about it. The tier went
+    # `unverified` while the `UNVERIFIED:` block stayed empty and the status stayed 0: a state
+    # word with no cause and no signal, on the one path where that must not happen.
+    # The guard is the reason it is reported HERE: this is the only place that knows the lookup was needed.
+    #
+    # Only when it was needed. With `upstream_advance == 0` the code question does not arise
+    # (`classify_tier` returns `fresh` without consulting it), so inventing a cause there would
+    # be the mirror defect — a cause for a check that was never asked.
+    if files is None and rec.upstream_advance:
+        unverified = unverified + [{
+            "check": "changed-files",
+            "cause": "the commits the upstream gained could not be read, so docs-only vs "
+                     "code-touching could not be decided",
+        }]
+        exit_code = 4
+
+    return {
+        "tier": hr.classify_tier(upstream_advance=rec.upstream_advance, has_code=has_code),
+        "rows": rec.rows,
+        "unverified": unverified,
+        "exit_code": exit_code,
+        "has_code": has_code,
+    }
 
 
 def gather_git_facts(run):
@@ -665,7 +751,7 @@ def parse_roadmap(md: str, facts: dict | None = None) -> dict:
         # carry the done glyph INSIDE the name cell and 0 carry it leading, so removing the
         # inclusive test zeroes `mainline_done` for all of them — and no test would have gone
         # red, because the new mechanism is only exercised by rows that have a plan block
-        # and those 47 never will (a station id exists only where a block does).
+        # and those rows never will (a station id exists only where a block does).
         #
         # The boundary is `binds-to`, nothing else. Not the glyph, not the position in the
         # table, not whether the row looks new.
@@ -964,7 +1050,14 @@ def read_ci_status(root, head_sha, now=None):
     }
 
 
-def gather_card_facts(root, run, resume_runner=_run_resume, now=None):
+def gather_card_facts(root, run, resume_runner=_run_resume, now=None, run_git=None, refresh=False):
+    """`run_git` is the returncode-aware runner this needs and `run` cannot be.
+
+    It is NOT defaulted to the real one. A caller that does not inject it gets `unverified`
+    with "no git runner was provided" as the cause -- fail-closed AND visible, rather than a
+    default that quietly executes git in whatever directory the process happens to be in and
+    lets a test pass for the wrong reason. Production injects it in `main()`.
+    """
     git = gather_git_facts(run)
     status_md = ""
     for name in ("docs/STATUS.md", "STATUS.md"):
@@ -997,15 +1090,41 @@ def gather_card_facts(root, run, resume_runner=_run_resume, now=None):
     resume_md = ""
     for name in ("RESUME.md", "docs/RESUME.md"):
         p = root / name
+        # `and p.read_text().strip()`, not just `exists()`: an EMPTY root RESUME.md used to
+        # shadow a real `docs/RESUME.md`, so the tier became `no-handoff` — which this makes the
+        # one tier allowed to say "clean start" — while a handoff sat in the rescue location.
+        # The shadowing predates the current work; what is new is that it can now produce exactly the
+        # earlier sentence.
         if p.exists():
-            resume_md = p.read_text()
-            break
+            body = p.read_text()
+            if body.strip():
+                resume_md = body
+                break
     checkpoint = parse_newest_checkpoint(resume_md) if resume_md else None
     digest = read_digest(root, runner=resume_runner)
-    anchor = checkpoint["noted_max_pr"] if checkpoint else None
-    save_state = classify_save_state(
-        anchor, git["merges"], lambda pr: is_code_merge(_files_of_pr(run, pr))
-    )
+    # The anchor is the sha `/handoff` writes, read out of the block
+    # `parse_newest_checkpoint` already selected. The block is handed over rather than
+    # re-selected: a second selector could pair one block's header with another block's sha.
+    anchor = rec = files = None
+    block = ""          # bound unconditionally: the cause-selection below reads it on every path
+    if checkpoint:
+        block = "\n".join([checkpoint.get("header") or ""] + list(checkpoint.get("lines") or []))
+        anchor = hr.read_anchor(block)
+    if anchor is not None and run_git is not None:
+        rec = hr.reconcile(anchor, run_git, refresh=refresh)
+        files = hr.files_changed(run_git, rec.upstream_range)
+    if anchor is not None and run_git is None:
+        save_state = _unverified_state(
+            "anchor", "no git runner was provided to gather_card_facts")
+    else:
+        save_state = classify_save_state(
+            has_handoff=bool(resume_md), anchor=anchor, rec=rec, files=files,
+            anchor_absent_cause=(
+                "the handoff's `snapshot: HEAD <sha>` line could not be parsed"
+                if hr.snapshot_line_present(block) else
+                "the handoff carries no `snapshot: HEAD <sha>` line"),
+        )
+    save_state["anchor"] = anchor
     # The five rows are decided ONCE, from ONE value. The `SOURCES:`
     # booleans below and the render branch further down both read THIS object;
     # neither recomputes "does the file exist" on its own. This file already
@@ -1098,7 +1217,56 @@ def _render_ci_block(ci, head_sha) -> list[str]:
 
 def render_facts_text(f: dict) -> str:
     cp, ss, dg = f["checkpoint"], f["save_state"], f["digest"]
-    unrec = " ".join(f"#{m['pr']}" for m in ss["unrecorded"])
+    # The ANCHOR block. One call produces both comparisons, so `fresh` can never be
+    # printed without the `checkout` row beside it: that is held structurally rather than by
+    # a rule someone has to remember.
+    _OUTCOME_GLOSS = {
+        "unchanged": "",
+        "ahead": "the {subj} has commits the anchor lacks",
+        "behind": "the {subj} lacks commits the anchor has",
+        "diverged": "each side has commits the other lacks",
+        "unavailable": "",
+        "not-attempted": "",
+    }
+    _SUBJ = {"checkout": "working tree", "upstream": "upstream", "remote": "real remote"}
+
+    def _anchor_rows():
+        a, rows = ss.get("anchor"), ss.get("rows") or []
+        if not a and not rows:
+            return []
+        head = "ANCHOR: HEAD {} · {} · {}".format(
+            a.sha[:7] if a else "-", (a.branch if a else None) or "-",
+            (a.taken_at if a else None) or "-")
+        lines = [head]
+        for r in rows:
+            n = r.subject_advance if r.outcome == "ahead" else r.anchor_only
+            if r.outcome == "diverged":
+                dist = "subject +{}, anchor +{}".format(r.subject_advance, r.anchor_only)
+            elif r.outcome in ("ahead", "behind") and n is not None:
+                dist = "{} commit{}".format(n, "" if n == 1 else "s")
+            else:
+                dist = ""
+            note = r.cause or _OUTCOME_GLOSS.get(r.outcome, "").format(
+                subj=_SUBJ.get(r.check, r.check))
+            # `_one_line`, not str(): a cause is a producer's free text and the blob is
+            # line-oriented. This is the same defect class a cross-family review caught in this
+            # file once already (see _one_line's own docstring) -- and it was reproduced here
+            # before the test below went red. No reachable input carries a newline today; that
+            # is luck, and luck is not a property.
+            lines.append("  {:<10} {:<14} {:<22} {}".format(
+                _one_line(r.check), _one_line(r.outcome), _one_line(dist),
+                _one_line(note)).rstrip())
+        return lines
+
+    def _unverified_rows():
+        uv = ss.get("unverified") or []
+        if not uv:
+            return []
+        # One line per check, each carrying its OWN cause. Never one collapsed bucket: as checks
+        # multiply, a single `unverified` stops saying which one could not run.
+        return ["UNVERIFIED:"] + [
+            "  - check: {:<10} cause: {}".format(_one_line(u["check"]), _one_line(u["cause"]))
+            for u in uv]
     ci = f.get("ci")
     out = [
         f"BRANCH: {f['git']['branch']} ({'clean' if f['git']['clean'] else 'dirty'})",
@@ -1119,7 +1287,9 @@ def render_facts_text(f: dict) -> str:
             f"  files: {', '.join(dg['files'][:8])}" if dg["files"] else "",
         ]
     out += [
-        f"SAVE-STATE: {ss['tier']}" + (f" (unrecorded: {unrec}, code={ss['code_count']})" if unrec else ""),
+        f"SAVE-STATE: {ss['tier']}",
+        *_anchor_rows(),
+        *_unverified_rows(),
         f"LOCKED-NEXT: {' · '.join(f['status']['locked_next'])}" if f["status"]["locked_next"] else "",
     ]
     rm = f.get("roadmap")
@@ -1206,15 +1376,48 @@ def main(argv=None) -> int:
     import sys
     from pathlib import Path as _P
 
+    # `argv=None` means sys.argv[1:], not "no flags". It used to mean the latter by accident --
+    # the parameter was declared and never read -- so `--refresh` was unreachable from the only
+    # surface a user has, while being fully implemented and tested one layer down.
+    args = list(sys.argv[1:] if argv is None else argv)
+    refresh = False
+    for a in args:
+        if a == "--refresh":
+            refresh = True
+        else:
+            # Refused, not ignored. A silently-dropped flag is a request the user believes was
+            # honoured, and here it would mean a confident offline card where a live check was
+            # asked for.
+            print("session_card: unknown argument %r (known: --refresh)" % a, file=sys.stderr)
+            return 2
+
     def _run(args):
         return subprocess.run(["git", *args], capture_output=True, text=True).stdout
 
     try:
-        facts = gather_card_facts(_P.cwd(), _run)
+        # `run_git=hr.run_git` is the PRODUCTION injection, and it is load-bearing rather than
+        # tidy. `gather_card_facts` deliberately does not default it (a default would let a test
+        # pass by running git in whatever directory the process is in), so a `main()` that forgets
+        # it leaves the whole reconciliation reporting `unverified / no git runner was provided`
+        # -- fail-closed and honest, and completely non-functional. That is exactly what shipped
+        # for one commit, and only running the real command found it.
+        facts = gather_card_facts(_P.cwd(), _run, run_git=hr.run_git, refresh=refresh)
         print(render_facts_text(facts))
-    except Exception as exc:  # never crash the card
-        print(f"session_card: partial ({exc})", file=sys.stderr)
-    return 0
+    except Exception as exc:
+        # STILL never a traceback -- but no longer exit 0. Nothing was printed, so returning 0
+        # would report a verified-clean run for a card that does not exist. "Never crash" was
+        # always about not raising at the user; it was never a reason to claim success.
+        print(f"session_card: could not produce a card ({exc})", file=sys.stderr)
+        return 2
+    # 0 when no check was ATTEMPTED and left inconclusive; 4 when one was. A `not-attempted`
+    # row -- the offline `remote` check on every default run -- does not count, or the status
+    # would fire every single time and carry no information.
+    #
+    # 4, NOT 3. `scripts/plc-python.sh` already exits 3 for "no working Python interpreter",
+    # `commands/catchup.md` documents that 3, and the wrapper `exec`s this script so this
+    # number passes straight through to the caller. One number with two meanings is the defect
+    # class this work exists to remove; reproducing it in its own exit status was the trap.
+    return int(facts["save_state"].get("exit_code", 0) or 0)
 
 
 if __name__ == "__main__":

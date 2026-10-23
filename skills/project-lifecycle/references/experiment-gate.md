@@ -44,7 +44,7 @@ Nine sections. Write one before each experiment runs.
                   No baseline, no experiment.
 **Dataset**       Which cases; how they are stratified (normal / edge / known-failure / difficulty);
                   whether they represent the real distribution.
-**Ground truth**  Where the right answer for each case comes from — planted, human-labelled, a test
+**Ground Truth**  Where the right answer for each case comes from — planted, human-labelled, a test
                   failure, a production incident.
 **Metrics**       One primary (decides pass/fail) plus guardrails (proves you did not wreck
                   something else to move the primary).

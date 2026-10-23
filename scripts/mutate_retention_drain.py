@@ -89,12 +89,25 @@ MUTANTS: list[tuple[str, str, list[tuple[str, str]]]] = [
                 '    mkdir -p "$segdir" || { echo "✗ cannot create $segdir"; return 1; }\n'
                 '    awk -v segdir="$segdir" \'\n',
             ),
+            # The chunk branch stages into a scratch dir UNDER $stage and then renames each piece
+            # to the next free suffix beside the segments already there (the previous
+            # shape re-split from part-aa every time and overwrote same-named segments, losing
+            # archived entries). Re-aimed with it, not around it: the three
+            # needles below are where that branch decides WHERE to write, so moving them to
+            # $segdir still produces the pre-staging shape this mutant exists to describe.
             (
-                '    split -l 2000 "$archive" "$stage/part-" \\\n',
+                '    local newdir="$stage/.split" n_existing=0 k=0 target hi lo\n',
                 '    mkdir -p "$segdir" || { echo "✗ cannot create $segdir"; return 1; }\n'
-                '    split -l 2000 "$archive" "$segdir/part-" \\\n',
+                '    local newdir="$segdir/.split" n_existing=0 k=0 target hi lo\n',
             ),
-            ('    for s in "$stage"/part-*; do\n', '    for s in "$segdir"/part-*; do\n'),
+            (
+                '    for s in "$stage"/part-*.md; do [ -f "$s" ] && n_existing=$((n_existing + 1)); done\n',
+                '    for s in "$segdir"/part-*.md; do [ -f "$s" ] && n_existing=$((n_existing + 1)); done\n',
+            ),
+            (
+                '      target="$stage/part-${alpha:hi:1}${alpha:lo:1}.md"\n',
+                '      target="$segdir/part-${alpha:hi:1}${alpha:lo:1}.md"\n',
+            ),
             ('    for s in "$stage"/*.md; do\n', '    for s in "$segdir"/*.md; do\n'),
             ('  } > "$stage/index.md" \\\n', '  } > "$segdir/index.md" \\\n'),
             (
@@ -270,8 +283,8 @@ def _run_one(name: str, breaks: str, outdir: Path) -> tuple[str, str, str, list[
     body = run.stdout + run.stderr
     killed = sorted({m.split("::")[-1] for m in FAILED.findall(body)})
     # Counted per OUTCOME rather than by matching one summary shape. `(\d+) failed, (\d+) passed`
-    # does not match a tail carrying errors — `2 failed, 3 errors, 107 passed` fell through to a
-    # denominator of 107, dropping the errored tests from both the kill list and the total.
+    # does not match a tail carrying errors — `F failed, E errors, P passed` fell through to a
+    # denominator of P, dropping the errored tests from both the kill list and the total.
     counts = {k: int(v) for v, k in re.findall(r"(\d+) (passed|failed|errors?|xfailed|xpassed)", body)}
     total = sum(v for k, v in counts.items() if k in ("passed", "failed", "xfailed", "xpassed"))
     errors = sum(v for k, v in counts.items() if k.startswith("error"))

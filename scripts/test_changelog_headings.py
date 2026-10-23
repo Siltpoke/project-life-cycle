@@ -58,7 +58,7 @@ def test_duplicate_heading_in_one_section_fails(tmp_path: Path) -> None:
     # Asserted as the literal rendered list, NOT as `"3" in stdout and "9" in stdout`. That was
     # the first draft and it SURVIVED the mutation that reports only the last line number —
     # `tmp_path` is spelled into the message and supplies stray digits, so the row was passing
-    # on the fixture's own directory name. Measured, not reasoned: the mutant went 9 passed.
+    # on the fixture's own directory name. Measured, not reasoned: the mutant passed.
     assert "lines 3, 9" in result.stdout
 
 

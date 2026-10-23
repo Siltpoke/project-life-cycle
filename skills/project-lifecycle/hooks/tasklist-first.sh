@@ -54,6 +54,55 @@ INPUT="$(cat 2>/dev/null || true)"
 
 [ "${PLC_TASKLIST_GUARD:-1}" = "0" ] && exit 0
 
+# jq ABSENT, reported as UNVERIFIED rather than as nothing.
+#
+# This guard already owns the right answer for "I could not check": the `defer` + UNVERIFIED
+# envelope further down, whose own text says it is not a pass. The jq-absent case never reached
+# it. `jqget` swallows a missing binary through `|| true`, `$SID` comes back empty, and the
+# `[ -z "$SID" ] && exit 0` below ends the run -- silently, which in the transcript is
+# indistinguishable from "a list exists and was verified".
+#
+# MEASURED: one `Write` event, no `.claude/tasklist.md` present. With jq on PATH,
+# `exit 2` and the block message. With jq off PATH, `exit 0`, stdout empty, stderr empty. The
+# probe was validated (jq really unreachable) and the jq-present control really did block.
+#
+# IT COULD NOT HAVE BEEN FIXED BY FALLING THROUGH to that envelope, which is why this block
+# exists instead of a rerouted branch: the envelope is built by `jq -cn`, so under the one
+# condition that needs it, it emits nothing. The payload here is therefore hand-written -- safe
+# only because every byte is a fixed literal, with nothing interpolated from `$INPUT`. Reading
+# `$INPUT` is exactly what is impossible here, so there is nothing to interpolate.
+#
+# Both wired modes (`mark` on TaskCreate|TodoWrite, `check` on the gated tools) are PreToolUse, so
+# one envelope is correct for either. The wording says "parsed nothing" rather than naming one
+# mode's job, because it is true of both: without jq, `mark` cannot record a satisfier and `check`
+# cannot look for one.
+#
+# TWO CORRECTIONS TO WHAT THIS COMMENT USED TO CLAIM, both from an independent review, and kept as
+# corrections rather than silently rewritten because the claim was wider than the mechanism in the
+# phase whose whole subject is claims wider than mechanisms:
+#
+#   1. It said "no call can draw two notices". FALSE. The two MODES cannot both fire on one call
+#      (their matchers are disjoint), but `guard.sh` is wired on `matcher: "Bash"` and this hook's
+#      `check` on `Bash|Task|Agent|Edit|Write|...`, so a single Bash call draws one notice from
+#      EACH hook. On a jq-less machine that is two notices per Bash call.
+#   2. It implied the notice is scoped to gated calls. It is not, and it CANNOT be: deciding
+#      whether a call is gated requires reading `tool_name` out of the event, which requires jq.
+#      So this block necessarily sits above the gating logic and fires on every matched call --
+#      `ls` and `cat` included. That is forced by the missing dependency, not chosen.
+#
+# The cost is therefore noise for the whole session on a jq-less machine, and it is accepted rather
+# than hidden: the alternative that was rejected is the silence this phase exists to remove. A
+# block-once throttle is the obvious mitigation and is NOT built here, because the marker it would
+# need is keyed on `$SID`, which is one of the fields there is no jq to read.
+#
+# Exit 0, as before. The block-once state machine needs `$SID` to key its markers and there is no
+# `$SID` to be had, so there is no once to block -- this reports on every gated call, which is
+# what the post-block contract already does.
+if ! command -v jq >/dev/null 2>&1; then
+  printf '%s' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"defer","additionalContext":"UNVERIFIED (project-lifecycle tasklist-first.sh) -- jq is not on PATH, so this hook parsed nothing and verified nothing. It did NOT check whether an enumerated task list exists for this phase, and it is not enforcing one for as long as jq is missing. This is not a pass; do not treat it as one at close time, and closing a phase under it needs a SKIP: line in the journal like any other unperformed step. The normal permission flow is untouched. To restore this layer, install jq."}}'
+  exit 0
+fi
+
 N="${PLC_TASKLIST_MIN:-3}"
 DIR="${TMPDIR:-/tmp}/plc-tasklist-guard"
 mkdir -p "$DIR" 2>/dev/null || true

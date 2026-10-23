@@ -16,7 +16,7 @@ State #1 makes skips *obvious*; gate #2 makes them *impossible to hide*.
 ## What the gate checks
 
 ### `task-done` (one cadence task)
-- [ ] the task's commit **touched the product tree** — the files changed in HEAD include a path under manifest `.product_paths[]` (e.g. `src/`, or `backend/`+`frontend/` for a split app, `skills/` for a skill repo). Path-based is the honest check: a legit `refactor:`/`docs(skill):` that changes the product passes, a meta-only change fails — the old commit-verb proxy couldn't tell them apart. **Backward-compatible:** when `product_paths` is not declared, this falls back to the legacy check that HEAD is a `feat(...)`/`fix(...)` commit
+- [ ] the phase **touched the product tree** — the files changed in the branch range `origin/main...HEAD` (HEAD's own commit when there is no `origin/main` yet) include a path under manifest `.product_paths[]`, where an entry names a directory, a single file (`calc.py`), or the repo root (`.`) (e.g. `src/`, or `backend/`+`frontend/` for a split app, `skills/` for a skill repo). Path-based is the honest check: a legit `refactor:`/`docs(skill):` that changes the product passes, a meta-only change fails — the old commit-verb proxy couldn't tell them apart. **Backward-compatible:** when `product_paths` is not declared, this falls back to the legacy check that the same range holds a `feat(...)`/`fix(...)` commit. **Why the range and not HEAD:** the next row requires a separate `docs:` journal commit, which the cadence writes after the code — so a HEAD-only check failed every correctly finished task
 - [ ] a `docs:` journal commit exists in the branch range (`origin/main..HEAD`), and the journal entry contains the literal header `## Plan deviations` (present even if body = "none") — the journal checked is the **most-recently-modified** `*.md` fragment under `retention.journal_dir` (default `docs/journal.d/`) when one exists (mtime order, deliberately not filename order: same-day fragments like `…-note10.md` vs `…-note5.md` sort wrong lexicographically, and multiple undrained fragments coexisting within a milestone is the expected state), else the manifest `journal` monolith
 - [ ] a **non-empty** test-evidence file, unchanged since it was generated (NOT proof a command ran) — by **content fingerprint** when the manifest declares `test_evidence_inputs` (the evidence file's `# plc-gate-evidence inputs=<digest>` header must match the current-tree digest of the declared inputs), else by the legacy **mtime** check (newer than the feat commit). `-s` not just `-f` — an empty-but-fresh file is a false pass, e.g. an interrupted `tee`. Written by the project's test runner, not by hand; if `test_runs_required` > 1 the file must also contain a `RUNS=N` line with N ≥ required. **Scope note:** after a fixup, task-level evidence may be scoped to the suites the fixup diff touched (per `cadence.md` §"Selective re-verification after fixup") — the scoping is task-level ONLY; `phase-done` below always demands full-suite evidence, and that full run is the safety net for anything task-level scoping skipped
 - [ ] `user-story.md` exists for the phase (unless `exempt_user_story` true) — **required at `task-done`, not only at `phase-done`**, because the `ac-oracle-binding` row below reads the story to get its denominator. A task-mode gate with no story has nothing to count against, and passing over that absence would hand a green row to every phase that never wrote one
@@ -144,7 +144,7 @@ grandfather; the other four should not be.
 
 `status_doc` (optional, default `docs/STATUS.md`) names the read-first status doc measured by the hot-cap row; `RESUME.md` and `docs/brainstorming-qa-log.md` are conventional paths and stay hardcoded in the gate. `retention.qa_log_dir` (default `docs/qa-log.d`) and `retention.changelog_dir` (default `changelog.d`) are manifest-driven, mirroring `journal_dir`.
 
-`product_paths` (optional array, **task mode**) names the code/product tree; a task's commit satisfies check #1 by touching a path under it (`git diff-tree … HEAD`). This asks the honest question — *did the task change the product* — that the legacy `feat|fix` commit-verb check only proxied: a legitimate `refactor:` or `docs(skill):` that changes the product now passes, while a meta-only change fails, which no widened verb list could tell apart. Set it to your product tree — `["src/"]`, `["backend/","frontend/"]`, `["skills/"]` for a skill repo. **Backward-compatible:** an *absent* key falls back to the legacy `feat|fix` check, so a manifest predating this key is unaffected and no adopter's gate flips on upgrade — the path check is opt-in by declaring the key. A malformed value (present but not a non-empty array — an object, string, or empty array) fails closed.
+`product_paths` (optional array, **task mode**) names the code/product tree; a task satisfies check #1 when the branch range (`origin/main...HEAD`, or HEAD's own commit with no `origin/main`) touches a path under it — an entry may name a directory (`src/`, matches only its contents), a single file (`calc.py`), or the repo root (`.`, any change). This asks the honest question — *did the task change the product* — that the legacy `feat|fix` commit-verb check only proxied: a legitimate `refactor:` or `docs(skill):` that changes the product now passes, while a meta-only change fails, which no widened verb list could tell apart. Set it to your product tree — `["src/"]`, `["backend/","frontend/"]`, `["skills/"]` for a skill repo. **Backward-compatible:** an *absent* key falls back to the legacy `feat|fix` check, so a manifest predating this key is unaffected and no adopter's gate flips on upgrade — the path check is opt-in by declaring the key. A malformed value (present but not a non-empty array — an object, string, or empty array) fails closed.
 
 `test_evidence_inputs` (optional array) switches the **test-evidence freshness** check from mtime to a **content fingerprint**. mtime is not evidence that the tests ran against the *current* code — git does not preserve mtime across a checkout, and a fresh clone / CI checkout / synced folder shuffles mtimes, so a mtime-only row false-PASSES by construction there. Declare the inputs whose change means "the tests must be re-run" (globs, e.g. `["src/**","tests/**"]`); the gate then requires the evidence file's first line to be a `# plc-gate-evidence inputs=<digest>` header that matches the current-tree digest of those inputs. **The runner must produce that header** — prepend it with the `evidence-header` subcommand: `{ close-gate.sh evidence-header; <test_command>; } | tee <test_evidence>`. **Two-part opt-in, so no adopter breaks:** an *absent* key keeps the legacy mtime check byte-identical (existing manifests are untouched), and even a declared key does nothing until the runner writes the header — a declared-but-unheaded evidence file **hard-fails** (never silently falls back to mtime) with the exact regenerate command. Inputs that match no tracked file, or a malformed value, fail closed. The digest is over git-**tracked** working-tree content (an uncommitted edit to a tracked input *is* caught; a brand-new *unstaged* file is not — stage before generating evidence), the same git-tracked convention `product_paths` uses. **`/init-harness` generates both for new adopters**: the key is filled from the detected source/test tree, the `test_command` is emitted in the header-prefixed placeholder form above, and `scripts/gen-test-evidence.sh` (§Evidence runner) is scaffolded — so a bootstrapped repo is in fingerprint mode from its first run rather than only if someone knew to turn it on. **Do not hand-write the pipeline** even when retrofitting: the documented `… | tee <file>` form ends in a bare `tee`, which exits 0 even when the step writing the header fails, silently overwriting good evidence with a broken file. Copy the runner instead. An *existing* manifest with no key is still untouched and stays on mtime, so no adopter's gate flips on upgrade.
 
@@ -160,7 +160,7 @@ grandfather; the other four should not be.
 
 `surface_total` must be a JSON **number** greater than zero (a numeric string is refused). `basis` says what universe that total counts, and must be exactly one of `tracked-files` / `all-files` / `glob-set` / `explicit-path-list`. `why` is a non-empty array of non-empty strings, **free prose in any language and any script -- the gate reads none of it** and checks only that it is there.
 
-**Do not write `surface_kept`.** The gate DERIVES how many files the narrowing matches, from the same pathspec resolution the fingerprint itself uses, and a manifest that declares the member is refused. A number you cannot write is one you cannot fake and cannot leave to rot -- and the rotting is not hypothetical: this repository's own manifest stated 77 where the truth had grown to 595, with this row green over it the whole time.
+**Do not write `surface_kept`.** The gate DERIVES how many files the narrowing matches, from the same pathspec resolution the fingerprint itself uses, and a manifest that declares the member is refused. A number you cannot write is one you cannot fake and cannot leave to rot -- and the rotting is not hypothetical: a manifest was found stating a count far below the truth, with this row green over it the whole time.
 
 **What p30 removed, stated rather than silently dropped.** Until p30 the value was an array of strings and the row asserted a measurement SHAPE inside that prose: at least two ASCII digit groups plus a case-insensitive match on the English root `track`. Both predicates were language-bound, so an argument that was entirely true but spelled its numbers out, or was written in another language, or made the case without that word, was REFUSED by a hard-fail gate. And the anti-gaming strength the rule was assumed to buy was measured and was not there -- `0 0 track` satisfied it. The one property it reliably delivered, that an untouched scaffold placeholder fails, is preserved. **There is no longer any requirement to use Arabic numerals or the English word `tracked` anywhere.**
 
@@ -315,19 +315,83 @@ JARCHIVE=""; JSLICE=""; JFENCED=""
 # entry for why each rule is chosen by its error direction rather than by correctness.
 journal_slice() {
   awk -v pat="phase-$2" '
+    # The length of the delimiter run this line opens with, or 0 if it is not a fence line.
     function frun(s) { if (match(s, /^(`+|~+)/) && RLENGTH >= 3) return RLENGTH; return 0 }
+    # A closer for an open <ch>-fence of length <ln>: same character, at least as long, and
+    # NOTHING but whitespace after it -- a bare delimiter run closes, and a run carrying a language
+    # tag after it is content and an opener, not a closer. (The two forms are not spelled out with
+    # literal backtick runs on purpose: the adopter-facing reference embeds this program inside a
+    # markdown fence, and a triple run here ends that fence early. Measured: one such line cut the
+    # extracted gate from 79,554 bytes to 9,504 -- 88% of it -- with nothing reporting a problem.)
     function fclose(s, ch, ln,   r) {
       r = frun(s)
       if (!r || substr(s, 1, 1) != ch || r < ln) return 0
       return (substr(s, r + 1) ~ /^[[:space:]]*$/)
     }
-    BEGIN { fopen = 0; prevblank = 1; inb = 0; found = 0; fenced = 0 }
+    # The payload of an ACCEPTED sentinel line: what sits between the opener and the ` -->`
+    # terminator. Returns "" for the two shapes the grammar calls malformed -- an empty or
+    # all-whitespace payload, and a comment with no terminator on its line -- so one return value
+    # means "do not use this", and the caller decides how loudly to say so.
+    function fpay(s,   t, i) {
+      t = substr(s, length(PFX) + 1)
+      i = index(t, " -->")
+      if (i == 0) return ""
+      t = substr(t, 1, i - 1)
+      if (t ~ /^[[:space:]]*$/) return ""
+      # WHITESPACE INSIDE THE PAYLOAD IS MALFORMED, which the grammar above has always said and
+      # this function did not check. A payload names a PATH; a space in it means the line is not
+      # the thing it looks like, and scoring it anyway hands the phase-name test a token nobody
+      # wrote. Derived from a census of existing markers, the way the rest of this grammar was:
+      # none has whitespace in the payload, so enforcing the stated rule refuses
+      # nothing that exists. Returning "" routes it to the same loud failure as an empty payload.
+      if (t ~ /[[:space:]]/) return ""
+      return t
+    }
+    BEGIN { PFX = "<!-- fragment: "; fopen = 0; prevblank = 1; inb = 0; found = 0; fenced = 0
+            printed = 0; malformed = 0 }
     {
       if (prevblank == 1 && $0 ~ /^<!-- fragment: /) {
         k = index($0, pat)
         after = (k > 0) ? substr($0, k + length(pat), 1) : ""
         nm = (k > 0 && (after == "-" || after == ".")) ? 1 : 0
-        if (fopen == 0) { inb = nm; if (nm) found = 1; prevblank = 0; next }
+        if (fopen == 0) {
+          # ACCEPTED boundary. It both ends the previous slice and opens this one; the sentinel
+          # line itself is never body.
+          #
+          # PAYLOAD MODE, and it is inert unless asked for: with -v emit=payload the caller gets
+          # the markers themselves rather than the slice belonging to one phase.
+          #
+          # THE REASON IS FAIL-LOUD, not reach. A caller can already ask "is there a boundary for
+          # this phase" with the exit status above, and measurement says that answer is right for
+          # every marker in this archive today. What it CANNOT do is tell a malformed marker from
+          # an absent one: a sentinel line with an empty payload exits 1 up there, which a caller
+          # reads as "this file holds nothing for you" -- a fail-OPEN reading of the one shape the
+          # grammar wants to fail loudly. Code 3 below is where that distinction lives.
+          #
+          # It also moves the NAME test to the caller, which already owns one, so a payload ending
+          # AT the phase name parses -- the substring rule above needs a following `-` or `.`.
+          # Stated rather than implied: that form is not load-bearing today. Such lines in
+          # this archive sit directly beneath a full-path marker naming the same fragment, with no
+          # blank line above them, so none of them is a boundary and the exit status misses
+          # nothing. The grammar accepts the form; no archived evidence depends on it.
+          #
+          # Malformedness is judged HERE and only for accepted boundaries: a sentinel quoted inside
+          # a fence is not a marker, so a malformed quoted example must fail no scan.
+          if (emit == "payload") {
+            p = fpay($0)
+            if (p == "") malformed = 1
+            else { print p; printed = 1 }
+            prevblank = 0
+            next
+          }
+          inb = nm
+          if (nm) found = 1
+          prevblank = 0
+          next
+        }
+        # REJECTED — sentinel-shaped, but inside a fence. Rule 2: it still ENDS the open slice,
+        # so no slice can ever reach into the next fragment. Rule 3: if it names this phase, say
+        # so rather than dropping it silently. The line then falls through as ordinary body.
         if (nm) fenced = 1
         inb = 0
       }
@@ -336,7 +400,12 @@ journal_slice() {
       if (inb) print
       prevblank = ($0 ~ /^[[:space:]]*$/) ? 1 : 0
     }
-    END { exit(found ? 0 : (fenced ? 2 : 1)) }
+    # Slice mode: 0 a boundary for this phase was found, 1 none was, 2 one naming it was rejected
+    # as fenced. Payload mode keeps the same error DIRECTION and adds one code rather than reusing
+    # a quieter one: 3 means a malformed marker was seen, and it outranks having printed others,
+    # because the whole point of the grammar is that fail-loud stays reachable.
+    END { if (emit == "payload") exit(malformed ? 3 : (printed ? 0 : 1))
+          exit(found ? 0 : (fenced ? 2 : 1)) }
   ' "$1"
 }
 # $1 journal dir  $2 phase  $3 archive dir (may be empty)  $4 monolith fallback
@@ -590,7 +659,7 @@ check_evidence() {
   # And `surface_kept` is DERIVED, not declared -- see evidence_kept_count(). A number the author
   # cannot write is a number they cannot fake and cannot leave to rot. This was not the original
   # design: it was added after a review found that declared numbers drift silently, and after the
-  # repository that ships this gate was found stating 77 where the truth was 595, with this very row
+  # repository that ships this gate was found stating a count far below the truth, with this very row
   # green over it.
   #
   # WHAT THIS ROW STILL DOES NOT DO, stated here so the ✓ text and this comment cannot drift apart:
@@ -627,7 +696,7 @@ check_evidence() {
         # "an array of strings, at least one of which says something" -- in ONE jq expression, so the
         # sub-conditions cannot drift apart across three shell reads.
         #
-        # NOT "every element non-empty", and the difference was found by dogfooding rather than by
+        # NOT "every element non-empty", and the difference was found in use rather than by
         # design: this repository's own `why` is a multi-line prose block that uses empty strings as
         # PARAGRAPH SEPARATORS, and the first version of this rule refused it. The property that
         # actually matters is that the value says something, so `["", "", "x"]` passes and
@@ -638,7 +707,7 @@ check_evidence() {
         RAT_MISSING=""
         # A declared surface_kept is REFUSED rather than ignored. Accepting-and-ignoring it would let
         # a stale copied number sit in the manifest looking authoritative while nothing reads it --
-        # which is exactly the 77-vs-595 shape this change exists to remove.
+        # which is exactly the stale-count shape this change exists to remove.
         [ "$RAT_HAS_KEPT" = yes ] && RAT_MISSING="$RAT_MISSING surface_kept-is-derived-remove-it"
         [ "$RAT_TOTAL_TYPE" = number ] || RAT_MISSING="$RAT_MISSING surface_total-must-be-a-json-number"
         if [ "$RAT_TOTAL_TYPE" = number ]; then
@@ -835,8 +904,21 @@ ac_oracle_binding() { # $1 = mode (task|phase)
     base="$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)"
     mb="$(git merge-base "$base" HEAD 2>/dev/null || echo unknown)"; export AC_MERGE_BASE="$mb"
     # A FAILURE and an EMPTY SCOPE are different facts. `|| : > "$ids"` collapsed them: an unset
-    # origin/HEAD, an absent merge-base or a malformed `Closes:` trailer all became "no criteria
-    # claimed by any commit on this branch" and a green row. Keep stderr and fail loudly.
+    # origin/HEAD or an absent merge-base became "no criteria claimed by any commit on this
+    # branch" and a green row. Keep stderr and fail loudly.
+    #
+    # A MALFORMED TRAILER IS NO LONGER ONE OF THOSE CASES, and the list above used to say
+    # it was. `scope-from-trailers` now tokenises without judging, so a malformed value travels
+    # to `report`, which names it with a MALFORMED verdict distinct from ORPHAN. The reason the
+    # verdict moved is that a verdict is only worth what the reader of it sees: in the reference
+    # project's own gate the equivalent call is `... 2>/dev/null || : > "$AC_IDS"`, so a `die`
+    # here was swallowed AND the id file truncated, turning a red with the wrong message into a
+    # GREEN printing "no criteria claimed". This variant never had that bug -- it already failed
+    # loudly -- so for THIS gate the move is a better message rather than a fixed colour.
+    #
+    # The branch below is still reachable and still load-bearing: `scope-from-trailers` continues
+    # to `die` on an undeterminable default branch and on an absent merge-base, which are what
+    # those two remaining cases are.
     if ! bash "$ac_sh" scope-from-trailers "$PHASE" --base "$base" > "$ids" 2>"$ids.err"; then
       bad "ac-oracle-binding: could not determine what this branch claims to close — $(head -3 "$ids.err" | tr '\n' ' ')"
       rm -f "$ids" "$ids.err"
@@ -865,30 +947,59 @@ ac_oracle_binding() { # $1 = mode (task|phase)
 }
 
 if [ "$MODE" = task ]; then
-  # Product-tree check: did THIS task's commit touch the product tree? A path check asks the real question
-  # ("the phase shipped a product change") that the old `feat|fix` commit-VERB test only proxied —
-  # a legit refactor-only commit under the product tree had to be mislabeled `feat` to pass. Paths
-  # come from the manifest `.product_paths[]`. BACKWARD-COMPATIBLE: an ABSENT key falls back to the
-  # legacy verb check, so a manifest predating this key keeps its behavior and no adopter's gate
-  # flips on upgrade — the path check is opt-in by declaring product_paths. `git diff-tree … --root
-  # HEAD` names the files in HEAD's own commit; `--root` is REQUIRED for parent-safety — without it
-  # a root commit (an adopter's very first commit, e.g. an init-harness scaffold + first product
-  # code in one commit) diffs against a nonexistent parent and prints nothing → false ✗ on a real
-  # change; with it a root commit lists all its files and a parented commit is unaffected. Gate on
-  # the JSON *type*: `.product_paths[]?` also iterates an object's values, so a `{"a":"src/"}` typo
-  # would silently run on those — only a non-empty ARRAY takes the path branch; null (absent) →
+  # Did this phase ship a product change? A path check asks the real question that
+  # the old `feat|fix` commit-VERB test only proxied — a legit refactor-only commit under the product
+  # tree had to be mislabeled `feat` to pass. Paths come from the manifest `.product_paths[]`.
+  # BACKWARD-COMPATIBLE: an ABSENT key falls back to the legacy verb check, so a manifest predating
+  # this key keeps its behavior — the path check is opt-in by declaring product_paths.
+  #
+  # SCOPE: the branch range `origin/main...HEAD`, NOT HEAD's own commit. This row used to read
+  # `git diff-tree … HEAD` only, and the row right below it requires a SEPARATE `docs:` journal
+  # commit in the range. The cadence writes that journal AFTER the code, so HEAD is the docs commit
+  # and a correctly finished task failed here with "changed no product-tree path" — measured on
+  # real hosts in the v5.0.0 release test, where one workaround was to rewrite this row to get past
+  # it. The two rows could only both pass if the journal went first or into the code commit. The
+  # range is also what SKILL.md's check table and this repo's own gate already say ("the phase diff
+  # touched the product tree"). No `origin/main` (a repo with no remote yet, e.g. an adopter's very
+  # first commit) → fall back to HEAD's own commit; `--root` keeps a root commit's files visible.
+  if git rev-parse -q --verify origin/main >/dev/null 2>&1; then
+    P1_SCOPE="origin/main...HEAD"
+    # core.quotePath=false: with git's default, a non-ASCII path prints C-quoted ("src/caf\303\251.py"),
+    # whose leading `"` never matches `^src`.
+    P1_FILES="$(git -c core.quotePath=false diff --name-only origin/main...HEAD 2>/dev/null || true)"
+    P1_SUBJ="$(git log origin/main..HEAD --format=%s 2>/dev/null || true)"
+  else
+    P1_SCOPE="HEAD (no origin/main to diff against)"
+    P1_FILES="$(git -c core.quotePath=false diff-tree --no-commit-id --name-only -r --root HEAD 2>/dev/null || true)"
+    P1_SUBJ="$(git log -1 --format=%s 2>/dev/null || true)"
+  fi
+  # Gate on the JSON *type*: `.product_paths[]?` also iterates an object's values, so a `{"a":"src/"}`
+  # typo would silently run on those — only a non-empty ARRAY takes the path branch; null (absent) →
   # verb fallback; anything else (object / string / empty array) → fail closed.
   PP_TYPE="$(jq -r '.product_paths | type' "$M" 2>/dev/null || echo null)"
   if [ "$PP_TYPE" = array ] && PP_LIST="$(jq -r '.product_paths[]' "$M" 2>/dev/null)" && [ -n "$PP_LIST" ]; then
     # strip trailing slash, escape EVERY ERE metachar (so an adopter path like `c++/` or `app(v2)/`
-    # can't reach grep -E raw and false-FAIL), join with `|`. grep -c … -gt 0 (not grep -q) for the
-    # same pipefail/SIGPIPE reason the docs:/[DEBUG- checks below use.
+    # can't reach grep -E raw and false-FAIL), join with `|`.
     PP_ALT="$(printf '%s\n' "$PP_LIST" | sed -e 's#/*$##' -e 's#[][(){}.^$*+?|\\]#\\&#g' | paste -sd'|' -)"
-    if [ "$(git diff-tree --no-commit-id --name-only -r --root HEAD 2>/dev/null | grep -cE "^(${PP_ALT})/" || true)" -gt 0 ]; then
-      ok "task commit touches the product tree (${PP_ALT})"
-    else bad "task commit changed no product-tree path (${PP_ALT}) — a task must ship a product change (or fix product_paths)"; fi
+    # A ROOT entry (`.`, `./`, or a sole `/`) means "the product tree IS this repo" (a flat layout).
+    # As a regex it would be `^\./` or empty, which no repo-relative path ever matches, so it would
+    # fail forever; it means match-everything instead, i.e. "did the range change anything at all".
+    PP_ROOT=0
+    while IFS= read -r _pp; do
+      _pp="$(printf '%s' "$_pp" | sed -e 's#/*$##')"
+      if [ -z "$_pp" ] || [ "$_pp" = "." ]; then PP_ROOT=1; fi
+    done <<<"$PP_LIST"
+    # `(/|$)`, not a hard-appended `/`: an entry naming a FILE (`calc.py`, `Makefile`) must match
+    # itself — with `/` it matched nothing, ever (init-harness wrote `["calc.py"]` for a
+    # single-file project on real hosts) — while a directory entry still matches only its CONTENTS,
+    # so `src` does not match `src-old/x.py`. grep -c … -gt 0 (not grep -q) for the same
+    # pipefail/SIGPIPE reason the docs:/[DEBUG- checks below use.
+    if { [ "$PP_ROOT" = 1 ] && [ -n "$P1_FILES" ]; } \
+       || [ "$(grep -cE "^(${PP_ALT})(/|\$)" <<<"$P1_FILES" || true)" -gt 0 ]; then
+      ok "phase touches the product tree in $P1_SCOPE (${PP_ALT})"
+    else bad "no product-tree path changed in $P1_SCOPE (${PP_ALT}) — a task must ship a product change (or fix product_paths)"; fi
   elif [ "$PP_TYPE" = null ]; then
-    git log -1 --format=%s | grep -qE '^(feat|fix)(\(|:)' && ok "feat/fix commit" || bad "no feat/fix commit on HEAD"
+    grep -qE '^(feat|fix)(\(|:)' <<<"$P1_SUBJ" && ok "feat/fix commit in $P1_SCOPE" || bad "no feat/fix commit in $P1_SCOPE"
   else
     bad "product_paths present in manifest but not a non-empty JSON array — fix the manifest"
   fi
@@ -1650,11 +1761,37 @@ scope_from_trailers() {
   [ -n "$raw" ] || return 0
   while IFS= read -r tok; do
     [ -n "$tok" ] || continue
-    case "$tok" in
-      *:AC*) out="$out$tok"$'\n' ;;
-      '#'*)  die "a \`Closes:\` trailer names an issue ($tok), not an acceptance criterion. Use \`Refs:\` for issues." ;;
-      *)     die "unparseable \`Closes:\` value: $tok" ;;
-    esac
+    # THIS STEP TOKENISES AND NO LONGER JUDGES, and the reason is WHERE THE VERDICT IS READ.
+    #
+    # It used to classify here, with `case "$tok" in *:AC*)` -- a CONTAINMENT test -- and `die` for
+    # anything else. Measured (while writing a commit): `Closes: p1:AC5,
+    # p1:AC6` on one line tokenises through `tr ' ' '\n'`, which splits on spaces and NOT on
+    # commas, so `p1:AC5,` reached the comparison with its comma attached, was accepted as a
+    # well-formed id, matched nothing in the story, and was reported as
+    # `ORPHAN  ...the current story declares no such criterion` -- a factual assertion about the
+    # USER STORY. A comma in the author's own commit message was reported as a defect in a
+    # different file.
+    #
+    # THE OBVIOUS FIX WAS ANCHORING THE GLOB HERE, AND IT MADE THINGS WORSE. Measured rather than
+    # reasoned: `scripts/close-gate.sh:1348` invokes this step as
+    #
+    #     ... scope-from-trailers ... > "$AC_IDS" 2>/dev/null || : > "$AC_IDS"
+    #
+    # so a `die` is SWALLOWED **and the id file is truncated**. With an anchored glob here the
+    # gate went from `ORPHAN -> report exits 1 -> RED` (wrong reason, right colour) to
+    # `die -> swallowed -> empty scope -> report exits 0 printing "no criteria claimed by any
+    # commit on this branch" -> GREEN`. A fix for a wrong message that turns a red into a
+    # reassuring green is worse than the message it replaces.
+    #
+    # So the token TRAVELS, and `report` -- where verdicts live, and where the gate reads them --
+    # names it. That move closes THREE silences, not one: this `die`, the swallow above, and
+    # `report`'s own `case "$id" in "$phase":AC*) ;; *) continue ;;`, which dropped every
+    # non-matching token without a word.
+    #
+    # WHAT DID NOT CHANGE: commas are still not separators. The convention is one `Closes:` per
+    # line, and the requirement is the malformed VERDICT rather than a new accepted input
+    # shape -- widening the parser would be a feature wearing a bug fix's clothes.
+    out="$out$tok"$'\n'
   done <<<"$raw"
   printf '%s' "$out" | sort -u
 }
@@ -1721,8 +1858,34 @@ report() {
     fi
     # An id a commit CLAIMS that the story does not declare must be reported. The intersection
     # below would silently drop it, and an unclaimed id must be reported distinctly.
+    # THREE VERDICTS, AND THE ORDER IS THE POINT.
+    #
+    # The grammar is checked BEFORE the phase filter. That filter used to be the first thing a
+    # token met -- `case "$id" in "$phase":AC*) ;; *) continue ;;` -- so a token that was not a
+    # well-formed id of this phase was DROPPED WITHOUT A WORD. Combined with the tokeniser
+    # `die`ing upstream and the gate swallowing that `die`, a comma in a `Closes:` trailer had
+    # three separate ways to end in silence.
+    #
+    # MALFORMED is a verdict about the COMMIT MESSAGE. ORPHAN is a claim about the USER STORY.
+    # Both are red, and the distinction exists because the gate printed the second when the first was true,
+    # sending the reader to the wrong file. The grammar is the one this file already applies at
+    # the story end, so the two sides of the comparison cannot disagree about what an id IS.
+    #
+    # `#NNN` keeps its own sentence rather than folding into MALFORMED: `Closes: #NNN` is
+    # habitual forge idiom and this repository files backlog items under its own ids, so the reader needs
+    # to be told it is the WRONG KIND of reference, not a typo.
     while IFS= read -r id; do
       [ -n "$id" ] || continue
+      case "$id" in
+        '#'*)
+          printf '  %-12s MALFORMED names an issue, not an acceptance criterion -- use `Refs:` for issues\n' "$id"
+          fail=1; continue ;;
+      esac
+      if ! printf '%s' "$id" | grep -qE '^[A-Za-z0-9_.-]+:AC[0-9]+(\.[0-9]+)?[a-z]?$'; then
+        printf '  %-12s MALFORMED not a bare criterion id; expected <phase>:AC<n>[.<n>][a-z], one `Closes:` per line, space-separated within a line -- a trailing comma is part of the token\n' "$id"
+        fail=1; continue
+      fi
+      # Another phase's well-formed id is not this phase's business, and is not an error.
       case "$id" in "$phase":AC*) ;; *) continue ;; esac
       if ! grep -qFx "$id" <<<"$declared"; then
         printf '  %-12s ORPHAN    claimed by a `Closes:` trailer, but the current story declares no such criterion\n' "$id"
@@ -2395,13 +2558,19 @@ restore
 git add .close-gate-probe.py && git -c user.email=t@t -c user.name=t commit --quiet -m "test: inject debug probe (large diff, marker first)"
 neg "orphan [DEBUG- in diff (large-diff SIGPIPE guard)"  'orphan \[DEBUG- logs'  task
 git reset --quiet --hard HEAD~1; restore
-git -c user.email=t@t -c user.name=t commit --quiet --allow-empty -m "chore: not a cadence task"
-# Check #1 is path-based when the manifest declares product_paths (an empty commit touches no
-# product path → 'no product-tree path') and the legacy verb check otherwise ('no feat/fix commit').
-# An empty chore commit fails BOTH branches, so accept either message — the NEG stays correct whether
-# the manifest under test predates product_paths or ships it (the manifest example now does).
-neg "non-product / non-feat-fix HEAD"  'no feat/fix commit|no product-tree path'  task
-git reset --quiet --hard HEAD~1; restore
+# Check #1 reads the BRANCH RANGE, so an empty commit stacked on this (passing) branch no
+# longer fails it — the range still holds the branch's product change, and that is the point of that check
+# (a docs: journal commit after the code is the normal cadence order). The fail path is an EMPTY
+# range instead: a detached worktree at origin/main, where the range holds nothing. Path-based when
+# the manifest declares product_paths ('no product-tree path'), the legacy verb check otherwise ('no
+# feat/fix commit'); an empty range fails BOTH, so accept either message.
+WT3="$TMP/wt3"
+if git -C "$ROOT" worktree add --quiet --detach "$WT3" origin/main 2>/dev/null; then
+  mkdir -p "$WT3/scripts" "$WT3/.claude"; cp scripts/close-gate.sh "$WT3/scripts/"; cp "$M" "$WT3/.claude/close-gate.json"
+  o="$(cd "$WT3" && bash scripts/close-gate.sh task 2>&1 || true)"
+  grep -qE 'no feat/fix commit|no product-tree path' <<<"$o" && { echo "  ✓ NEG  no product change in the range (empty range)"; pass=$((pass+1)); } || { echo "  ✗ NEG  product-tree check on an empty range"; failc=$((failc+1)); }
+  git -C "$ROOT" worktree remove --force "$WT3" >/dev/null 2>&1 || true
+else echo "  ⚠ SKIP product-tree empty-range test (could not create origin/main worktree)"; fi
 # Sweeper diff-direction teeth: a sweep-tagged commit that ADDS code must fail; a SWEEP-PERF line rescues it.
 # ALSO the regression guard for the sweep-DETECTION SIGPIPE (production close-gate.sh sweep check): the
 # Archetype: sweep trailer sits on line 3 of a LARGE commit body (thousands of filler lines). With the old

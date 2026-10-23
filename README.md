@@ -4,7 +4,7 @@
 
 **Project Life Cycle turns ad-hoc AI coding sessions into a repeatable, traceable software workflow** — one [Claude Code](https://docs.claude.com/en/docs/claude-code) skill that runs the same spec → plan → build → verify → ship → release discipline on every project, driven by three slash commands: `/init-harness` → `/ship` → `/release`.
 
-Works in [Claude Code](#claude-code-setup), [Codex](#codex-setup), [Qoder](#qoder-setup), [Antigravity](#antigravity-setup), and [CodeBuddy](#codebuddy-setup).
+Verified to load in [Claude Code](#claude-code-setup), [Codex](#codex-setup), [Qoder](#qoder-setup) and [CodeBuddy](#codebuddy-setup) — each checked with that host's own plugin validator, with the output recorded in [HOST-VERIFICATION.md](HOST-VERIFICATION.md). [Antigravity](#antigravity-setup) ships a manifest and is [**not yet verified**](HOST-VERIFICATION.md#unverified) (its `agy` CLI loads the plugin, but running a session needs an interactive browser login the unattended checks could not do). Those checks cover discovery and loading. A later end-to-end run drove a small phase through each of the four hosts; what it found — including where the skill's hooks do **not** run — is in the same file. None of it ran on Windows.
 
 **Want the details?** The [**Guide**](GUIDE.md) covers what it does, when to use it, the full workflow, and a file-by-file repo map. [CHANGELOG.md](CHANGELOG.md) is what shipped.
 
@@ -20,7 +20,7 @@ claude plugin marketplace add Siltpoke/project-life-cycle
 claude plugin install project-lifecycle@project-life-cycle
 ```
 
-Restart Claude Code. Skill becomes available as `project-lifecycle`; auto-triggers when you start a new project, plan a milestone, or run per-phase work. The three headline commands — `/project-lifecycle:init-harness` (bootstrap a project), `/project-lifecycle:ship` (vertical-slice feature), `/project-lifecycle:release` (cut a release) — drive the core arc, alongside the opt-in `/project-lifecycle:builder-profile` (a local snapshot of how you actually use an AI coding agent). A set of auxiliary commands rounds out the workflow — `/catchup`, `/handoff`, `/reconcile`, `/review`, `/research`, `/capture`, `/recall`, `/cognition-distill`, `/tasklist`, `/plc-status`, `/experiment` — see the [Guide](GUIDE.md) for what each does. The bare forms (`/init-harness`, `/ship`, …) used throughout this README also work, as long as no other installed command claims the same name.
+Restart Claude Code. Skill becomes available as `project-lifecycle`; auto-triggers when you start a new project, plan a milestone, or run per-phase work. The three headline commands — `/project-lifecycle:init-harness` (bootstrap a project), `/project-lifecycle:ship` (vertical-slice feature), `/project-lifecycle:release` (cut a release) — drive the core arc, alongside the opt-in `/project-lifecycle:builder-profile` (a local snapshot of how you actually use an AI coding agent). A set of auxiliary commands rounds out the workflow — `/catchup`, `/handoff`, `/reconcile`, `/review`, `/research`, `/capture`, `/recall`, `/cognition-distill`, `/plc-status`, `/experiment` — see the [Guide](GUIDE.md) for what each does. The bare forms (`/init-harness`, `/ship`, …) used throughout this README also work, as long as no other installed command claims the same name.
 
 Update later:
 
@@ -75,7 +75,7 @@ Then start a new Codex thread. The cachebuster step stamps the version in `.code
 
 ### Qoder setup
 
-This repo also ships Qoder plugin metadata in `.qoder-plugin/plugin.json` (the plugin manifest) and `.qoder-plugin/marketplace.json` (required for `qodercli plugins marketplace add`). The `skills/` directory layout and `SKILL.md` frontmatter match Qoder's plugin conventions, and the frontmatter hook paths use `${QODER_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}` so the same skill works in both Qoder and Claude Code.
+This repo also ships Qoder plugin metadata in `.qoder-plugin/plugin.json` (the plugin manifest) and `.qoder-plugin/marketplace.json` (required for `qodercli plugins marketplace add`). The `skills/` directory layout and `SKILL.md` frontmatter match Qoder's plugin conventions, and the frontmatter hook paths use `${QODER_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}`, so the skill loads in both Qoder and Claude Code. **The skill's frontmatter hooks were not observed to run in Qoder:** in an end-to-end run the skill loaded and the task-list guard never intercepted a write ([HOST-VERIFICATION.md](HOST-VERIFICATION.md#end-to-end-run)). Treat those hooks as Claude Code-only until that is resolved. The pre-push close gate is a git hook, not a skill hook, and is unaffected.
 
 Install from a local checkout:
 
@@ -130,7 +130,7 @@ agy plugin install /path/to/project-life-cycle
 
 ### CodeBuddy setup
 
-This repo ships CodeBuddy plugin metadata in `.codebuddy-plugin/plugin.json` (the plugin manifest) and `.codebuddy-plugin/marketplace.json` (required for `/plugin marketplace add`). CodeBuddy natively supports `${CLAUDE_PLUGIN_ROOT}` as a Claude Code compatibility alias, so the same `SKILL.md` frontmatter hooks run unchanged.
+This repo ships CodeBuddy plugin metadata in `.codebuddy-plugin/plugin.json` (the plugin manifest) and `.codebuddy-plugin/marketplace.json` (required for `/plugin marketplace add`). CodeBuddy natively supports `${CLAUDE_PLUGIN_ROOT}` as a Claude Code compatibility alias, so the hook commands resolve there. **They were not observed to run, though:** in an end-to-end run the skill loaded and the task-list guard never intercepted a write ([HOST-VERIFICATION.md](HOST-VERIFICATION.md#end-to-end-run)). Treat the skill's frontmatter hooks as Claude Code-only until that is resolved. The pre-push close gate is a git hook, not a skill hook, and is unaffected.
 
 Load from a local checkout:
 

@@ -35,7 +35,14 @@ REAL_PICK = {
 def _write_stub_codex(bindir: Path, *, mode="ok", authed=True, payload=None):
     """Write a fake `codex` honoring `login status` + `exec ... -o <file>`.
 
-    mode: ok | unparseable | spawnfail | hang
+    mode: ok | unparseable | spawnfail | quota | hang
+
+    `quota` reproduces a MEASURED run (codex-cli): exit 1 with
+    `ERROR: You've hit your usage limit.` on stderr, the process having started and run
+    to completion. Quota exhaustion is NOT uniform -- a second shape has been observed,
+    `exit 0` with no output at all -- so the stub reproduces the one that
+    was measured and the fix covers only that one. The other shape is indistinguishable
+    from `empty-answer` by construction and is deliberately left alone.
 
     `payload` replaces REAL_PICK in the `ok` branch, so a caller can hand this stub
     ANY payload shape. The code-review stub has this too; without it this side would be
@@ -72,6 +79,7 @@ if [ "$sub" = "exec" ]; then
   case "{mode}" in
     hang) sleep 30;;
     spawnfail) echo '{{"type":"turn.failed"}}'; exit 1;;
+    quota) echo "ERROR: You've hit your usage limit. Your limit resets soon -- try again later." >&2; exit 1;;
     unparseable) [ -n "$out" ] && printf 'not json{{' > "$out"; echo '{{"type":"turn.completed"}}'; exit 0;;
     ok) [ -n "$out" ] && cat > "$out" <<'JSON'
 {body}
@@ -135,6 +143,50 @@ def test_not_authed_falls_back(tmp_path):
     assert cp.returncode == 3
     assert r["status"] == "fallback"
     assert r["fallback_reason"] == "not-authed"
+
+
+def test_p174_quota_exhaustion_is_not_reported_as_a_spawn_failure(tmp_path):
+    """The fallback was right and the reason it gave was wrong.
+
+    MEASURED. The runner emitted
+    `{"status":"fallback","fallback_reason":"spawn-failed"}` and exited 3. A direct probe
+    showed why that was false: `codex exec --sandbox read-only -` exited 1 printing
+    `ERROR: You've hit your usage limit. ... try again later.` The
+    binary was on PATH, logged in, and the process started and ran to completion. Nothing
+    about the spawn failed.
+
+    `scripts/cross-family-review.sh` classified EVERY non-zero exit as `spawn-failed`, and
+    its reason table had no class for being rate-limited at all. **A signal that points the
+    maintainer at the wrong thing**: following `spawn-failed` means inspecting the process,
+    the sandbox and the arguments, while the actual remedy is to wait for the limit to reset.
+    Same shape as an earlier defect, where the auth probe read stdout and codex wrote to stderr, so it
+    ALWAYS fell back `not-authed` -- both times the fallback was correct and its stated
+    reason was not.
+
+    The assertion is two-sided: the new reason must appear AND `spawn-failed` must not,
+    because the run exits 3 either way and a returncode assertion passes against the defect.
+    """
+    cp, r = _run(tmp_path, mode="quota")
+    assert cp.returncode == 3, cp.stderr
+    assert r["status"] == "fallback"
+    assert r["fallback_reason"] == "quota-exhausted", (
+        f"rate-limiting still reported as {r['fallback_reason']!r}"
+    )
+    assert "pick" not in r, "the fallback arm must not carry the payload key"
+
+
+def test_p174_an_unrecognised_nonzero_exit_still_says_spawn_failed(tmp_path):
+    """The positive control, and it is the one that keeps the fix honest.
+
+    The requirement is explicit: an unclassifiable non-zero exit stays `spawn-failed`
+    -- what it prints must still be true. A fix that routed every non-zero exit to the new
+    reason would pass the test above and destroy the distinction it exists to create.
+    """
+    cp, r = _run(tmp_path, mode="spawnfail")
+    assert cp.returncode == 3
+    assert r["fallback_reason"] == "spawn-failed", (
+        f"an unclassifiable failure was relabelled {r['fallback_reason']!r}"
+    )
 
 
 def test_spawn_failure_falls_back(tmp_path):

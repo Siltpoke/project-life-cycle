@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Invariant: references/ci-cd-gates.md stays silent about `detailed` / the mode mechanism.
 #
-# WHY THIS EXISTS. a byte-freezing guard's first arm froze the whole references/ subtree, which meant
+# WHY THIS EXISTS. A byte-freezing guard's first arm froze the whole references/ subtree, which meant
 # this file could not be edited at all -- and the file documents CI and billing fallbacks, nothing
-# about `mode`. It was removed from .claude/mode-frozen-set.txt on 2026-08-31 on the precedent
-# close-gate.md set, and that removal REST ON A PREMISE: that the file has nothing to do with
+# about `mode`. It was removed from .claude/mode-frozen-set.txt, and that removal
+# RESTS ON A PREMISE: that the file has nothing to do with
 # `detailed`. This guard asserts the premise instead of leaving it as a sentence in a comment.
 #
 # That is the narrow form of what the frozen-set file itself calls the general fix -- "pin the

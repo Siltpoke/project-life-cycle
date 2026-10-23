@@ -4,7 +4,7 @@
 # existing section's body open.
 #
 # WHY THESE TWO AND NOT THE THIRD. AC-2 was split into three separately-falsifiable criteria
-# (story amendment A3): [a] the mainline table's bytes are unchanged, [b] the new blocks are placed
+# -- [a] the mainline table's bytes are unchanged, [b] the new blocks are placed
 # so no existing section is cut open, [c] PLC's own two parsers produce byte-identical output
 # across the change. **[c] is not here, and its absence is a placement decision, not an omission.**
 # [c] has to run `scripts/session_card.py` -- that is `python3` -- and every script in
@@ -15,8 +15,8 @@
 # `test_command`. **Do not move it back here because it looks like the same job.**
 #
 # WHY [b] EXISTS AT ALL -- it is not a style rule. Both consumers define a section's body as
-# "everything after this `## ` heading up to the NEXT `## `" (the downstream consumer,
-# `src/progress/roadmap-parse.ts:96-108`; PLC's own parser walks headings the same way). The new
+# "everything after this `## ` heading up to the NEXT `## `" (a downstream consumer's
+# parser; PLC's own parser walks headings the same way). The new
 # blocks are themselves `## ` sections, so dropping one into the middle of an existing section
 # TRUNCATES that section's body -- while the mainline table's bytes never move. That is why [a] is
 # necessary but NOT sufficient, and why the review's suggested shortcut ("just compare the table
@@ -76,11 +76,11 @@ ok() { printf '  ok  %s\n' "$*"; }
 # THE RULE IS TWO-SIDED, AND THE FIRST VERSION ONLY IMPLEMENTED ONE SIDE. Its comment said
 # "the previous non-blank line was a table row AND the next non-blank line is also a table
 # row"; the code tested only the previous one. Measured consequence, not a hypothetical: it
-# rejected `## 🧭` placed immediately before `## 🗂` -- one of the NINE positions an early run proved
+# rejected `## 🧭` placed immediately before `## 🗂` -- one of the positions an early run proved
 # safe by running both parsers over every candidate -- because the mainline table happens to
 # be the last thing in the section above. A guard whose comment describes a two-sided test and
-# whose code performs a one-sided one is this repo's most-filed defect, written by the author
-# of the phase that exists to fix it.
+# whose code performs a one-sided one is a known defect shape, and this one was
+# written inside the phase that exists to fix it.
 #
 # Two passes: collect lines, then decide with real lookahead. A single streaming pass cannot
 # see the NEXT non-blank line, which is exactly the half that went missing.
@@ -135,7 +135,7 @@ fi
 # makes this comparison mean "since this phase started" no matter how many commits land on top.
 # When there is no base to compare against (a fresh clone with no origin, an adopter running this
 # on a tree that has no such history), the check says so and SKIPS rather than passing -- an empty
-# comparison that prints a pass is indistinguishable from a real one, filed here twice (p38, p32).
+# comparison that prints a pass is indistinguishable from a real one, filed here before.
 #
 # THE DECLARED-ROWS EXCEPTION, and why it is not a loosening. The criterion this check names is
 # "ADDING THE BLOCKS leaves the table byte-identical". Comparing the whole table against the base

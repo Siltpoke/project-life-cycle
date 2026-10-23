@@ -633,3 +633,124 @@ def test_a_header_with_no_readable_label_still_recovers(tmp_path: Path) -> None:
     assert res.returncode == 0, f"the recovery path must stay open: {res.stderr}"
     header = _header_of(tmp_path)
     assert "(derived)" in header and "(hand-written)" in header
+
+
+# ---------------------------------------------------------------------------------------------
+# The priority glyph table must know the heaviest glyph, and must find the glyph in whichever heading segment opens with it.
+#
+# The words are not a usable key: severity words come in several spellings, some non-English,
+# and the same word can label 🟠 in one document and 🔴 in another. The glyph is
+# authoritative; the word beside it is decoration.
+# ---------------------------------------------------------------------------------------------
+
+GLYPH_FIXTURE = """# Backlog
+
+Deferred decisions.
+
+## B7001 — the heaviest kind — 🔴 HEAVY
+
+Body of B7001.
+
+## B7002 — ordinary high — 🟠 HIGH
+
+Body of B7002.
+
+## B7003 — carries 🟠 but names 🔴 in its own prose — 🟠 HEAVY (should be 🔴, see B7001)
+
+Body of B7003.
+
+## B7004 — a title that mentions 🔴 while being light — 🟢 LOW
+
+Body of B7004.
+
+## B7005 — no priority segment at all, just a sentence that ends the heading
+
+Body of B7005.
+
+## B7006 — a glyph from the same family that is not a priority — 🟣 WHO KNOWS
+
+Body of B7006.
+
+## B7007 — glyph segment is not last: prose with its own — dashes — follows it — 🟡 2026-01-01 (note: a — inside)
+
+Body of B7007.
+
+## B7008 — glyph segment is second-to-last — 🟡 SOON (small) — surfaced 2026-01-02
+
+Body of B7008.
+
+## B7009 — 🟠 ESCALATED — the glyph segment comes FIRST and the title is last
+
+Body of B7009.
+"""
+
+
+def _prio_cell(index: str, bid: str) -> str:
+    """The priority cell of one row, read positionally rather than by substring.
+
+    A containment assertion over the whole row cannot tell `🟠 high` in the priority column
+    from the same text having leaked into `what` — the header tests are checked per
+    cell for exactly that reason, and this reuses the lesson.
+    """
+    for line in index.splitlines():
+        if line.startswith(f"| **{bid}** |"):
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            assert len(cells) == 4, f"unexpected row shape for {bid}: {line!r}"
+            return cells[2]
+    raise AssertionError(f"{bid} has no row in the index")
+
+
+def test_p160_the_heaviest_glyph_gets_a_tier_above_high(tmp_path: Path) -> None:
+    """RED before the fix: the cell was empty, which reads as "no priority given"."""
+    out = _run(tmp_path, GLYPH_FIXTURE)
+    cell = _prio_cell(_index_of(out), "B7001")
+    assert cell == "🔴 crit", f"the heaviest glyph did not rank: {cell!r}"
+
+
+def test_p160_a_glyph_named_in_prose_does_not_outrank_the_real_one(tmp_path: Path) -> None:
+    """Positive control. Green before the fix and it must stay green.
+
+    B7003 carries 🟠 and mentions 🔴 inside its own trailing segment; B7004 is 🟢 and mentions 🔴 in
+    its title. A substring-matched 🔴 branch promotes both, and the promotion is invisible —
+    a wrong priority looks exactly like a right one.
+    """
+    index = _index_of(_run(tmp_path, GLYPH_FIXTURE))
+    assert _prio_cell(index, "B7003") == "🟠 high", "a prose 🔴 outranked the real glyph"
+    assert _prio_cell(index, "B7004") == "🟢 low", "a 🔴 in the title outranked the real glyph"
+
+
+def test_p160_an_unranked_family_glyph_is_visible_not_blank(tmp_path: Path) -> None:
+    """RED before the fix: 🟣 fell to no branch and rendered blank, exit 0, no word said.
+
+    `?` rather than a silent cell is the whole point — and it must be DISTINGUISHABLE from a
+    heading that set no priority at all, or the fix just relabels the silence.
+    """
+    res = _run_raw(tmp_path, GLYPH_FIXTURE)
+    assert res.returncode == 0, f"an unranked glyph must not abort the run: {res.stderr}"
+    index = _index_of((tmp_path / "docs" / "BACKLOG.md").read_text(encoding="utf-8"))
+    assert _prio_cell(index, "B7006") == "?", "an unrecognised glyph rendered as if absent"
+    assert "B7006" in res.stderr, f"nothing on stderr named the entry: {res.stderr!r}"
+    assert "🟣" in res.stderr, f"stderr did not name the glyph it could not rank: {res.stderr!r}"
+
+
+def test_p160_the_glyph_is_found_in_whichever_segment_opens_with_it(tmp_path: Path) -> None:
+    """The regression a last-segment rule introduces, pinned as its own case.
+
+    Three real shapes from docs/BACKLOG.md, reduced: B7007 has further ` — ` dashes after the
+    glyph segment, B7008 has the glyph second-to-last, B7009 has it first. A last-segment reader
+    returns blank for all three — and blank is what the whole entry is about.
+    """
+    index = _index_of(_run(tmp_path, GLYPH_FIXTURE))
+    assert _prio_cell(index, "B7007") == "🟡 med", "prose after the glyph segment lost the priority"
+    assert _prio_cell(index, "B7008") == "🟡 med", "a trailing `surfaced` note lost the priority"
+    assert _prio_cell(index, "B7009") == "🟠 high", "a leading glyph segment lost the priority"
+
+
+def test_p160_no_priority_segment_stays_blank_and_silent(tmp_path: Path) -> None:
+    """The other side of the same line. Priority is optional and hand-written: an entry that
+    never set one is not a defect, so it gets no `?` and earns no warning. Without this, the
+    fix trades one indiscriminate cell for one indiscriminate complaint."""
+    res = _run_raw(tmp_path, GLYPH_FIXTURE)
+    index = _index_of((tmp_path / "docs" / "BACKLOG.md").read_text(encoding="utf-8"))
+    assert _prio_cell(index, "B7005") == "", "an entry with no priority was given one"
+    assert "B7005" not in res.stderr, f"an absent priority was reported as unrankable: {res.stderr!r}"

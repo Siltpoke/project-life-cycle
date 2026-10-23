@@ -29,6 +29,53 @@
 # inferred-vs-checked defect named above, one level up.
 
 INPUT="$(cat 2>/dev/null || true)"
+
+# jq ABSENT is not the same event as jq returning nothing, and conflating them is what this
+# block fixes. `jq` is the only parser here: with it off PATH, `$CMD` is empty, the `|| exit 0`
+# below fires, and the hook exits 0 having inspected NOTHING -- byte-identical, in the exit code
+# and in the transcript, to a run where it read the command and found nothing to object to.
+# MEASURED, not reasoned: the same `git push origin main` event is `exit 2`
+# plus the deny message with jq on PATH, and `exit 0` with empty stdout AND empty stderr with jq
+# off it. The probe was validated (`command -v jq` really did fail under it) and the jq-present
+# control really did still block, so the silence is attributable to the missing jq.
+#
+# Still exit 0 -- fail-open is correct and deliberate. A missing dependency must not wall off a
+# machine; the enforcing layers named in this file's header are unaffected either way. What
+# changes is only that the hook now SAYS it did not look.
+#
+# The notice goes to stdout as the documented hook envelope, NOT to stderr. `additionalContext` is
+# the field the PreToolUse contract DOCUMENTS as reaching the model, and `defer` abstains rather
+# than spending the user's consent -- `allow` would remove the confirmation prompt for every later
+# gated call. Both of those come from tasklist-first.sh's field-choice note, which was itself
+# hotfixed for shipping the wrong two fields.
+#
+# WHAT IS AND IS NOT ESTABLISHED, stated at the width of the evidence rather than at the width of
+# the intent (review finding, and the exact defect class this hook's own header is about):
+#   * ESTABLISHED: this hook EMITS a well-formed envelope on stdout. The tests assert that.
+#   * NOT ESTABLISHED: that a host RENDERS it. No run of any host was observed showing
+#     `additionalContext` under `defer`. The sibling note says "verified against the documented
+#     contract" -- i.e. verified against documentation text, not against a delivery.
+#   * NOT ESTABLISHED: that stderr "reaches nobody". What is true is narrower and is all that is
+#     claimed here: under a non-blocking exit this hook's stderr has NO DOCUMENTED READER, and the
+#     same note records that the docs are SILENT on the matter, which is "unspecified", not
+#     "dropped". stdout was chosen because it is the channel the contract names -- not because
+#     stderr was measured as unread.
+# The choice stands on the documented channel being the documented channel. Writing more than that
+# would be this phase committing its own defect inside its own fix.
+#
+# NO ESCAPE HATCH, said out loud rather than left to be discovered: unlike tasklist-first.sh
+# (PLC_TASKLIST_GUARD=0), this hook has no env kill switch, so on a jq-less machine this notice
+# fires on EVERY Bash call for the whole session and the only remedies are installing jq or
+# unwiring the hook. That is a cost, not an oversight; the alternative was staying silent.
+#
+# Hand-written JSON is safe HERE and would not be safe generally: every byte of this payload is a
+# fixed literal in this file. Nothing from `$INPUT` is interpolated -- which is unavoidable, since
+# reading `$INPUT` is precisely what is impossible right now.
+if ! command -v jq >/dev/null 2>&1; then
+  printf '%s' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"defer","additionalContext":"UNVERIFIED (project-lifecycle guard.sh) -- jq is not on PATH, so this hook parsed nothing and checked nothing. It did NOT verify that this command avoids a --no-verify bypass or a direct push to main; it is not enforcing either rule for as long as jq is missing. This is not a pass. The normal permission flow is untouched, and the git pre-push hook plus branch protection are unaffected. To restore this layer, install jq."}}'
+  exit 0
+fi
+
 CMD="$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
 [ -n "$CMD" ] || exit 0
 

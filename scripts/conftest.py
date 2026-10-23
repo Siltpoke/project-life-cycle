@@ -16,12 +16,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 # The list is MEASURED, not remembered: it is exactly the set that fails when this hook is removed
 # and the suite runs against this tree. It is re-measured for every release rather than carried
 # forward, and entries that have stopped failing are dropped -- adding a test here that would pass
-# is a silent loss of coverage, which is why the list shrank the last two times it was measured.
+# is a silent loss of coverage.
 #
-# 4.1.1 dropped four. Two were freed by a fix in this release; the other two were freed by
-# RESTORING CONTENT TO THE CHANGELOG. They had been failing because this changelog's entry for
-# the breaking change named the key without showing a value you could paste, and the rows exist
-# to catch exactly that. A row that goes red because a notice is thin is not a row to skip.
+# A row that goes red because a notice is thin is not a row to skip: the notice gets fixed instead.
 #
 # Ids are matched WITHOUT their parameters, so a parametrised test listed here is skipped for
 # every parameter, including any that would pass on their own.
@@ -55,16 +52,8 @@ _NEEDS_MAINTAINER_RECORDS = {
     "scripts/test_corpus_validators.py::test_archiving_a_declaration_does_not_move_any_position",
     "scripts/test_document_map.py::test_the_claim_about_status_doc_is_true_of_this_repo",
     "scripts/test_exit_zero_claims.py::test_the_changelog_entry_is_marked_superseded_not_rewritten",
-    "scripts/test_filings.py::test_the_entry_exists_and_is_a_filing_not_a_mention",
-    "scripts/test_filings.py::test_the_index_lists_every_filing_as_open",
-    "scripts/test_filings.py::test_the_label_judgement_is_recorded_as_a_decision",
     "scripts/test_gate_envelope.py::test_mutant_manifest_with_an_argument_defeats_the_no_arguments_row",
     "scripts/test_gate_envelope.py::test_the_gate_invokes_this_checker_with_no_arguments",
-    "scripts/test_generator_edges.py::test_a_backslash_in_the_map_path_does_not_change_which_file_is_which",
-    "scripts/test_generator_edges.py::test_crlf_input_is_read_as_the_same_paths",
-    "scripts/test_generator_edges.py::test_the_generator_edge_alone_selects_the_oracle",
-    "scripts/test_generator_edges.py::test_the_real_table_declares_both_required_edges",
-    "scripts/test_input_map_guards.py::test_the_invariant_is_registered_in_the_real_gate",
     "scripts/test_ledger_writers.py::test_a_failing_writer_cannot_change_the_gates_verdict",
     "scripts/test_ledger_writers.py::test_a_stage_the_gate_never_reached_renders_missing_not_done",
     "scripts/test_ledger_writers.py::test_mutant_a_propagating_writer_failure_reds_the_gate",
@@ -77,10 +66,6 @@ _NEEDS_MAINTAINER_RECORDS = {
     "scripts/test_roadmap_parsers_unchanged.py::test_control_heading_inside_the_table",
     "scripts/test_roadmap_parsers_unchanged.py::test_control_one_character_in_a_mainline_row",
     "scripts/test_roadmap_parsers_unchanged.py::test_insertion_points_are_all_safe",
-    "scripts/test_select_tests.py::test_ac10_a_tracked_only_reader_is_not",
-    "scripts/test_select_tests.py::test_ac10_an_untracked_reader_is_selected_for_an_empty_change",
-    "scripts/test_select_tests.py::test_ac1_the_oracle_is_selected",
-    "scripts/test_select_tests.py::test_ac2_and_it_is_not_everything",
     "scripts/test_session_card_no_network.py::test_the_guard_is_declared_in_the_close_gate_manifest",
     "scripts/test_stage_registry.py::test_the_invariant_is_declared_in_the_gate_manifest",
 }

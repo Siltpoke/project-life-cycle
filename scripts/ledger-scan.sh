@@ -46,6 +46,20 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Tests pass the path explicitly; nothing ambient can relocate the writer.
 APPEND_DEFAULT="$HERE/ledger-append.sh"
 
+# The ONE reader for the drain's fragment sentinel, shared with the wrap-up gate: a file here, an
+# embedded copy there, held to the same bytes by
+# scripts/invariants/one-fragment-sentinel-reader.sh. The gate is a single drop-in script and
+# cannot reach a sibling file; this scanner runs in place and can. Writing a second matcher for
+# the same sentinel is exactly the drift that guard refuses.
+#
+# It is an ARGUMENT (`--sentinel`) with this as the default, for the reason written above the
+# emitter and then promptly re-earned: a mutant copy of this script lives under a temp directory,
+# so a reader resolved beside the script is NOT THERE, and a mutant of the matchers dies of a
+# missing file and is scored dead for a reason unrelated to what it mutated. Measured --
+# mutant rows failed exactly that way before this line existed. Not an environment variable, for
+# the same reason as the emitter: an environment variable is not a capability.
+SENTINEL_DEFAULT="$HERE/lib/fragment-sentinel.awk"
+
 die() { printf 'ledger-scan: %s\n' "$1" >&2; exit "${2:-2}"; }
 
 usage() {
@@ -55,6 +69,8 @@ usage:
   ledger-scan.sh scan --roadmap <docs/ROADMAP.md> --out-dir <dir>
                       [--registry <.claude/stage-registry.json>] [--repo-root <dir>]
                       [--repo-id <id>] [--now <RFC3339-UTC>]
+                      [--emitter <scripts/ledger-append.sh>]
+                      [--sentinel <scripts/lib/fragment-sentinel.awk>]
 EOF
 }
 
@@ -165,9 +181,109 @@ find_archive_headings() {
   return 0
 }
 
+# --- fragment markers: one read of each archive for the WHOLE scan ------------------------------
+#
+# ROOTS ARE FILES for this kind, not directories, because that is what the drain writes into: one
+# compiled monolith, one cold archive file, and a directory of roll-over segments reached by a
+# glob. The two finders above walk `<dir>/*.md`; this pair expands each root and takes what is a
+# regular file.
+#
+# WHY AN INDEX AND NOT A READ PER RUN, AND THE REASON IS NOT SPEED. The per-run shape was written
+# first, and the arithmetic looked damning -- one awk pass per declared file per run, over
+# archives that do not change during a scan, in a file that already carries that lesson one layer
+# up (its first draft spawned one jq per file per run and was slow). Then it was measured, and no
+# cost was there to find: a full scan ran no slower with this kind declared than without it,
+# so any difference is run-to-run noise. The index stays, and the honest
+# reason is the next paragraph, not this one.
+#
+# IT PUTS THE REFUSAL IN THE RIGHT PLACE. A malformed marker is a property of the ARCHIVE, not
+# of a run: it is the same defect whichever phase is being scored. Reading once means the refusal
+# fires once, before any run is scored, from the top level where `die` ends the scan -- instead of
+# once per run, from inside a command substitution, where `die` ends only a subshell and the scan would
+# have to notice through `set -e`. The loudest rule in this grammar should not depend on a shell
+# option staying switched on.
+#
+# The reader itself supplies whole-line-only and fence-awareness, so neither is re-derived here: a
+# document that QUOTES a marker inside a fenced block is not a marker, and this phase's own spec
+# does exactly that.
+FM_INDEX=""
+fm_build_index() {
+  local sentinel="$1" repo_root="$2" specs="$3"
+  local spec roots root f rel payloads payload base cand rc seen=""
+  while IFS= read -r spec; do
+    [ -n "$spec" ] || continue
+    case "$spec" in *"|fragment-marker|"*) ;; *) continue ;; esac
+    # `<stage>|<kind>|<suffix>|<roots>` -- drop the first three fields. `suffix` has no meaning for
+    # this kind: a marker names a source PATH, and the phase name comes from its basename.
+    roots="${spec#*|}"; roots="${roots#*|}"; roots="${roots#*|}"
+    for root in $roots; do
+      for f in $repo_root/$root; do
+        [ -f "$f" ] || continue
+        rel="${f#"$repo_root"/}"
+        # A file declared under two stages is read once, not twice.
+        case "$seen" in *"|$rel|"*) continue ;; esac
+        seen="$seen|$rel|"
+        [ -r "$f" ] || die "declared root $rel is not readable, so this scan cannot say whether it holds markers" 3
+        payloads="$(awk -v emit=payload -f "$sentinel" "$f")" && rc=0 || rc=$?
+        [ "$rc" -eq 3 ] && die "malformed fragment marker in $rel -- a sentinel-shaped line whose payload is empty, or whose comment never closes. The grammar fails loud here on purpose: a marker nobody can read must not be scored as a marker nobody wrote." 3
+        # 2 IS NOT A VERDICT IN PAYLOAD MODE. The reader's contract uses 2 for "a sentinel naming
+        # this phase was rejected as FENCED", which only the slice mode returns; in payload mode a
+        # 2 is `awk` itself failing -- a syntax error in the program, or an input it could not read.
+        # Measured: both exit 2. Falling through to `continue` scored that as "this file holds no
+        # markers", which is the fail-OPEN reading of "I could not look".
+        [ "$rc" -eq 2 ] && die "the fragment-sentinel reader could not run against $rel (awk exited 2: a program that does not parse, or an input it cannot read). A reader that could not look must not be scored as a file holding nothing." 3
+        [ "$rc" -eq 0 ] || continue
+        while IFS= read -r payload; do
+          [ -n "$payload" ] || continue
+          # The phase name comes from the payload's BASENAME with a trailing `.md` optional, so
+          # both observed forms parse. The match itself happens at lookup time through
+          # `file_name_matches` -- the same anchored rule the filename finder uses, so "this name
+          # is that phase" has one definition and not two.
+          base="${payload##*/}"
+          case "$base" in *phase-*) cand="${base##*phase-}" ;; *) continue ;; esac
+          FM_INDEX="$FM_INDEX$rel|${cand%.md}"$'\n'
+        done <<EOF2
+$payloads
+EOF2
+      done
+    done
+  done <<EOF
+$specs
+EOF
+}
+
+# Print every declared file under these roots that carries a marker naming this phase.
+find_fragment_markers() {
+  local slug="$1" repo_root="$2"; shift 2
+  local root f paths="" rel cand hit=""
+  for root in "$@"; do
+    for f in $repo_root/$root; do
+      [ -f "$f" ] || continue
+      paths="$paths|${f#"$repo_root"/}|"
+    done
+  done
+  [ -n "$paths" ] || return 0
+  # `|` is the field separator for the same reason the registry specs use it: a path can hold `/`,
+  # `*`, `.` and `-`, but not a pipe. A TAB would be worse than useless here -- it is IFS
+  # whitespace, so a run of them collapses and an empty field shifts the next one left.
+  while IFS='|' read -r rel cand; do
+    [ -n "$rel" ] || continue
+    case "$paths" in *"|$rel|"*) ;; *) continue ;; esac
+    case "$hit" in *"|$rel|"*) continue ;; esac
+    file_name_matches "$cand" "$slug" || continue
+    hit="$hit|$rel|"
+    printf '%s\n' "$rel"
+  done <<EOF
+$FM_INDEX
+EOF
+  # Same reason as the finders above: under `set -e` a trailing non-zero from the last match test
+  # would become this function's status and kill the scan on the common case.
+  return 0
+}
+
 # --- scan -------------------------------------------------------------------------------------
 cmd_scan() {
-  local roadmap="" out_dir="" registry="" repo_root="" repo_id="" now="" emitter=""
+  local roadmap="" out_dir="" registry="" repo_root="" repo_id="" now="" emitter="" sentinel=""
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --roadmap)   [ "$#" -ge 2 ] || die "--roadmap needs a value";   roadmap="$2";   shift 2 ;;
@@ -177,6 +293,7 @@ cmd_scan() {
       --repo-id)   [ "$#" -ge 2 ] || die "--repo-id needs a value";   repo_id="$2";   shift 2 ;;
       --now)       [ "$#" -ge 2 ] || die "--now needs a value";       now="$2";       shift 2 ;;
       --emitter)   [ "$#" -ge 2 ] || die "--emitter needs a value";   emitter="$2";   shift 2 ;;
+      --sentinel)  [ "$#" -ge 2 ] || die "--sentinel needs a value";  sentinel="$2";  shift 2 ;;
       *) die "unknown argument: $1" ;;
     esac
   done
@@ -201,6 +318,11 @@ cmd_scan() {
   # An emitter that is not there, or not a file, is a hard failure rather than a silent skip: a
   # scan that cannot write is not a scan that found nothing.
   [ -f "$emitter" ] || die "emitter is not a file: $emitter"
+  [ -n "$sentinel" ] || sentinel="$SENTINEL_DEFAULT"
+  # Checked unconditionally, not only when the registry happens to declare a marker source: the
+  # reader ships with this scanner, so its absence means a broken installation, and a scanner that
+  # cannot read markers is not a scanner that found none.
+  [ -f "$sentinel" ] || die "the fragment-sentinel reader is not a file: $sentinel"
 
   mkdir -p "$out_dir"
 
@@ -220,6 +342,10 @@ cmd_scan() {
       | [$sid, .kind, (.suffix // ""), (.roots | join(" "))] | join("|")' "$registry")"
   stage_ids="$(jq -r '.stages[].stage_id' "$registry")"
   [ -n "$stage_ids" ] || die "the registry declares no stages -- every run would then be trivially complete"
+
+  # Fragment markers are read here, once for the whole scan, and a malformed one refuses from this
+  # level rather than from inside a per-run command substitution. See fm_build_index.
+  fm_build_index "$sentinel" "$repo_root" "$specs"
 
   local slug run_id phase stage kind roots suffix artifacts found file spec
   local n_runs=0 n_records=0
@@ -247,6 +373,10 @@ cmd_scan() {
             found="$(find_phase_files "$slug" "$suffix" "$repo_root" $roots)" ;;
           archive-heading)
             found="$(find_archive_headings "$slug" "$repo_root" $roots)" ;;
+          fragment-marker)
+            # A pure lookup in the index built before the run loop. The malformed-marker refusal
+            # already fired there if it was going to, at the top level where `die` ends the scan.
+            found="$(find_fragment_markers "$slug" "$repo_root" $roots)" ;;
           prose-token)
             # The run population IS this file, so this is true by construction for a retro run.
             # Emitted anyway and labelled in the registry, rather than silently dropped.

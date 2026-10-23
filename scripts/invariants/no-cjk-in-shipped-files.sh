@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Invariant (the station-plan work): no CJK text in a tracked file that reaches the public snapshot.
+# Invariant (the station-plan work): no CJK text in a tracked file that ships.
 #
 # WHY THIS EXISTS, and it is a measured gap rather than a precaution. The only thing enforcing
 # this rule was `.git/hooks/pre-push` check #3 — which is NOT git-tracked and runs at
@@ -18,13 +18,12 @@
 # THE EXEMPTIONS MIRROR THE HOOK, deliberately and not by coincidence:
 #   README* / CHANGELOG.md / GUIDE*  the intentional Chinese docs and the language switcher.
 #   private/                            a private working directory, if you keep one.
-#   docs/                               p39: the working record is tracked and 70+ of its files
-#                                       are Chinese; it is not on the export allow-list, which
-#                                       an allow-list assertion kept outside this snapshot
-#                                       makes. That assertion is what makes this exemption
-#                                       safe, and it is tracked, unlike the hook.
+#   docs/                               the project's working record; it does not ship.
+#   CLAUDE.md                           the root agent-instruction file; it does not ship either.
 #
 # The paths are anchored, so `docs-something/` and `skills/x/docs/` are still scanned.
+# CLAUDE.md is anchored too, so `skills/x/CLAUDE.md` is still scanned -- only the root file is
+# exempt.
 #
 # Envelope: bash + git + grep + perl. No python3 (CLAUDE.md). `grep -P` is not portable (BSD
 # grep lacks it), so the codepoint test is perl, which ships with macOS and with every runner
@@ -41,7 +40,8 @@ command -v perl >/dev/null 2>&1 || {
 # Tracked files only. An untracked file cannot reach the snapshot, and scanning the working
 # tree would red on scratch files nobody is shipping.
 files="$(git ls-files -- ':(exclude)docs/**' ':(exclude)private/**' \
-                         ':(exclude)README*' ':(exclude)CHANGELOG.md' ':(exclude)GUIDE*')"
+                         ':(exclude)README*' ':(exclude)CHANGELOG.md' ':(exclude)GUIDE*' \
+                         ':(exclude,top)CLAUDE.md')"
 
 n_scanned=0
 hits=""
@@ -66,7 +66,7 @@ $files
 EOF
 
 # An empty scan is reported, never passed silently: zero files scanned and zero hits are two
-# different states, and this repo has filed the collapse of that distinction twice.
+# different states, and this repo has seen the collapse of that distinction.
 if [ "$n_scanned" -eq 0 ]; then
   printf '⊘ no-cjk-in-shipped-files: 0 tracked files in scope — nothing was checked, and that is stated rather than passed\n'
   exit 0
@@ -80,7 +80,7 @@ if [ -n "$hits" ]; then
 fi
 
 if [ "$fail" -ne 0 ]; then
-  printf '✗ no-cjk-in-shipped-files: FAILED — these bytes reach the public snapshot; this check refuses them\n' >&2
+  printf '✗ no-cjk-in-shipped-files: FAILED — CJK is not allowed in shipped files outside the listed localized docs\n' >&2
   exit 1
 fi
-printf '✓ no-cjk-in-shipped-files (%s tracked file(s) scanned; docs/, private/, README*, CHANGELOG.md, GUIDE* are exempt by name)\n' "$n_scanned"
+printf '✓ no-cjk-in-shipped-files (%s tracked file(s) scanned; docs/, private/, README*, CHANGELOG.md, GUIDE*, and the root CLAUDE.md are exempt by name)\n' "$n_scanned"

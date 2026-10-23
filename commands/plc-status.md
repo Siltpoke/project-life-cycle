@@ -1,5 +1,5 @@
 ---
-description: Render the lifecycle ledger — for every mandated stage of a run, whether it was observed, only claimed, missing, not-applicable, or unrecoverable. Default shows the current run, `--run <id>` shows one run's rows plus its timeline, `--all` shows the conformance matrix over every run on disk. Read-only, terminal-only, jq the single dependency. Distinct from `/tasklist`, which reads a different contract.
+description: Render the lifecycle ledger — for every mandated stage of a run, whether it was observed, only claimed, missing, not-applicable, or unrecoverable. Default shows the current run, `--run <id>` shows one run's rows plus its timeline, `--all` shows the conformance matrix over every run on disk. Read-only, terminal-only, jq the single dependency. Reads the lifecycle ledger and nothing else; the separate `.claude/tasklist.md` progress contract has no reader command any more (`/tasklist` has been retired, and the contract file itself is unchanged).
 ---
 
 # /plc-status — did this run actually follow the process?
@@ -10,7 +10,7 @@ Renders `<repo>/.claude/.gate-runs/ledger/<run_id>.jsonl` against the stage regi
 Run and render its stdout **verbatim** as your reply:
 
 ```bash
-bash scripts/plc-status.sh
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/plc-status.sh"
 ```
 
 (In the installed plugin this path is under the skill dir; in a checkout of this repository it is

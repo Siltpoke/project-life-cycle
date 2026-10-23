@@ -77,6 +77,94 @@ For solo-developer + AI workflows (no co-reviewer available), the practical setu
 - Block force pushes to main ✅
 - Required reviews: 0 (you ARE the reviewer; the PR review IS the human checkpoint)
 
+## A green can go stale, and the PR page cannot show it (contract — copy it, PLC does not ship it)
+
+A `pull_request` run does not test your branch. It tests a virtual merge of **your head with the base
+as the base was when the run was created**. If anything lands on the base afterwards, that green
+describes a tree that will never exist — and the PR page renders that case **identically** to a fresh
+green. The industry name for the resulting breakage is a **semantic conflict**: two changes that merge
+cleanly as text and are wrong together.
+
+Measured instance: a run started, a different PR merged into the base while it ran, and
+the first run then reported green. Nothing noticed. What caught it was a human re-running one
+test file locally against the combination, afterwards.
+
+**Two things GitHub documents, and one it does not.** Documented: a re-run reuses the original
+`GITHUB_SHA` and `GITHUB_REF`, so re-running does **not** retest a fresh merge. Also documented: the
+"Require branches to be up to date before merging" protection, which is the correct first answer when
+you can have it. **Not documented:** whether the merge ref is recomputed when the base advances.
+Independent community measurement says it is not, the workflow is not re-run, and the existing check run
+is not invalidated. Treat that as observed behaviour, not a contract — and say so in any output built on
+it.
+
+### When protection is not available to you
+
+Protected branches and rulesets are **not** offered on some plans (for example a private repository on a free plan): both REST
+endpoints answer `403 Upgrade to GitHub Pro or make this repository public`. Merge queue needs an
+org-owned public repo or Enterprise Cloud. So on such a repo there is **nothing
+server-side** that can refuse a stale merge, and a check you run yourself is the only option left.
+
+**PLC does not ship that check**, for the same reason it does not ship the ci-status producer: a
+merge-time check for a specific forge is forge-specific code, and PLC's no-external-tool rule forbids any PLC step from requiring
+an external tool. What follows is the **contract** it should honour. Write it in your own tooling, or
+borrow the shape.
+
+### The contract
+
+**Four outcomes, and only four.** The words are the ones `/catchup` and `/handoff` already use, so a
+reader does not have to learn a second vocabulary:
+
+| outcome | meaning | exit |
+|---|---|---|
+| `fresh` | the base the recorded run tested IS the current base | 0 |
+| `stale` | it is NOT the current base | non-zero |
+| `unverified` | attempted and could not conclude — always with a cause | distinct non-zero |
+| `not-attempted` | deliberately skipped (no pull request yet) | 0 |
+
+**`not-attempted` must exit 0 and `unverified` must not.** A mandatory row that is always `unverified`
+makes every run exit non-zero, and an exit code that fires every time carries no information.
+
+**Five rules, each from something that went wrong:**
+
+1. **No verdict without its operands.** Every `fresh` and every `stale` prints both SHAs. `fresh` with
+   nothing beside it is indistinguishable from a check that looked away.
+2. **A run existing is not a green.** A run is evidence only when its conclusion is success **and** it
+   executed at least one step. Two shapes: `gh run list` can report
+   `conclusion: failure` for runs that never executed at all, and a
+   run can report `failure` after two seconds with **zero steps**, which usually means the forge refused to start it (billing or plan limits) -- check the run's annotations. A check that
+   compares bases on the strength of "a run exists" will announce `fresh` or `stale` about a run that
+   tested nothing.
+3. **Print the run-selection rule before applying it.** A head can carry several runs — re-runs, and
+   both `push` and `pull_request` events. "The latest run" is not a rule until it says latest of what.
+   Print the candidate count too.
+4. **Bound every forge call, and keep a timeout distinguishable from a refusal.** `gh` has no request
+   timeout of its own; a routable-but-silent host can hang a call. A check that can hang is
+   worse than one that says less.
+5. **Say what the check cannot do, in its own output.** Where protection is unavailable, the check
+   reports and cannot block. A mechanism that reads as enforcement while not enforcing is worse than no
+   mechanism, because the transcript then carries a green nobody re-checks.
+
+**Where the recorded base comes from.** For an open pull request, `refs/pull/N/merge` resolves and the
+**first** parent of that commit is the base the run merged against; the second is the head. Verified on a
+real open PR, with both parents byte-identical to the expected commits. Two warnings, both measured: for
+a **merged** pull request the same endpoint answers **404**, so this is only answerable while the PR is
+open; and a workflow-run object may carry `pull_requests: []`, in which case the run object is not a
+source for the base at all.
+
+**And a caution about what this cannot settle offline.** `git merge-base --is-ancestor <base> HEAD` looks
+like a cheap local substitute. It is not sufficient: it returns "fresh" in two cases where the truth is
+stale — when the local base ref was never fetched, and when the branch was merged-up or rebased after the
+green was recorded, so the green belongs to an older head. A false `stale` costs a re-run; a false
+`fresh` is the whole defect.
+
+### Does writing a contract nobody copies help?
+
+An earlier note left that question open about the ci-status producer on this page. In practice the
+answer is that when the producer is never materialised -- no file, no script,
+not in `scripts/`, not in CI config -- the card's CI row reports `absent` for
+as long as that holds. So the honest statement about everything in this section is that it is a contract,
+not a delivery. If you implement it, say so where the question is tracked.
+
 ## Anti-patterns
 
 - **Pre-commit hooks ran first time at PR open** — wastes the CI queue on format drift the local hook would have caught in 200ms. Run hooks on every commit.
@@ -187,7 +275,7 @@ jobs:
 ### Putting the state on record (example snippet — copy it, PLC does not ship it)
 
 `/catchup` renders a CI row from `.claude/ci-status.json` (p40). PLC **reads** that file and never
-writes it, because R1 forbids forge-specific code anywhere in PLC — a producer under PLC's own
+writes it, because PLC rules out forge-specific code anywhere in it — a producer under PLC's own
 `scripts/` would satisfy "the card makes no network call" while violating the intent. So the
 producer is yours: copy this into your own tooling and run it when you want the card to stop saying
 `absent`. Documentation is not a dependency. Tracking: an open backlog item.
@@ -233,17 +321,17 @@ by name two sections up.
 
 **Three limits, measured rather than reasoned. Read them before trusting the snippet.**
 
-1. **`conclusion: failure` does not mean the code failed.** `gh run list` reported it for three
-   consecutive runs on this repo that never executed at all.
-2. **The shape is not the whole answer, and neither is the text.** Two unrelated blocked repos
-   produced two *different* structured shapes for the same cause, and only the annotation text
-   explained both. But the text is not stable either: this page quoted the message as
-   *"recent **GitHub Actions** payments have failed"* until 2026-08-31, when a live run
-   (a zero-step run, 2s) returned *"recent **account** payments have failed"* — corrected in
-   the table above. **A matcher built on either signal alone will be wrong somewhere**; the snippet
+1. **`conclusion: failure` does not mean the code failed.** `gh run list` can report it for
+   runs that never executed at all: a run that ends with zero steps in about two seconds usually means the forge refused to start it (billing or plan limits) -- check the run's annotations.
+2. **The shape is not the whole answer, and neither is the text.** Blocked repos
+   can produce *different* structured shapes for the same cause, and only the annotation text
+   explained both. But the text is not stable either: the message has been worded both as
+   *"recent **GitHub Actions** payments have failed"* and as
+   *"recent **account** payments have failed"* (the table above has the current one).
+   **A matcher built on either signal alone will be wrong somewhere**; the snippet
    uses the shape because it fails toward `unknown`, which is the safe direction.
 3. **`gh` has no request timeout of its own** (`cli/go-gh`'s `Timeout` defaults to zero). A
-   routable-but-silent host hung a call past ten seconds. The `timeout=20` above is what
+   routable-but-silent host can hang a call. The `timeout=20` above is what
    keeps that out of anything interactive — do not drop it.
 
 **The open question that item leaves open, restated rather than answered:** whether a snippet nobody

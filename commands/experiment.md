@@ -53,7 +53,7 @@ Order matters — later sections depend on earlier answers:
 2. **Baseline** — what the number is today, where it came from, which commit. **No baseline, no
    experiment.** If there is no baseline, measuring one is the first experiment.
 3. **Dataset** — which cases, how stratified, whether they represent the real distribution.
-4. **Ground truth** — where each case's right answer comes from.
+4. **Ground Truth** — where each case's right answer comes from.
 5. **Metrics** — one primary, plus guardrails. Ask what would be wrecked by moving the primary.
 6. **Procedure** — what is held fixed; one change at a time.
 7. **Variance** — how many runs, how reported, **and whether the instrument can resolve the

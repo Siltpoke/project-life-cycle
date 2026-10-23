@@ -1,6 +1,6 @@
 """The documented ci-status producer snippet must still parse.
 
-R1 forbids PLC shipping forge-specific code, so the producer for
+PLC does not ship forge-specific code, so the producer for
 `.claude/ci-status.json` lives in references/ci-cd-gates.md as an example an
 adopter copies. That leaves it with no gate behind it -- prose asserting
 something no mechanism checks.
@@ -54,7 +54,7 @@ def test_the_snippet_still_defines_the_observer() -> None:
 
 
 def test_the_snippet_passes_a_timeout_to_gh() -> None:
-    """an earlier measurement had `gh` hanging past ten seconds on a routable-but-silent host,
+    """an earlier measurement had `gh` hanging on a routable-but-silent host,
     because cli/go-gh's Timeout defaults to zero. A copied snippet without a
     timeout reintroduces that into whatever the adopter wires it to."""
     assert re.search(r"timeout\s*=\s*\d+", _snippet()), "the snippet calls gh with no timeout"
