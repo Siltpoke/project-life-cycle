@@ -26,7 +26,9 @@ armed foreign:codex →
           (resolved binary must NOT be inside the repo tree — reject a project-local shim)
   gate 2  authed? (noninteractive)  no → fallback: not-authed
   gate 3  spawn ok? (wall-clock cap, stdin closed, read-only sandbox)
-                                    timeout → fallback: timed-out ; other error → fallback: spawn-failed
+                                    timeout → fallback: timed-out
+                                    engine says `usage limit` → fallback: quota-exhausted
+                                    any other error → fallback: spawn-failed
   gate 4  output parseable?         no → fallback: unparseable
           required field present?   no → fallback: unparseable
           required field has content?

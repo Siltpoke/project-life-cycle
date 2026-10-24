@@ -16,7 +16,7 @@ THE TWO HOMES ARE TWO ARTIFACTS. `scripts/close-gate.sh` and the fenced script i
 `skills/project-lifecycle/references/close-gate.md` cannot share source. an earlier task factored the
 pathspec resolution in each of them separately, with the same function names and contract. What
 must never differ is the ANSWER, which is what `test_both_homes_agree_*` exists to catch -- a
-one-home edit is the failure mode cross-check agent B found in p30's own plan.
+one-home edit is the failure mode a cross-check found in the plan.
 """
 
 import os
@@ -129,7 +129,7 @@ def test_kept_count_matches_reality(home, inputs, expected, tree):
 def test_both_homes_agree(inputs, tree):
     """Two artifacts, two factorings, one answer.
 
-    This is the assertion cross-check agent B's CRITICAL finding produced: p30's plan originally
+    This is the assertion a cross-check finding produced: the plan originally
     factored one home and left the other to invent its own resolution.
     """
     srcs = _home_sources()
@@ -175,7 +175,7 @@ def test_a_tracked_path_containing_a_newline_is_counted_once(tree):
     ADDED BY A SURVIVING MUTANT, not by foresight. The first version of this file carried a comment
     saying "counts NUL delimiters rather than lines: a path may contain a newline and `wc -l` would
     then over-count" and shipped no test for it: swapping the implementation to
-    `tr '\\000' '\\n' | wc -l` left all 13 tests green. A claim wider than the mechanism backing it,
+    `tr '\\000' '\\n' | wc -l` left every test green. A claim wider than the mechanism backing it,
     inside the phase about that exact class. The fixture below is what makes the comment true.
     """
     weird = tree / "we\nird.md"

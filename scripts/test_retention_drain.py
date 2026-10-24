@@ -11,6 +11,7 @@ import json
 import os
 import re
 import subprocess
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
@@ -2111,7 +2112,7 @@ def test_f23_the_store_is_not_a_drain_target(tmp_path: Path) -> None:
 # ── Two critical defects, pinned before the fix ──
 
 def test_f24_restore_removes_a_month_archive_the_drain_created(tmp_path: Path) -> None:
-    """F24 · AC2's tree bar, AC19 — CRITICAL, RED before the fix.
+    """F24 · AC2's tree bar, AC19 — RED before the fix.
 
     `drain journal` captures `$frags` plus the month archives that ALREADY exist. A fragment
     whose target month has no archive yet makes the drain CREATE one — a path that was never in
@@ -2139,7 +2140,7 @@ def test_f24_restore_removes_a_month_archive_the_drain_created(tmp_path: Path) -
 
 
 def test_f25_a_fragment_name_with_a_space_is_really_captured(tmp_path: Path) -> None:
-    """F25 · AC1, AC11 — CRITICAL, RED before the fix.
+    """F25 · AC1, AC11 — RED before the fix.
 
     `capture_preimage "drain journal" $frags …` is unquoted (a deliberate SC2086 site). A
     fragment named with a space word-splits into three nonexistent partial paths, each recorded
@@ -2180,7 +2181,7 @@ def test_f25_a_fragment_name_with_a_space_is_really_captured(tmp_path: Path) -> 
 
 
 def test_f26_restore_removes_what_rollover_created(tmp_path: Path) -> None:
-    """F26 · AC2's tree bar — IMPORTANT, RED before the fix.
+    """F26 · AC2's tree bar — RED before the fix.
 
     `check_rollover` runs inside the same invocation as the drain, after the capture, and creates
     a segment directory plus an index while rewriting the archive to a stub. None of that was in
@@ -2623,6 +2624,68 @@ def _entry_counts(segdir: Path) -> dict[str, int]:
             if line.startswith("## "):
                 counts[line] = counts.get(line, 0) + 1
     return counts
+
+
+def _undated_rollover_repo(tmp_path: Path, tags: tuple[str, ...]) -> Path:
+    """A repo whose archive crosses 4x the cap and whose entry headings carry NO date.
+
+    The date is what chooses the branch: `check_rollover` splits by month only when every entry
+    heading is dated, and falls back to a line-count `split` otherwise. This repo's own qa-log
+    archive takes the second branch, so it is the branch the close drain actually runs.
+    """
+    body = "\n".join("padding line for the roll-over threshold" for _ in range(30))
+    return make_fixture_repo(
+        tmp_path,
+        manifest={"retention": {"archive_dir": "docs/archive", "preimage_keep": KEEP_N}},
+        files={MONOLITH: "# Changelog\n\n" + "".join(f"## [{t}]\n\n{body}\n\n" for t in tags)},
+    )
+
+
+def test_s21_a_second_undated_rollover_keeps_the_first_rollovers_segments(tmp_path: Path) -> None:
+    """A roll-over must not DESTROY what an earlier roll-over wrote. RED before the fix.
+
+    MEASURED, which is how this was found: the close drain of a phase rolled
+    the qa-log archive over a second time and **entry headings stopped existing anywhere in
+    the working tree** -- one archive segment lost most of its lines, others
+    were rewritten, and the only surviving copy of that content was inside the
+    pre-image ring. In a phase whose entire subject is "the ring is an undo buffer, not evidence",
+    the closing step itself made the ring the last copy. git had the content, so nothing was lost
+    for good -- which is exactly the cold-storage path this phase rewrote the drain's comment to
+    name.
+
+    THE TWO BRANCHES OF ONE VERBATIM-MOVE CONTRACT DISAGREE, and the script's own comment says
+    that is a defect rather than a layout choice -- about a different disagreement. The staged
+    directory is seeded with a copy of the existing segments, and the month branch APPENDS into
+    that copy (`>> out`). The undated branch runs `split -l 2000 "$archive" "$stage/part-"` and
+    then renames each piece to `part-XX.md`, which OVERWRITES the seeded copy of the same name.
+    So the seeding comment ("seeding it wrong would trade duplicated content for lost content,
+    which is the worse of the two") describes a protection the second branch does not get.
+    """
+    first = _undated_rollover_repo(tmp_path, tuple(f"1.{i}.0" for i in range(1, 9)))
+    assert _run(first, "drain", MONOLITH, "1").returncode == 0
+    segdir = first / "docs/archive/CHANGELOG"
+    before = _entry_counts(segdir)
+    assert before, "roll-over did not fire; fixture is vacuous"
+    assert sorted(p.name for p in segdir.glob("part-*.md")), (
+        "this fixture must take the line-count branch; a month-split segment set means the "
+        "headings were dated after all and the test measures the wrong branch"
+    )
+
+    body = "\n".join("padding line for the roll-over threshold" for _ in range(30))
+    mono = first / MONOLITH
+    mono.write_text(
+        mono.read_text(encoding="utf-8")
+        + "".join(f"## [2.{i}.0]\n\n{body}\n\n" for i in range(1, 9)),
+        encoding="utf-8",
+    )
+    assert _run(first, "drain", MONOLITH, "1").returncode == 0
+
+    after = _entry_counts(segdir)
+    lost = [h for h in before if h not in after]
+    assert not lost, (
+        f"{len(lost)} entry heading(s) written by the FIRST roll-over are gone after the second: "
+        + ", ".join(lost[:6])
+    )
 
 
 def test_s12_a_successful_rollover_still_exits_zero(tmp_path: Path) -> None:
@@ -3120,3 +3183,528 @@ def test_s16_a_failed_swap_never_destroys_the_previous_segments(tmp_path: Path) 
         )
     finally:
         stubborn.chmod(0o700)
+
+
+def _rolled(segdir: Path) -> list[str]:
+    """Every line of every segment file, index.md excluded (it is generated, not moved)."""
+    lines: list[str] = []
+    for f in sorted(segdir.glob("*.md")):
+        if f.name == "index.md":
+            continue
+        lines.extend(f.read_text(encoding="utf-8").splitlines())
+    return lines
+
+
+def test_s18_the_month_split_moves_every_line_including_what_precedes_the_first_entry(
+    tmp_path: Path,
+) -> None:
+    """The roll-over is a verbatim MOVE, so no line of the archive may vanish in it.
+
+    The month split assigns each line to the segment named by the nearest PRECEDING `## ` heading,
+    and it writes nothing while no heading has been seen yet. Everything above the first entry is
+    therefore dropped: in a real archive that is its title, its `## 📑 Index` heading, every TOC
+    bullet the drain just regenerated, and the `---` separator — and a fragment marker, if one sits
+    there, which is how a roll-over can turn an observed stage into a missing one.
+
+    MEASURED against the pre-fix script with this fixture (8 monolith entries, 5 of them
+    archived): 10 lines reached no segment -- the archive's title, its `## 📑 Index` heading, all
+    five TOC bullets, the `---` separator, and the two blank lines between them.
+
+    The control is the other branch of the same function: an archive whose headings are undated
+    goes through `split -l`, which moves every byte. Two branches of one verbatim-move contract
+    disagreeing is what makes this a defect rather than a layout choice — so the comparison is
+    asserted in S19 rather than left as an argument.
+    """
+    (tmp_path / "control").mkdir()
+    (tmp_path / "rolled").mkdir()
+    control = _rollover_repo(tmp_path / "control")
+    rolled = _rollover_repo(tmp_path / "rolled")
+
+    # Same fixture, same eviction, roll-over threshold out of reach: this is what the archive
+    # holds at the moment the split would run.
+    assert _run(control, "drain", MONOLITH, "100000").returncode == 0
+    archive = control / ARCHIVE
+    assert archive.is_file(), "the control never produced an archive; the fixture is vacuous"
+    assert not (control / "docs/archive/CHANGELOG").exists(), (
+        "the control rolled over after all, so it is not a picture of the pre-split archive"
+    )
+    before = archive.read_text(encoding="utf-8").splitlines()
+
+    assert _run(rolled, "drain", MONOLITH, "1").returncode == 0
+    segdir = rolled / "docs/archive/CHANGELOG"
+    assert segdir.is_dir() and _entry_counts(segdir), "roll-over never fired; this is vacuous"
+
+    after = Counter(_rolled(segdir))
+    missing = [ln for ln, k in (Counter(before) - after).items() for _ in range(k)]
+    assert missing == [], (
+        f"{len(missing)} line(s) of the archive reached no segment — the split dropped them:\n"
+        + "\n".join(f"  {ln!r}" for ln in missing[:15])
+    )
+    # The multiset difference above is ONE-DIRECTIONAL, and a review named what that lets through:
+    # a duplicated line can mask the loss of an identical one, and this fixture has 240 identical
+    # padding lines. The totals close that gap for a first roll-over, where the segments are built
+    # from this archive and nothing else. S20 is where a LATER roll-over's additions are bounded.
+    assert sum(after.values()) == sum(Counter(before).values()), (
+        f"the segment tree holds {sum(after.values())} lines against the archive's "
+        f"{len(before)} — equal multiset differences can still hide a swap"
+    )
+
+
+def test_s19_the_chunk_split_already_moved_that_region_which_is_how_we_know(
+    tmp_path: Path,
+) -> None:
+    """S18's control, and the reason it is a test: the two branches must not disagree.
+
+    `check_rollover` splits by month when every entry heading carries a date and by line count
+    when they do not. The line-count branch runs `split -l`, which cannot drop anything, so the
+    same archive region survives there. Without this assertion S18 rests on reading the source;
+    with it, the claim "a verbatim move loses nothing" is measured on the branch that already
+    honours it.
+    """
+    (tmp_path / "undated").mkdir()
+    body = "\n".join("padding line for the roll-over threshold" for _ in range(30))
+    repo = make_fixture_repo(
+        tmp_path / "undated",
+        manifest={"retention": {"archive_dir": "docs/archive", "preimage_keep": KEEP_N}},
+        files={MONOLITH: "# Changelog\n\n" + "".join(
+            f"## [{i}.0.0] release {i}\n\n{body}\n\n" for i in range(1, 9)
+        )},
+    )
+    assert _run(repo, "drain", MONOLITH, "1").returncode == 0
+    segdir = repo / "docs/archive/CHANGELOG"
+    assert segdir.is_dir(), "roll-over never fired; this control is vacuous"
+    assert sorted(p.name for p in segdir.glob("part-*.md")), (
+        "no `part-*.md` segment: this fixture took the month branch, not the line-count one"
+    )
+    joined = "\n".join(_rolled(segdir))
+    assert "## 📑 Index" in joined, "the line-count branch dropped the archive's own index heading"
+    assert "# CHANGELOG — archive" in joined, "the line-count branch dropped the archive's title"
+
+
+def test_s20_a_later_rollover_adds_two_generated_lines_and_no_more(tmp_path: Path) -> None:
+    """S18's cost, bounded — raised by an independent review, which is why it is a fixture.
+
+    S18 makes the split move every line, and most of what it had been dropping is the archive's
+    own GENERATED header. So the header now travels into a segment, and on every roll-over AFTER
+    the first the previous run's stub TITLE travels too. The review's word for that was unbounded
+    accumulation. It is bounded, at one copy per roll-over, and a number in a comment goes stale
+    while a fixture does not.
+
+    MEASURED across three roll-overs: 0 stub titles and 0 pointer lines in the segment tree after
+    the first, 1 of each after the second, 2 of each after the third. They land in whichever
+    segments hold the first dated heading and the last entry, which is why this counts over the
+    whole tree rather than naming a file.
+
+    ONE OF THE TWO SHAPES IS NOT THIS CHANGE'S DOING, and the mutant says so rather than the
+    author: against a copy with the split reverted, the second roll-over gives 0 titles and ONE
+    pointer. The pointer line sits after the last heading, so the old rule already carried it. The
+    assertion still counts both, because what matters is the bound, not which rule produced it.
+
+    The other half of the assertion is the one that would matter if it broke: a later roll-over
+    appends into a stage seeded from the existing segments, and nothing archived by the first
+    roll-over may be lost in that path.
+    """
+    (tmp_path / "later").mkdir()
+    repo = _rollover_repo(tmp_path / "later")
+    segdir = repo / "docs/archive/CHANGELOG"
+
+    STUB_TITLE = "# CHANGELOG — archive, rolled over into segments"
+    POINTER = "> Earlier entries archived verbatim"
+
+    def generated() -> tuple[int, int]:
+        lines = _rolled(segdir)
+        return (
+            sum(1 for ln in lines if ln == STUB_TITLE),
+            sum(1 for ln in lines if ln.startswith(POINTER)),
+        )
+
+    assert _run(repo, "drain", MONOLITH, "1").returncode == 0
+    assert _entry_counts(segdir), "roll-over never fired; this fixture is vacuous"
+    first = Counter(_rolled(segdir))
+    assert generated() == (0, 0), (
+        f"the first roll-over already carried a stub into a segment: {generated()}"
+    )
+
+    _extend(repo, "2027-11", ("5.1.0", "5.2.0", "5.3.0", "5.4.0"))
+    _extend(repo, "2026-03", tuple(f"6.{i}.0" for i in range(1, 9)))
+    assert _run(repo, "drain", MONOLITH, "1").returncode == 0
+    second = Counter(_rolled(segdir))
+    assert generated() == (1, 1), f"the second roll-over added more than one of each: {generated()}"
+    lost = [ln for ln, k in (first - second).items() for _ in range(k)]
+    assert lost == [], (
+        f"the second roll-over lost {len(lost)} line(s) the first one had archived:\n"
+        + "\n".join(f"  {ln!r}" for ln in lost[:15])
+    )
+
+    _extend(repo, "2027-12", ("7.1.0", "7.2.0", "7.3.0", "7.4.0"))
+    _extend(repo, "2026-04", tuple(f"8.{i}.0" for i in range(1, 9)))
+    assert _run(repo, "drain", MONOLITH, "1").returncode == 0
+    assert generated() == (2, 2), (
+        f"growth is not one copy of each per roll-over: {generated()} after the third"
+    )
+    third = Counter(_rolled(segdir))
+    lost = [ln for ln, k in (second - third).items() for _ in range(k)]
+    assert lost == [], f"the third roll-over lost {len(lost)} line(s): {lost[:15]}"
+
+
+# ── Last-copy refusal ─────────────────────────────────────────────────────
+
+LAST_COPY_FRAGMENT = "docs/qa-log.d/2026-01-01-phase-zzlast.md"
+LAST_COPY_BODY = (
+    "## 2026-01-01 · zzlast\n\nthe only sentence that exists nowhere else in this fixture\n"
+)
+QA_MONOLITH = "docs/brainstorming-qa-log.md"
+
+
+def _ring_holding_a_last_copy(tmp_path: Path) -> Path:
+    """A repo whose oldest slot holds the only copy of a fragment, built the way it happened.
+
+    No slot is hand-assembled: the first drain compiles the fragment into the hot monolith and
+    deletes it, so the slot legitimately holds its bytes. The monolith is then REPLACED, which is
+    what a later roll-over plus an eviction amount to, and at that point the ring is the only
+    holder. `preimage_keep` is 1 so the second drain's capture makes the oldest slot a candidate.
+    """
+    repo = make_fixture_repo(
+        tmp_path,
+        manifest={"retention": {"archive_dir": "docs/archive", "preimage_keep": 1}},
+        files={LAST_COPY_FRAGMENT: LAST_COPY_BODY},
+    )
+    assert _run(repo, "drain", "qa-log").returncode == 0
+    assert _slots(repo) == ["0001"], _slots(repo)
+    assert LAST_COPY_BODY.splitlines()[2] in (repo / QA_MONOLITH).read_text(encoding="utf-8")
+
+    # The monolith loses the block. Now the ring is the only holder of those bytes.
+    (repo / QA_MONOLITH).write_text(
+        "# Brainstorming QA log\n\n## 📑 Index\n\n---\n\n## 2026-02-01 · unrelated\n\nother\n",
+        encoding="utf-8",
+    )
+    (repo / "docs/qa-log.d/2026-03-01-phase-zznext.md").write_text(
+        "## 2026-03-01 · zznext\n\nsomething new to drain\n", encoding="utf-8"
+    )
+    return repo
+
+
+def test_f27_a_prune_refuses_to_evict_the_last_copy_and_the_drain_exits_non_zero(
+    tmp_path: Path,
+) -> None:
+    """AC7 — the refusal, its exit code, and the path it names.
+
+    RED against the earlier script (measured through `PLC_DRAIN_IMPL`): the drain exits 0 and slot
+    0001 is gone, taking the only copy of that fragment with it. The ring is an undo buffer, and an
+    undo buffer that holds a last copy is unacknowledged primary storage with a delete queue.
+
+    The exit code is asserted, not the message alone: the eviction loop used to run inside a
+    `printf | while` subshell, where a refusal cannot reach the caller, and `preimage_prune` ended
+    `return 0` whatever happened inside it.
+    """
+    repo = _ring_holding_a_last_copy(tmp_path)
+    before = _slots(repo)
+
+    result = _run(repo, "drain", "qa-log")
+
+    assert result.returncode != 0, (
+        f"the drain exited 0 while evicting a last copy:\n{result.stdout}{result.stderr}"
+    )
+    out = result.stdout + result.stderr
+    assert LAST_COPY_FRAGMENT in out, f"the refusal does not name the path that stopped it:\n{out}"
+    assert "0001" in _slots(repo), (
+        f"the refused slot was evicted anyway: {before} -> {_slots(repo)}"
+    )
+    # The fragment's bytes still exist somewhere, which is the whole point of refusing.
+    held = repo / PREIMAGE_DIR / "0001/files" / LAST_COPY_FRAGMENT
+    assert held.is_file() and held.read_text(encoding="utf-8") == LAST_COPY_BODY
+
+    # And the refusal is REPEATABLE without changing what it protects: the capture belonging to
+    # the drain that did not happen is rolled back, so the ring does not grow by one per attempt.
+    again = _run(repo, "drain", "qa-log")
+    assert again.returncode != 0, again.stdout + again.stderr
+    assert _slots(repo) == before, (
+        f"a refused attempt changed the store: {before} -> {_slots(repo)}"
+    )
+    statuses = [ln.split("\t")[3] for ln in _index(repo) if ln.count("\t") >= 4]
+    assert "REFUSED" in statuses, f"the receipt does not record the refusal: {_index(repo)}"
+
+
+def test_f28_a_snapshot_of_a_still_live_fragment_never_blocks(tmp_path: Path) -> None:
+    """AC7's negative control — the refusal must not fire on the ordinary case.
+
+    Without this, the refusal test passes just as well against a prune that refuses EVERYTHING, which would
+    stop every drain on this repo the moment the ring filled. Here the fragment is still sitting in
+    `docs/qa-log.d/`, so the slot's copy is a snapshot and not a last copy, and the eviction runs.
+    """
+    repo = make_fixture_repo(
+        tmp_path,
+        manifest={"retention": {"archive_dir": "docs/archive", "preimage_keep": 1}},
+        files={
+            "docs/qa-log.d/2026-01-01-phase-zzalive.md": "## 2026-01-01 · zzalive\n\nstill here\n",
+        },
+    )
+    # A restore-free way to get a slot whose files still exist: capture, then put the fragment back.
+    assert _run(repo, "drain", "qa-log").returncode == 0
+    assert _slots(repo) == ["0001"], _slots(repo)
+    (repo / "docs/qa-log.d/2026-01-01-phase-zzalive.md").write_text(
+        "## 2026-01-01 · zzalive\n\nstill here\n", encoding="utf-8"
+    )
+
+    result = _run(repo, "drain", "qa-log")
+    assert result.returncode == 0, (
+        f"the prune refused a snapshot of a document that is still live:\n"
+        f"{result.stdout}{result.stderr}"
+    )
+    assert "0001" not in _slots(repo), (
+        f"the oldest slot was not evicted, so this control proves nothing: {_slots(repo)}"
+    )
+
+
+def test_f29_mutant_a_durable_set_that_includes_the_ring_never_refuses(tmp_path: Path) -> None:
+    """AC7's second negative control, and it is a different thing from the first.
+
+    The check's durable set excludes `$PID`, which lives INSIDE `$AD`. A set built recursively over
+    `$AD` finds every fragment in some older slot, so nothing is ever a last copy: the check passes
+    vacuously while looking exactly like a check that works. That is the fails-open mutant, and it
+    must be killed by the refusal test's fixture rather than argued about.
+
+    The seam is `PLC_DRAIN_IMPL`, the same selector the invariant script already uses.
+
+    RE-AIMED, not relaxed. The exclusion used to be a `-path "$PID" -prune` inside one `find`; it is
+    now the `case` that skips the ring's directories while `durable_streams` walks `$AD` looking for
+    segment series. The needle moved because the code moved -- the same thing this phase had to do
+    more than once -- and the mutant still describes the one shape that matters: a durable set that
+    contains the ring.
+    """
+    impl = Path(os.environ.get("PLC_DRAIN_IMPL", DRAIN))
+    text = impl.read_text(encoding="utf-8")
+    pruned = '''    case "$d" in "$PID"|"$PID"/*) continue ;; esac'''
+    assert text.count(pruned) == 1, "the durable set's exclusion is not where this mutant expects"
+    mutant = tmp_path / "drain-fails-open.sh"
+    mutant.write_text(
+        text.replace(pruned, '''    case "$d" in "$PID"|"$PID"/*) : ;; esac'''),
+        encoding="utf-8",
+    )
+
+    (tmp_path / "ring").mkdir()
+    repo = _ring_holding_a_last_copy(tmp_path / "ring")
+    result = subprocess.run(
+        ["bash", str(mutant), "drain", "qa-log"], cwd=repo, capture_output=True, text=True,
+        check=False,
+    )
+    assert result.returncode == 0 and "0001" not in _slots(repo), (
+        "the recursive-over-$AD mutant did NOT fail open, so the refusal test's green says less than it looks "
+        f"like it does:\nrc={result.returncode}\n{result.stdout}{result.stderr}"
+    )
+
+
+TWO_ENTRY_FRAGMENT = "docs/qa-log.d/2026-01-01-phase-zzsplit.md"
+ENTRY_A = "## 2026-01-01 · zzsplit A\n\nthe first of two sentences that exist only in this phase\n"
+ENTRY_B = "## 2026-01-02 · zzsplit B\n\nthe second of two sentences that exist only in this phase\n"
+OTHER_ENTRY = "## 2026-06-01 · unrelated\n\nsome other phase wrote this\n"
+
+
+def test_f31_an_archived_fragment_whose_entries_were_REORDERED_is_not_a_last_copy(
+    tmp_path: Path,
+) -> None:
+    """AC7 — the ordinary case the first version of this check called a last copy.
+
+    RED against the shipped script (measured through `PLC_DRAIN_IMPL`): it refuses, the drain exits
+    non-zero and moves nothing, because it asked whether the fragment's WHOLE line sequence appears
+    contiguously in one file. `drain_monolith` slices entry-by-entry and reassembles NEWEST-FIRST,
+    so a multi-entry fragment comes back with other phases' entries between its own. Every byte is
+    durable; the fragment-shaped run is not.
+
+    This is why this fixture exists: whole-file
+    contiguity scored ring fragments as last copies while they were in the archive, and the
+    next drain and every `restore` would have been refused.
+
+    The monolith is REWRITTEN to model the reassembly, the way the refusal test rewrites it to model an
+    eviction. What it must model is only this: both entries present, not adjacent.
+    """
+    repo = make_fixture_repo(
+        tmp_path,
+        manifest={"retention": {"archive_dir": "docs/archive", "preimage_keep": 1}},
+        files={TWO_ENTRY_FRAGMENT: ENTRY_A + "\n" + ENTRY_B},
+    )
+    assert _run(repo, "drain", "qa-log").returncode == 0
+    assert _slots(repo) == ["0001"], _slots(repo)
+
+    (repo / QA_MONOLITH).write_text(
+        "# Brainstorming QA log\n\n## 📑 Index\n\n---\n\n"
+        + ENTRY_A + "\n" + OTHER_ENTRY + "\n" + ENTRY_B,
+        encoding="utf-8",
+    )
+    mono = (repo / QA_MONOLITH).read_text(encoding="utf-8")
+    assert ENTRY_A in mono and ENTRY_B in mono, "the fixture must keep both entries durable"
+    assert ENTRY_A + "\n" + ENTRY_B not in mono, (
+        "the two entries are still adjacent, so this fixture would pass under whole-file "
+        "contiguity and prove nothing"
+    )
+    (repo / "docs/qa-log.d/2026-03-01-phase-zznext.md").write_text(
+        "## 2026-03-01 · zznext\n\nsomething new to drain\n", encoding="utf-8"
+    )
+
+    result = _run(repo, "drain", "qa-log")
+
+    assert result.returncode == 0, (
+        "the prune refused a slot whose every entry is durable -- only their ORDER changed:\n"
+        f"{result.stdout}{result.stderr}"
+    )
+    assert "0001" not in _slots(repo), (
+        f"the oldest slot was not evicted, so this test proves nothing: {_slots(repo)}"
+    )
+
+
+def test_f32_an_entry_split_across_two_segments_is_not_a_last_copy(tmp_path: Path) -> None:
+    """AC7 — the second half of the same defect, and a different mechanism.
+
+    RED against the shipped script: `check_rollover` segments an archive with `split -l`, which
+    cuts at a LINE COUNT and therefore cuts THROUGH an entry: one segment can end mid-entry
+    and the next carry the
+    rest. No single file holds that entry contiguously, so a per-file test refuses even for a
+    fragment with ONE entry -- per-entry splitting alone does not fix it, which is why this
+    fixture is separate from the per-entry one above.
+
+    The segments are cut by the real `split -l`, not written by hand, and the fixture asserts both
+    halves of the property it depends on: the concatenation is byte-identical to the source, and
+    neither file alone holds the entry.
+    """
+    long_entry = "## 2026-01-01 · zzstraddle\n\n" + "".join(
+        f"line {i} of an entry long enough to be cut in half by a line-count split\n"
+        for i in range(1, 41)
+    )
+    repo = make_fixture_repo(
+        tmp_path,
+        manifest={
+            "retention": {
+                "archive_dir": "docs/archive",
+                "preimage_keep": 1,
+                # Declared because this fixture creates a SEGMENTED archive, and the drain exits 3
+                # rather than guess a segment order -- the refusal this repo would rather have than
+                # a guessed reassembly. Measured here: without it the second drain exits 3 and the
+                # test would have been reporting that refusal as the last-copy refusal.
+                "order": {"brainstorming-qa-log.md": "newest-first"},
+            }
+        },
+        files={"docs/qa-log.d/2026-01-01-phase-zzstraddle.md": long_entry},
+    )
+    assert _run(repo, "drain", "qa-log").returncode == 0
+    assert _slots(repo) == ["0001"], _slots(repo)
+
+    # The durable copy moves OUT of the monolith and into a real `split -l` series.
+    source = tmp_path / "pre-split.md"
+    source.write_text(
+        "# Brainstorming QA log archive\n\n" + OTHER_ENTRY + "\n" + long_entry,
+        encoding="utf-8",
+    )
+    segdir = repo / "docs/archive/brainstorming-qa-log"
+    segdir.mkdir(parents=True, exist_ok=True)
+    assert subprocess.run(
+        ["split", "-l", "20", str(source), "part-"], cwd=segdir, check=False
+    ).returncode == 0
+    pieces = sorted(segdir.glob("part-*"))
+    assert len(pieces) >= 2, f"the split produced {len(pieces)} piece(s), so nothing straddles"
+    for piece in pieces:
+        piece.rename(piece.with_suffix(".md"))
+    pieces = sorted(segdir.glob("part-??.md"))
+    rejoined = "".join(piece.read_text(encoding="utf-8") for piece in pieces)
+    assert rejoined == source.read_text(encoding="utf-8"), (
+        "the concatenation is not the source, so these segments are not what `split -l` cut"
+    )
+    assert not any(long_entry in piece.read_text(encoding="utf-8") for piece in pieces), (
+        "one segment holds the whole entry, so this fixture would pass under per-file contiguity "
+        "and prove nothing about the series"
+    )
+
+    (repo / QA_MONOLITH).write_text(
+        "# Brainstorming QA log\n\n## 📑 Index\n\n---\n\n" + OTHER_ENTRY, encoding="utf-8"
+    )
+    (repo / "docs/qa-log.d/2026-03-01-phase-zznext.md").write_text(
+        "## 2026-03-01 · zznext\n\nsomething new to drain\n", encoding="utf-8"
+    )
+
+    result = _run(repo, "drain", "qa-log")
+
+    assert result.returncode == 0, (
+        "the prune refused a slot whose entry is durable in a segment SERIES -- the only reason no "
+        f"single file holds it is the line-count split:\n{result.stdout}{result.stderr}"
+    )
+    assert "0001" not in _slots(repo), (
+        f"the oldest slot was not evicted, so this test proves nothing: {_slots(repo)}"
+    )
+
+
+def _receipt_rows(repo: Path) -> list[list[str]]:
+    """The receipt parsed with ONE reader, so a new status word cannot get a reader of its own."""
+    rows = []
+    for line in _index(repo):
+        if not line:
+            continue
+        parts = line.split("\t")
+        assert len(parts) == 5, f"receipt line is not five columns: {line!r}"
+        rows.append(parts)
+    return rows
+
+
+def test_f30_each_evicted_slot_gets_one_receipt_line_under_its_own_status(
+    tmp_path: Path,
+) -> None:
+    """AC8 — an eviction is recorded, once per slot, and not as a capture.
+
+    RED against the earlier script: the prune deletes slots silently, so the receipt shows four
+    captures and no evictions, and the only trace of three destroyed generations is that their
+    directories are not there any more.
+
+    The status word matters as much as the line. `OK` means a capture happened, and reusing it for
+    an eviction makes every reader that counts captures wrong -- this store has already produced
+    the shape of an OK-line count that no longer matches the slots on disk.
+
+    The fixture evicts THREE slots in one prune, because "one line per evicted slot" and "a line
+    when a prune runs" are different claims and a single-eviction fixture cannot tell them apart.
+    """
+    repo = make_monolith_repo(
+        tmp_path,
+        tuple(f"[1.{i}.0] — 2026-0{i}-01" for i in range(1, 9)),
+        retention={"preimage_keep": 5},
+    )
+    for r in range(3):
+        for i in range(4):
+            _grow(repo, f"{r}.{i}.0")
+        assert _run(repo, "drain", MONOLITH).returncode == 0
+    assert len(_slots(repo)) == 3, f"the fixture needs three slots before the prune: {_slots(repo)}"
+    doomed = _slots(repo)
+    before = len(_receipt_rows(repo))
+
+    # The ring narrows under them: nothing else about the drain changes.
+    manifest = repo / ".claude/close-gate.json"
+    manifest.write_text(
+        json.dumps({"retention": {"archive_dir": "docs/archive", "preimage_keep": 1}}),
+        encoding="utf-8",
+    )
+    for i in range(4):
+        _grow(repo, f"final.{i}.0")
+    assert _run(repo, "drain", MONOLITH).returncode == 0
+
+    rows = _receipt_rows(repo)
+    added = rows[before:]
+    evicted = [r for r in added if r[3] == "EVICTED"]
+    captures = [r for r in added if r[3] == "OK"]
+
+    assert len(captures) == 1, f"expected one capture line for this drain: {added}"
+    assert sorted(r[0] for r in evicted) == sorted(doomed), (
+        f"the evicted keys in the receipt do not match the slots that disappeared: "
+        f"{[r[0] for r in evicted]} vs {doomed}"
+    )
+    assert _slots(repo) == sorted(_slots(repo))[-1:], (
+        f"the prune did not actually evict three slots: {_slots(repo)}"
+    )
+    for r in evicted:
+        assert r[2] == "prune", f"the mode column does not say where the line came from: {r}"
+        assert re.fullmatch(r"\d+ paths, \d+ bytes destroyed", r[4]), (
+            f"the detail does not name the paths and bytes: {r}"
+        )
+        assert int(r[4].split()[0]) > 0 and int(r[4].split()[2]) > 0, (
+            f"an eviction reported as destroying nothing: {r}"
+        )
+
+    # The counting reader: capture and eviction are separable, which is the point of the status.
+    statuses = [r[3] for r in rows]
+    assert statuses.count("OK") == 4, f"capture count is wrong: {statuses}"
+    assert statuses.count("EVICTED") == 3, f"eviction count is wrong: {statuses}"

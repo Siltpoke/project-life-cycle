@@ -38,7 +38,26 @@ Self-contained orchestrator for cutting a release under the `project-lifecycle` 
 
 ### Phase 1 — Read current state
 
-4. Current version: parse `.version` from `.claude-plugin/plugin.json` (`python3 -c "import json,sys; print(json.load(open('.claude-plugin/plugin.json'))['version'])"`).
+**Every Python call in this command goes through `bash scripts/plc-python.sh`, so `bash` is a
+prerequisite.** The wrapper finds a working Python and runs the script through it, because on
+Windows a bare `python3` is often an App Execution Alias rather than an interpreter — a release
+that silently did nothing is worse here than one that refuses. If no interpreter works it prints
+`COULD NOT RUN` naming each candidate it tried and exits 3, which is a hard abort for this command.
+
+**The `scripts/...` paths in this command are repo-relative ON PURPOSE, and every one of them
+assumes the working directory is the root of the repository being released**. They are not
+anchored to `${CLAUDE_PLUGIN_ROOT}` the way `/catchup`, `/recall`, `/handoff`, `/capture`,
+`/cognition-distill`, `/plc-status` and `/init-harness` anchor theirs, because those commands call
+scripts that ship WITH the plugin, while this one releases the repository you are standing in: its
+`scripts/validate.py` validates that repository's manifests (it resolves its own root from
+`__file__`, so a plugin-anchored copy would validate the wrong tree), and its
+`scripts/gen-test-evidence.sh` writes that repository's gate evidence. Anchoring them would point
+at a different checkout and silently release against the wrong one. Every other path this command
+touches — `.claude-plugin/plugin.json`, `CHANGELOG.md`, `changelog.d/` — carries the same
+assumption already. If you are not at the repo root, `cd` there first; the calls will fail loudly
+with `No such file or directory` rather than doing something partial.
+
+4. Current version: parse `.version` from `.claude-plugin/plugin.json` (`bash scripts/plc-python.sh -c "import json,sys; print(json.load(open('.claude-plugin/plugin.json'))['version'])"`).
 5. Verify `.claude-plugin/marketplace.json` plugins[0].version matches `.claude-plugin/plugin.json`. Also verify `.qoder-plugin/*` and `.codebuddy-plugin/*` (plugin.json `.version` + marketplace.json plugins[0].version) all match. Abort if any disagree — that's the bug the validator catches; fix first.
 6. Build the **effective `[Unreleased]` body** — READ-ONLY, no file mutation here (the actual compile + `git rm` stays in Phase 4 step 11.5, after the human confirm, so a cancel leaves files untouched):
    - **Read the configured changelog fragment dir first**: `.claude/close-gate.json` `retention.changelog_dir` (default `changelog.d` when the manifest, or the key, is absent). This is the same manifest key `close-gate.sh`'s `phase-done` reads for its CHANGELOG-touched check — `/release` must honor whatever override a project has set there, not assume the literal path `changelog.d/`. Use this resolved directory (call it "the changelog fragment dir" below) for the rest of this step and step 11.5.
@@ -83,13 +102,13 @@ If cancelled, exit gracefully without touching files.
     - Update compare links at the bottom of the file:
       - Replace `[Unreleased]: ...compare/v<PREV>...HEAD` with `[Unreleased]: ...compare/vX.Y.Z...HEAD`.
       - Insert a new line `[X.Y.Z]: ...compare/v<PREV>...vX.Y.Z` above the previous version's link.
-13. **If the repo generates its manifests** (`.claude-plugin/plugin.source.json` + `scripts/gen_plugin_manifests.py`, as this repository does): bump `.version` in the source to `X.Y.Z`, run `python3 scripts/gen_plugin_manifests.py`, and skip to step 16 — never hand-edit a generated manifest, `scripts/validate.py` rejects one that differs from the source. Otherwise bump `.version` in `.claude-plugin/plugin.json` to `X.Y.Z`.
+13. **If the repo generates its manifests** (`.claude-plugin/plugin.source.json` + `scripts/gen_plugin_manifests.py`, as this repository does): bump `.version` in the source to `X.Y.Z`, run `bash scripts/plc-python.sh scripts/gen_plugin_manifests.py`, and skip to step 16 — never hand-edit a generated manifest, `scripts/validate.py` rejects one that differs from the source. Otherwise bump `.version` in `.claude-plugin/plugin.json` to `X.Y.Z`.
 14. Bump `plugins[0].version` in `.claude-plugin/marketplace.json` to `X.Y.Z`.
 15. Bump the sibling manifests to `X.Y.Z` too: `.version` in `.qoder-plugin/plugin.json` + `.codebuddy-plugin/plugin.json`, and `plugins[0].version` in `.qoder-plugin/marketplace.json` + `.codebuddy-plugin/marketplace.json`. (Do NOT touch the top-level `plugin.json` — the Antigravity manifest's schema forbids a `version` field, so it carries none and is never bumped.)
 
 ### Phase 5 — Validate
 
-16. Run `python3 scripts/validate.py`. Abort + revert on any error — surface the validator output. Use the **explicit-HEAD** form so the `git rm`'d fragments are actually restored: `git checkout HEAD -- .claude-plugin/ .qoder-plugin/ .codebuddy-plugin/ CHANGELOG.md changelog.d/`. The bare `git checkout -- changelog.d/` FAILS for the fragments (the pathspec resolves against the index, which no longer holds them after `git rm` → "did not match any file(s)"); `git checkout HEAD -- …` resolves against the `HEAD` tree and restores them (they're still tracked in `HEAD` until this commit lands). The same command also cleanly reverts the in-place edits to `CHANGELOG.md` + the manifests.
+16. Run `bash scripts/plc-python.sh scripts/validate.py`. Abort + revert on any error — surface the validator output. Use the **explicit-HEAD** form so the `git rm`'d fragments are actually restored: `git checkout HEAD -- .claude-plugin/ .qoder-plugin/ .codebuddy-plugin/ CHANGELOG.md changelog.d/`. The bare `git checkout -- changelog.d/` FAILS for the fragments (the pathspec resolves against the index, which no longer holds them after `git rm` → "did not match any file(s)"); `git checkout HEAD -- …` resolves against the `HEAD` tree and restores them (they're still tracked in `HEAD` until this commit lands). The same command also cleanly reverts the in-place edits to `CHANGELOG.md` + the manifests.
 
 ### Phase 6 — Commit + tag + push
 

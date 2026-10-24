@@ -204,6 +204,24 @@ PINNED_EXEMPTIONS = (
     "scripts/invariants/gate-jq-only-envelope.sh",
     "scripts/invariants/context-floor-envelope.sh",
     "scripts/invariants/named-interpreter.sh",
+    # The row's own instruction was followed rather than the name pasted in.
+    # CONFIRMED UNSCANNABLE, not asserted: `commands-no-bare-python.sh` is a checker that BANS a
+    # bare Python invocation in the command docs, so it necessarily spells the token as data in
+    # three separate places -- the `INVOCATION` matcher regex it greps with, every one of its
+    # failure strings, and an EXEMPT list that quotes two real call sites verbatim so their
+    # written reasons stay readable. Same shape as the three entries above it.
+    # THE HOLE THIS OPENS, stated rather than implied: nothing SCANS this file for a Python
+    # interpreter it might reach for at runtime. It does not -- it is pure bash and greps
+    # markdown.
+    # NO LONGER HELD BY REVIEW. That sentence used to end "but
+    # that is now a claim held by review rather than by a scan", and it would be false today: the
+    # claim is measured for every entry in this tuple by
+    # `test_every_exempt_checker_invokes_no_python_at_runtime`, which runs each one with a
+    # recording interpreter double ahead of PATH and asserts the call log is empty. A grep still
+    # cannot do it -- these files spell `python` as data by construction -- so the oracle is
+    # behaviour, not shape. The old wording is quoted rather than deleted because dropping it
+    # would leave the pin's justification reading as if nothing had changed.
+    "scripts/invariants/commands-no-bare-python.sh",
 )
 
 
@@ -711,3 +729,126 @@ def test_mutant_planted_invocation_in_the_checker_defeats_the_own_source_row():
     """
     offenders = own_source_offenders(INVARIANT.read_text() + PLANT)
     assert offenders, "the own-source row cannot notice a plain top-level invocation"
+
+
+# --------------------------------------------------------------------------------------------
+# The EXEMPT set's own hole, measured instead of reviewed.
+#
+# `PINNED_EXEMPTIONS` above states the hole in prose: nothing checks that the four exempt
+# checkers do not themselves reach for a Python interpreter at runtime. They do not, and that
+# was "a claim held by review rather than by a scan".
+#
+# A grep CANNOT be that scan, and the reason is the same one `commands-no-bare-python.sh`
+# exists to document: every one of these four files spells `python` as DATA -- in a matcher
+# regex, in failure strings, in an exemption list quoting real call sites. Telling data from a
+# command is a shell lexer. So the oracle here is BEHAVIOURAL: put a recording double for every
+# plausible interpreter name ahead of everything on PATH, run each checker, and assert the call
+# log is empty.
+#
+# THE DOUBLE IS DELIBERATELY A SILENT SUCCESS -- exit 0, no output -- because that is the exact
+# shape of the Windows alias this whole phase is about. It also means THE EXIT CODE IS NOT THE
+# ORACLE: `test_the_runtime_oracle_fires_on_a_planted_invocation` asserts the planted copy still
+# exits 0 while the log has a line in it. A row that watched the verdict would have stayed green.
+#
+# WHAT THIS DOES NOT COVER, named rather than left to be found: a double on PATH cannot see
+# `/usr/bin/python3 x.py`. `test_no_exempt_checker_carries_an_absolute_path_invocation` is the
+# other half, and it is a grep -- narrow enough to be honest, because an ABSOLUTE path is a real
+# shape, and it excludes comment lines, which is where the only hits in these four files live.
+# --------------------------------------------------------------------------------------------
+
+PY_DOUBLE_NAMES = (
+    "python",
+    "python2",
+    "python3",
+    "python3.9",
+    "python3.10",
+    "python3.11",
+    "python3.12",
+    "python3.13",
+    "py",
+)
+
+ABS_PY = re.compile(r"(?:^|[\s\"'`=(])/(?:usr/)?(?:local/)?s?bin/python[0-9.]*\b")
+
+
+def _recording_python(tmp: Path) -> tuple[Path, Path]:
+    """A shim directory whose interpreters record the call and then succeed silently."""
+    shim = tmp / "shim"
+    shim.mkdir()
+    log = tmp / "python-calls.log"
+    for name in PY_DOUBLE_NAMES:
+        exe = shim / name
+        exe.write_text(f'#!/bin/sh\nprintf "%s %s\\n" "{name}" "$*" >> "{log}"\nexit 0\n')
+        exe.chmod(0o755)
+    log.write_text("")
+    return shim, log
+
+
+def _run_shimmed(script: Path, shim: Path, env_extra: dict[str, str] | None = None):
+    import os
+
+    env = dict(os.environ)
+    env["PATH"] = f"{shim}{os.pathsep}{env.get('PATH', '')}"
+    env.update(env_extra or {})
+    return subprocess.run(
+        ["/bin/bash", str(script)], cwd=str(REPO), env=env, capture_output=True, text=True
+    )
+
+
+@pytest.mark.parametrize("rel", exempt_files())
+def test_every_exempt_checker_invokes_no_python_at_runtime(rel, tmp_path):
+    shim, log = _recording_python(tmp_path)
+    r = _run_shimmed(REPO / rel, shim)
+    assert r.returncode == 0, f"{rel} did not run cleanly, so the empty log proves nothing:\n{r.stdout}{r.stderr}"
+    assert log.read_text() == "", f"{rel} invoked a Python interpreter at runtime:\n{log.read_text()}"
+
+
+def test_the_runtime_oracle_fires_on_a_planted_invocation(tmp_path):
+    """Without this the row above would also pass against a double that never gets consulted."""
+    shim, log = _recording_python(tmp_path)
+    rel = f"{INV_DIR}/commands-no-bare-python.sh"
+    assert rel in exempt_files(), "the planted-copy row names a file that is no longer exempt"
+    src = (REPO / rel).read_text()
+    mutated = src.replace("\nset -u\n", '\nset -u\nPLANTED=$(python3 -c "pass")\n', 1)
+    assert mutated != src, "the plant did not reach the copy"
+    copy = tmp_path / "planted.sh"
+    copy.write_text(mutated)
+    r = _run_shimmed(copy, shim, {"COMMANDS_PY_ROOT": str(REPO)})
+    assert "python3" in log.read_text(), "the recording double was never consulted"
+    assert r.returncode == 0, (
+        "the planted copy was expected to still exit 0 -- that is the point: the double succeeds "
+        "silently, so the verdict cannot be the oracle here"
+    )
+
+
+def abs_py_offenders(text: str) -> list[tuple[int, str]]:
+    """Absolute-path interpreter invocations that are not structurally a comment.
+
+    Comment lines are excluded because that is where these files legitimately quote absolute
+    interpreter paths while explaining what they match. The residual is stated, not hidden: a `#`
+    inside a string would read as a comment here, the same limitation `own_source_offenders`
+    already carries and for the same reason -- the alternative is a shell lexer.
+    """
+    return [
+        (i, ln)
+        for i, ln in enumerate(text.splitlines(), 1)
+        if not ln.lstrip().startswith("#") and ABS_PY.search(ln)
+    ]
+
+
+@pytest.mark.parametrize("rel", exempt_files())
+def test_no_exempt_checker_carries_an_absolute_path_invocation(rel):
+    """The half the PATH double structurally cannot see."""
+    offenders = abs_py_offenders((REPO / rel).read_text())
+    assert not offenders, f"{rel} invokes an interpreter by absolute path: {offenders}"
+
+
+def test_the_absolute_path_row_can_fire():
+    """Positive control, through the SAME helper the row uses -- not a second copy of the rule."""
+    assert abs_py_offenders('OUT=$(/usr/bin/python3 -c "pass")')
+    assert abs_py_offenders("/usr/local/bin/python scripts/x.py")
+    # The exclusion is the row's, not the regex's: this line matches ABS_PY and is still not an
+    # offender. Asserting both halves is what keeps the comment filter from being dead code.
+    comment = "# also catches `/usr/bin/python3`, since / is a non-word character"
+    assert ABS_PY.search(comment)
+    assert not abs_py_offenders(comment)

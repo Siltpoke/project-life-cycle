@@ -15,23 +15,23 @@ hooks:
     - matcher: "Bash"
       hooks:
         - type: command
-          command: "${QODER_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/skills/project-lifecycle/hooks/guard.sh"
+          command: "bash \"${QODER_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/skills/project-lifecycle/hooks/guard.sh\""
     - matcher: "TaskCreate|TodoWrite"
       hooks:
         - type: command
-          command: "${QODER_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/skills/project-lifecycle/hooks/tasklist-first.sh mark"
+          command: "bash \"${QODER_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/skills/project-lifecycle/hooks/tasklist-first.sh\" mark"
     - matcher: "Bash|Task|Agent|Edit|Write|MultiEdit|NotebookEdit"
       hooks:
         - type: command
-          command: "${QODER_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/skills/project-lifecycle/hooks/tasklist-first.sh check"
+          command: "bash \"${QODER_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/skills/project-lifecycle/hooks/tasklist-first.sh\" check"
   Stop:
     - hooks:
         - type: command
-          command: "${QODER_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/skills/project-lifecycle/hooks/close-gate-nudge.sh Stop"
+          command: "bash \"${QODER_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/skills/project-lifecycle/hooks/close-gate-nudge.sh\" Stop"
   SubagentStop:
     - hooks:
         - type: command
-          command: "${QODER_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/skills/project-lifecycle/hooks/close-gate-nudge.sh SubagentStop"
+          command: "bash \"${QODER_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/skills/project-lifecycle/hooks/close-gate-nudge.sh\" SubagentStop"
 ---
 
 # Project Life Cycle
@@ -105,7 +105,7 @@ The #1 way this skill fails: the AI finishes the code (the interesting part), fe
    - **Portable (always available):** write **`.claude/tasklist.md`** — one `- [ ]` line per step, wrap-up steps included, with the nonce line the guard prints in its block message as the first line. This works on every host, because writing a file is the one capability any agent that can edit code necessarily has. **Add `/.claude/tasklist.md` to the project's `.gitignore`** — it is per-phase working state carrying a session nonce, and committing it puts a meaningless artifact in every adopter's history. Expect **exactly one block per phase**: the nonce is minted by that block, so the artifact cannot be pre-written to avoid it.
    - **Host-native (better when present):** a first-class task tool — Claude Code's `TaskCreate` (one task per call, `TaskUpdate` to advance them), or the equivalent under another CLI (`update_plan`, `write_todos`, `updateTodos`, `todo_write`). Where one exists, prefer it: it renders as live UI rather than a static file.
 
-   **In-progress marker (`- [/]`) + a reader (`/tasklist`).** The list is markdown checkboxes: `- [ ]` todo, `- [x]` done, and **`- [/]` for the ONE task in progress right now** — the `[/]` convention is the Obsidian-Tasks de-facto in-progress status (ASCII, stays in the checkbox family, so the tasklist file itself stays pure-ASCII; the display glyph is a rendering-layer concern, never stored). Set `- [/]` on the leaf you are working so the reader can flag it `← here`. Since the host widget (`TaskCreate`/`TodoWrite`) is absent on some profiles and never portable across CLIs, PLC ships its own terminal reader for this contract: **`/tasklist`** prints a brief collapsed line (phase name, a progress bar + `done/total`, and a single `▶ now: <group> · <current step>`), and **`/tasklist --tree`** expands the full overview (per-`##` group counts + each leaf glyphed `✓`/`▶`/`○`, the current `- [/]` flagged `← here`). Pure jq-free bash (`scripts/tasklist-view.sh`), on every CLI; any unknown checkbox char is treated as todo. The reader is read-only: it renders the contract, never writes `.claude/tasklist.md`.
+   **In-progress marker (`- [/]`).** The list is markdown checkboxes: `- [ ]` todo, `- [x]` done, and **`- [/]` for the ONE task in progress right now** — the `[/]` convention is the Obsidian-Tasks de-facto in-progress status (ASCII, stays in the checkbox family, so the tasklist file itself stays pure-ASCII; the display glyph is a rendering-layer concern, never stored). Set `- [/]` on the leaf you are working so anything reading the file can tell which step is live. Any unknown checkbox char is treated as todo. **There is no reader command.** PLC shipped one — `/tasklist`, a pure-bash terminal renderer — and a later change removed it after it was found unused. The CONTRACT is what the skill teaches and what the hook enforces; a renderer for it is a host affordance, and the file is plain markdown that any editor, `grep` or host widget already shows. Removing the reader changed no byte of `.claude/tasklist.md` and no part of this contract.
 
    `hooks/tasklist-first.sh` checks the **file**, and accepts a host tool call as an alternative satisfier. It deliberately does **not** key on a tool name: a hook cannot enumerate the session's tools, and no two CLIs agree on the name or the call granularity — so a name-keyed guard is unsatisfiable on some hosts and reports enforcement it is not performing. When it cannot verify a list it says **`UNVERIFIED`** on every gated call rather than going silent; an `UNVERIFIED` line in the transcript is **not** a pass, and closing a phase under one requires a `SKIP: <reason>` line in the journal like any other unperformed step.
 
@@ -125,6 +125,7 @@ The #1 way this skill fails: the AI finishes the code (the interesting part), fe
    | 6 | `docs/ROADMAP.md` names the phase and was touched since the branch point | phase only |
    | 9b | divergence records — held OFF the push path deliberately (measured: git holds the connection open for the whole pre-push hook) | phase + CI |
    | 11 | `closure-declaration` — the phase declares which backlog ids it closed, reconciled against the ledger. Armed by the manifest | phase only |
+   | 13 | `sidelines` — a captured side discovery carries a landing. `task` checks WELL-FORMEDNESS only (every item line opens with a recognised state token; a missing file is fine, because requiring a drain on the push path would make capturing one line block the next push). `phase` requires the file to EXIST (an absent gitignored queue is not an empty one), `untriaged` to be empty or `- [none]` present, every `refused` to carry its `class:` and every `declined` its `why:`. Armed by the `sidelines` manifest key, read at the check-set so an unarmed adopter is printed as SKIPPED. **Reads declarations only — it cannot see a discovery nobody wrote down** | task + phase |
    | 12 | `experiment-gate` — a proposal exists for the phase, or a categorised skip is recorded. **Existence and structure only; it cannot judge a hypothesis** | phase only, armed by policy |
 
    **Not checked by the gate, despite being required by this skill:** `user-story.md`, Track A/B smoke artifacts, the acceptance verifier, ADR, cognition capture, and the *shape* of the test evidence (the gate fingerprints the file; it cannot tell a 3x suite from a single run). **"It passed" without pasted gate output = unverified = not done.** Full spec, portable script, manifest, and pre-push-hook wiring in `references/close-gate.md`. **The strongest layer is the active git pre-push hook** (`.githooks/pre-push` + `git config core.hooksPath .githooks`) — it rejects pushing an incomplete `feat/phase-*` branch regardless of whether the model remembered to run the gate. It is **not un-bypassable**: `git push --no-verify` skips every pre-push hook, which is a fact about git that the hook's own source states. What makes it strong is that skipping it takes a deliberate, visible act rather than a forgotten step. The only layer nothing local can bypass is **branch protection on the forge**, because it is enforced server-side after the push. Model-run discipline alone is the weakest layer and is exactly what lets wrap-up (especially the tests) get skipped. **Before relying on the gate, confirm a pre-push gate is actually active — check BOTH wirings, not just one:** either `git config core.hooksPath` prints a hooks dir that contains the gate (husky/lefthook style), OR the default `.git/hooks/pre-push` exists and invokes the close gate (what `scripts/install-close-gate-hook.sh` installs). An empty `core.hooksPath` is **not** proof the gate is absent — a repo can run its gate from the default `.git/hooks/pre-push` with `core.hooksPath` unset. Only if NEITHER holds is the gate uninstalled — run `/init-harness --refresh` (or `scripts/install-close-gate-hook.sh`) to retrofit it.
@@ -163,7 +164,7 @@ digraph entry {
 }
 ```
 
-"Substantial existing code" = recognized manifest present OR ≥1 recognized source file outside the whitelist — deterministic contract, lists, ambiguous-case and monorepo rules in `references/archaeology.md`. Each anchor in the graph counts as present at either conventional location (`RESUME.md` at root or `docs/RESUME.md`; `docs/iteration-journal.md` or root) — see the detection contract. The adoption entry offers a one-time read-only archaeology pass deriving baseline drafts (inferred ROADMAP / glossary / backfilled ADRs / journal start line / RESUME / adoption-snapshot index), gated by the ask-once `archaeology` policy key.
+"Substantial existing code" = recognized manifest present OR ≥1 recognized source file outside the whitelist. **The decision is runnable — `bash "${CLAUDE_PLUGIN_ROOT}/scripts/archaeology-preflight.sh" detect` answers it and says why** — and the four lists it reads live in one place, not in prose; the shape, ambiguous-case and monorepo rules are in `references/archaeology.md`. Each anchor in the graph counts as present at either conventional location (`RESUME.md` at root or `docs/RESUME.md`; `docs/iteration-journal.md` or root) — see the detection contract. The adoption entry offers a one-time read-only archaeology pass deriving baseline drafts (inferred ROADMAP / glossary / backfilled ADRs / journal start line / RESUME / adoption-snapshot index), gated by the ask-once `archaeology` policy key.
 
 <!-- plc-p31:begin -->
 ## Per-Phase Workflow
@@ -227,6 +228,7 @@ See `references/cadence.md` for full detail. **The verification tail (steps 1.5 
 - **Evidence-strength tags on locked design decisions** — 🟢 industry pattern (≥3 refs agree) / 🟡 mixed industry / 🔴 AI inference. 🔴 is highest review priority.
 - **Mid-phase resume note** — when a phase spans multiple sessions or `/clear` events, drop a `docs/research/YYYY-MM-DD-mX.Y-resume-note.md` capturing what's done, what's next, and the contracts the next session must honor.
 - **Backlog discipline** — any deferred decision lands in a backlog file with explicit Trigger + Exit criteria.
+- **Net growth on a counted surface records what it cost** — a phase that adds a `references/*.md`, a `commands/*.md`, or a row to `references/step-enforcement.md` carries one line, in its journal fragment or in a commit message: `GROWTH: <surface> +<N> deleted: <what was removed>` or `GROWTH: <surface> +<N> cannot-delete: <why nothing could be removed>`. Per surface, declared must be at least measured. **Lines are deliberately not counted** — that face was measured and rejected. The rule promises growth becomes **countable**, explicitly not that it becomes smaller. Enforced by `scripts/invariants/growth-declares-a-deletion.sh`; its header carries the reasoning, the measured baseline, and the full list of what it does **not** catch.
 - **TOC index on long-lived docs** — any append-only file (brainstorming-qa-log, iteration-journal, RESUME, smoke-findings, mid-phase-questions) or any doc >300 lines carries a top-of-file index with anchor links to each section. Both H2 sections and H3 sub-questions are linked. The index is updated **in the same commit** as the section append — never leave the index stale. **Fragment-aware**: qa-log and journal fragments (`docs/qa-log.d/`, `docs/journal.d/`) are short-lived hot files and carry NO TOC; the obligation lives on the compiled artifact instead — the hot monolith `docs/brainstorming-qa-log.md` for qa-log, the compiled archive `docs/archive/journal/YYYY-MM.md` for journal. Full convention + maintenance rules in `references/document-indexing.md`.
 - **Record the conversation's resume id** — at the phase delivery handoff step or when updating `RESUME.md`, run the Trigger A command in `references/agent-chats-registry.md` so this chat is recoverable later via `<cli> --resume` (Claude, Codex, and future families). Safe to always call (no-ops in subagents / when the id is empty).
 

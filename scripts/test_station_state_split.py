@@ -6,13 +6,13 @@
 **THIS IS A SPLIT AND NOT A DELETE, and the difference is the whole test file.** The first
 plan said "remove the inclusive done check". Measured on this repository at the time of
 writing, that removes every finished row from `mainline_done` — the done glyph sits INSIDE the name
-cell on all 47 and leads it on none — and **no test would have gone red**, because the new
-mechanism is only reachable by rows that have a plan block and those 47 never will (a
+cell on all of them and leads it on none — and **no test would have gone red**, because the new
+mechanism is only reachable by rows that have a plan block and those rows never will (a
 station id exists only where a block does). The plan's cross-check caught it and required
 the assertion `test_legacy_rows_are_byte_identical` makes.
 
 **AC-7, the glyph-never-enters case, needs a station WITH a plan block and NO closure
-declaration** (plan R2-13). A fixture that supplies both a declaration and a glyph is
+declaration**. A fixture that supplies both a declaration and a glyph is
 passed by a bad implementation that falls back to the glyph whenever the declaration is
 missing — the branch never gets reached. So the fixture below has a plan block, zero closed
 steps, and a done glyph sitting in the name cell: the honest answer is `0/N` and not done,
@@ -61,7 +61,7 @@ def roadmap(*rows: str) -> str:
 # ============================================================ the plan's own assertion
 
 
-@pytest.mark.skipif(not ROADMAP.exists(), reason="gitignored docs/ absent (fresh clone)")
+@pytest.mark.skipif(not ROADMAP.exists(), reason="docs/ROADMAP.md absent (adopter checkout; docs/ is tracked here since p39)")
 def test_legacy_rows_are_byte_identical_with_and_without_the_derivation() -> None:
     """The assertion the cross-check demanded. Unbound rows must be untouched by T7b, and
     "untouched" is asserted byte for byte rather than by count: a swap of two entries keeps
@@ -74,7 +74,7 @@ def test_legacy_rows_are_byte_identical_with_and_without_the_derivation() -> Non
            json.dumps(derived["mainline_done"], ensure_ascii=False)
 
 
-@pytest.mark.skipif(not ROADMAP.exists(), reason="gitignored docs/ absent (fresh clone)")
+@pytest.mark.skipif(not ROADMAP.exists(), reason="docs/ROADMAP.md absent (adopter checkout; docs/ is tracked here since p39)")
 def test_a_call_without_facts_is_the_pre_split_parser() -> None:
     """An adopter who calls `parse_roadmap(md)` — the signature before this task — must get
     exactly what they got before, including on a roadmap that HAS plan blocks."""

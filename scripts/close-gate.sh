@@ -164,6 +164,30 @@ if [ "$MODE" != test-command ] && [ "$MODE" != diff ]; then
   [ -n "$PHASE" ] || { echo "✗ $MODE mode needs a PHASE arg (e.g. close-gate.sh $MODE X.Y-X.Z)"; exit 1; }
 fi
 
+# The phase token is substituted into manifest values by `g()` below, via `sed`, so it is not
+# just a label -- it reaches a REGEX REPLACEMENT and, since the sidelines queue, a FILE PATH. Validated here rather
+# than in the row that needed it, because a bad token kills the gate long before any row runs.
+# MEASURED, not reasoned: `close-gate.sh phase a/b` printed
+#   sed: 1: "s/{PHASE}/a/b/g": bad flag in substitute command: 'b'
+# and exited 1 -- a cryptic failure with no row, no check-set line and no statement of what was
+# wrong. The token is reachable: `scripts/close-gate-prepush.sh` derives it with
+# a branch-name regex whose `[^-]+` PERMITS `/`, so a branch named
+# `feat/x/y-slug` produces exactly this. `&` and `\` in a token would silently CORRUPT the
+# substitution instead of failing it, which is worse. Empty is handled above, with its own message.
+# Fail-closed with a message that names the token:
+case "$PHASE" in
+  '') ;;                                   # already handled per mode above; `diff` legitimately has none
+  [A-Za-z0-9]*)
+    case "$PHASE" in
+      *[!A-Za-z0-9._-]*)
+        echo "✗ phase token [$PHASE] contains a character that is not safe to substitute into a manifest value or a path. A token must match ^[A-Za-z0-9][A-Za-z0-9._-]*\$. This token reaches a sed replacement (every {PHASE} in the manifest) and a file path (the sidelines queue), so a '/' breaks the substitution outright and '&' or '\\' would corrupt it silently. The pre-push derivation permits these: a branch slug that itself contains a slash yields a token like 'a/b'."
+        exit 1 ;;
+    esac ;;
+  *)
+    echo "✗ phase token [$PHASE] must start with a letter or digit and match ^[A-Za-z0-9][A-Za-z0-9._-]*\$ — it is substituted into manifest values and into the sidelines queue path."
+    exit 1 ;;
+esac
+
 [ -f "$M" ] || { echo "✗ missing manifest $M"; exit 1; }
 g() { jq -r ".$1 // empty" "$M" | sed "s/{PHASE}/$PHASE/g"; }
 
@@ -606,7 +630,23 @@ RUN_PRODUCT_TREE=0; RUN_CHANGELOG=0; RUN_PHASE_DOCS=0; RUN_JOURNAL=0; RUN_ROADMA
 RUN_DIVERGENCE=0
 RUN_CLOSURE_DECL=0
 RUN_EXPERIMENT_GATE=0
+RUN_SIDELINES=0
 SKIP_WHY=""
+
+# 13 is armed by the MANIFEST KEY, read HERE where the check-set line is computed -- the
+# same placement as row 12 and deliberately NOT row 11's. Row 11 reads its key inside the check,
+# so an unarmed adopter gets an `ok` line that is indistinguishable from a pass; this file's own
+# comment at row 11 records that a later session copied that shape as precedent and that the
+# comment it copied was false. Reading the key at the check-set is what makes "not
+# configured" print as SKIPPED instead of vanishing.
+#
+# It runs in BOTH task and phase, checking DIFFERENT things -- see the row itself. The split is
+# load-bearing rather than a cost optimisation: if `phase`'s empty-untriaged rule also ran on the
+# push path, capturing one line would block the next push until it was routed, and a capture step
+# that costs a push is a capture step nobody performs.
+SL_QUEUE="$(g sidelines)"
+SL_ARMED=0
+[ -n "$SL_QUEUE" ] && SL_ARMED=1
 case "$MODE" in
   phase)
     RUN_PRODUCT_TREE=1; RUN_CHANGELOG=1; RUN_PHASE_DOCS=1; RUN_JOURNAL=1; RUN_ROADMAP=1; RUN_EVIDENCE=1; RUN_AC=1
@@ -624,13 +664,22 @@ case "$MODE" in
       required|ask) RUN_EXPERIMENT_GATE=1 ;;
       *)            RUN_EXPERIMENT_GATE=0 ;;
     esac
+    RUN_SIDELINES="$SL_ARMED"
     SKIP_WHY="nothing skipped — phase close runs every declared check"
     if [ "$RUN_EXPERIMENT_GATE" = 0 ]; then
       SKIP_WHY="12 is off: experiment_gate is ${EG_POLICY:-<unset>} — an adopter who has not configured it is not failed by it, and this line is why \"off\" and \"this gate has no check 12\" do not look the same"
     fi
+    if [ "$RUN_SIDELINES" = 0 ]; then
+      SKIP_WHY="${SKIP_WHY%% —*}; 13 is off: no \`sidelines\` key in the manifest — an adopter who has not configured a side-discovery queue is not failed by it, and this line is why \"off\" and \"this gate has no check 13\" do not look the same"
+    fi
     ;;
   task)
     RUN_PRODUCT_TREE=1; RUN_JOURNAL=1; RUN_EVIDENCE=1; RUN_AC=1
+    # 13 runs here too, but it is a DIFFERENT question in this mode: well-formedness only, and a
+    # missing queue file is fine. See the row. Putting phase-mode's empty-untriaged rule on the
+    # push path would make capturing one line block the next push, which is the one cost this
+    # design cannot pay.
+    RUN_SIDELINES="$SL_ARMED"
     # 9b stays OFF here, and the reason is not its cost. `task` is what the PRE-PUSH hook
     # runs, and git opens the connection and negotiates refs BEFORE it runs pre-push -- so the
     # hook's whole duration is idle time on an already-open socket. A slow enough hook -- 9b takes
@@ -760,7 +809,7 @@ JARCHIVE=""; JSLICE=""; JFENCED=""
 #   3. A sentinel-shaped line naming this phase that was rejected as fenced is REPORTED (exit 2),
 #      not swallowed. The message is neutral about which case it is — a genuinely quoted example,
 #      or a real boundary hidden behind an unclosed fence upstream — because the gate cannot tell,
-#      and saying which would be the same over-claim a third time.
+#      and saying which would be the same over-claim again.
 #
 # DECLARED LIMITS: fences are recognised at column 1 only (no leading-space indent), backticks and
 # tildes only; an unterminated fence costs every boundary after it in that archive, loudly.
@@ -776,13 +825,37 @@ journal_slice() {
     # The length of the delimiter run this line opens with, or 0 if it is not a fence line.
     function frun(s) { if (match(s, /^(`+|~+)/) && RLENGTH >= 3) return RLENGTH; return 0 }
     # A closer for an open <ch>-fence of length <ln>: same character, at least as long, and
-    # NOTHING but whitespace after it — ``` done and ```sh are content and openers, not closers.
+    # NOTHING but whitespace after it -- a bare delimiter run closes, and a run carrying a language
+    # tag after it is content and an opener, not a closer. (The two forms are not spelled out with
+    # literal backtick runs on purpose: the adopter-facing reference embeds this program inside a
+    # markdown fence, and a triple run here ends that fence early. Measured: one such line cut the
+    # extracted gate from 79,554 bytes to 9,504 -- 88% of it -- with nothing reporting a problem.)
     function fclose(s, ch, ln,   r) {
       r = frun(s)
       if (!r || substr(s, 1, 1) != ch || r < ln) return 0
       return (substr(s, r + 1) ~ /^[[:space:]]*$/)
     }
-    BEGIN { fopen = 0; prevblank = 1; inb = 0; found = 0; fenced = 0 }
+    # The payload of an ACCEPTED sentinel line: what sits between the opener and the ` -->`
+    # terminator. Returns "" for the two shapes the grammar calls malformed -- an empty or
+    # all-whitespace payload, and a comment with no terminator on its line -- so one return value
+    # means "do not use this", and the caller decides how loudly to say so.
+    function fpay(s,   t, i) {
+      t = substr(s, length(PFX) + 1)
+      i = index(t, " -->")
+      if (i == 0) return ""
+      t = substr(t, 1, i - 1)
+      if (t ~ /^[[:space:]]*$/) return ""
+      # WHITESPACE INSIDE THE PAYLOAD IS MALFORMED, which the grammar above has always said and
+      # this function did not check. A payload names a PATH; a space in it means the line is not
+      # the thing it looks like, and scoring it anyway hands the phase-name test a token nobody
+      # wrote. Derived from a census of existing markers, the way the rest of this grammar was:
+      # none has whitespace in the payload, so enforcing the stated rule refuses
+      # nothing that exists. Returning "" routes it to the same loud failure as an empty payload.
+      if (t ~ /[[:space:]]/) return ""
+      return t
+    }
+    BEGIN { PFX = "<!-- fragment: "; fopen = 0; prevblank = 1; inb = 0; found = 0; fenced = 0
+            printed = 0; malformed = 0 }
     {
       if (prevblank == 1 && $0 ~ /^<!-- fragment: /) {
         k = index($0, pat)
@@ -791,6 +864,33 @@ journal_slice() {
         if (fopen == 0) {
           # ACCEPTED boundary. It both ends the previous slice and opens this one; the sentinel
           # line itself is never body.
+          #
+          # PAYLOAD MODE, and it is inert unless asked for: with -v emit=payload the caller gets
+          # the markers themselves rather than the slice belonging to one phase.
+          #
+          # THE REASON IS FAIL-LOUD, not reach. A caller can already ask "is there a boundary for
+          # this phase" with the exit status above, and measurement says that answer is right for
+          # every marker in this archive today. What it CANNOT do is tell a malformed marker from
+          # an absent one: a sentinel line with an empty payload exits 1 up there, which a caller
+          # reads as "this file holds nothing for you" -- a fail-OPEN reading of the one shape the
+          # grammar wants to fail loudly. Code 3 below is where that distinction lives.
+          #
+          # It also moves the NAME test to the caller, which already owns one, so a payload ending
+          # AT the phase name parses -- the substring rule above needs a following `-` or `.`.
+          # Stated rather than implied: that form is not load-bearing today. Such lines in
+          # this archive sit directly beneath a full-path marker naming the same fragment, with no
+          # blank line above them, so none of them is a boundary and the exit status misses
+          # nothing. The grammar accepts the form; no archived evidence depends on it.
+          #
+          # Malformedness is judged HERE and only for accepted boundaries: a sentinel quoted inside
+          # a fence is not a marker, so a malformed quoted example must fail no scan.
+          if (emit == "payload") {
+            p = fpay($0)
+            if (p == "") malformed = 1
+            else { print p; printed = 1 }
+            prevblank = 0
+            next
+          }
           inb = nm
           if (nm) found = 1
           prevblank = 0
@@ -807,7 +907,12 @@ journal_slice() {
       if (inb) print
       prevblank = ($0 ~ /^[[:space:]]*$/) ? 1 : 0
     }
-    END { exit(found ? 0 : (fenced ? 2 : 1)) }
+    # Slice mode: 0 a boundary for this phase was found, 1 none was, 2 one naming it was rejected
+    # as fenced. Payload mode keeps the same error DIRECTION and adds one code rather than reusing
+    # a quieter one: 3 means a malformed marker was seen, and it outranks having printed others,
+    # because the whole point of the grammar is that fail-loud stays reachable.
+    END { if (emit == "payload") exit(malformed ? 3 : (printed ? 0 : 1))
+          exit(found ? 0 : (fenced ? 2 : 1)) }
   ' "$1"
 }
 if [ -z "$J" ]; then
@@ -881,6 +986,7 @@ cs "$RUN_AC"           "10(ac-oracle-binding)"
 # Reads the SAME flag the row branches on, for the reason 9b records one line up.
 cs "$RUN_CLOSURE_DECL" "11(closure-declaration)"
 cs "$RUN_EXPERIMENT_GATE" "12(experiment-gate)"
+cs "$RUN_SIDELINES" "13(sidelines)"
 echo "check-set ($MODE): running ${CS_RAN:-none}"
 echo "check-set ($MODE): skipped ${CS_SKIPPED:-none} — $SKIP_WHY"
 echo "check-set ($MODE): product_paths declared [${PP_DISPLAY:-<none: unusable product_paths>}] · touched by $RANGE [${PP_MATCHED:-none}]"
@@ -967,7 +1073,11 @@ fi  # end check 2
 # mutant that set it in `diff` mode made the check-set line claim rows 3+4 ran while they did
 # not, surviving the whole suite. One flag, read by both.
 if [ "$RUN_PHASE_DOCS" = 1 ]; then
-# 3 + 4. spec + plan docs exist for the phase (LOCAL files).
+# 3 + 4. spec + plan docs exist for the phase. They are matched as LOCAL files on disk, by path
+# glob, and not from the commit range — which is what lets a task-mode run gate them before they
+# are committed. The parenthetical here used to give the reason as:
+# > LOCAL files — docs/ is gitignored
+# Retired by p39: docs/ is tracked. This gate dialect needs the glob either way.
 if [ "$(g exempt_docs)" = true ]; then
   skip_logged && ok "spec/plan exempt (SKIP: logged)" || bad "exempt_docs=true but no 'SKIP:' line in newest journal"
 else
@@ -1225,8 +1335,7 @@ fi
 #     the blob SHA of the hook it recorded, and `--check-divergences` is what enforces that pin. Where that harness file is absent the row prints that it does not apply.
 #
 #     WHY THIS IS CONDITIONAL. The check takes minutes -- several times the whole task-mode gate --
-#     so wiring it unconditionally makes
-#     every push that much slower, and a slow gate is one people
+#     so wiring it unconditionally makes every push that much slower, and a slow gate is one people
 #     route around with `--no-verify`. The pin is keyed on ONE file's blob, so ONLY a diff that
 #     touches that file can stale a record; every other push pays nothing.
 #
@@ -1348,7 +1457,7 @@ fi
 #     projects that had never configured the feature, which pushed 95/0 -> 21 red across eleven
 #     commits while the gate was structurally unable to see it.
 #
-#     WHAT UNARMED LOOKS LIKE, corrected 2026-08-31. This comment used to say the unarmed
+#     WHAT UNARMED LOOKS LIKE, corrected. This comment used to say the unarmed
 #     row "does not run, prints nothing, and leaves the check-set line untouched". All three were
 #     false of the code directly beneath it, and the wrong sentence is quoted rather than deleted
 #     because it did real damage: a phase in another session copied it as the design precedent for
@@ -1501,6 +1610,275 @@ if [ "$RUN_EXPERIMENT_GATE" = 1 ]; then
   fi
 fi
 
+# 13. sidelines. A side discovery -- something real that surfaced mid-phase and is not
+#     this phase's subject -- must not reach phase close without a recorded landing.
+#
+#     WHAT THIS ROW CAN AND CANNOT DO, and the bound is in its own output rather than only here.
+#     It reads DECLARATIONS. It cannot detect a discovery nobody wrote down, and `[none]` is
+#     therefore unfalsifiable: a phase that captured nothing and a phase that forgot to capture
+#     leave the same file. That is the same bound row 11 carries, and it is why the claim this
+#     phase makes is "a side discovery can no longer be lost SILENTLY" and never a loss rate.
+#     Capture is the one unenforced act in the design, deliberately, because no surface here can
+#     enforce it: a PreToolUse hook is handed one tool call and never the phase's theme, and the
+#     Stop hook cannot block at all.
+#
+#     TWO MODES, TWO DIFFERENT QUESTIONS, and the split is load-bearing. `task` -- what the
+#     pre-push hook runs on EVERY push -- checks only that each item line opens with a recognised
+#     state token, and treats a MISSING FILE as fine. `phase` requires the file, requires the
+#     untriaged set to be empty or `[none]` to be present, and requires each conditional field.
+#     If `phase`'s empty-untriaged rule also ran on the push path, capturing a single line would
+#     block the next push until it was routed -- and a capture step that costs a push is one
+#     nobody performs, which would make the whole mechanism equal to nothing.
+#
+#     AN ABSENT FILE IS NOT AN EMPTY ONE, in phase mode. A gitignored queue does not exist in a
+#     fresh clone, in CI, or in a different worktree, so reading absent as empty would make this
+#     row pass precisely when the queue was lost. That is the `SKIP and PASS are both green` shape
+#     this repository has already filed; phase mode says the queue is MISSING rather than clean.
+if [ "$RUN_SIDELINES" = 1 ]; then
+  SL_BOUND="bound:declarations-only — this row read what was DECLARED. It cannot see a discovery nobody wrote down, so \`[none]\` is a statement, not a verified fact"
+  # One regex, used by both modes. Anchored at the line start so a queue line QUOTING another
+  # state token in its prose cannot satisfy or break the check.
+  SL_OK_RE='^- \[(untriaged|refused|declined|none|landed:fix [0-9a-f]{7,40}|landed:backlog [A-Z][0-9.]+|landed:mainline-proposed)\]'
+  SL_ITEM_RE='^- \['
+  # A line that is SHAPED like a capture but is not anchored at column 0 is invisible to every
+  # check below -- not counted as an item, and not reported as malformed. Measured on a real gate: a queue
+  # holding `- [none] ...` plus `  - [untriaged] real discovery` printed
+  # `zero untriaged (and the explicit [none] verdict is present)` and the gate exited 0. An
+  # unrouted discovery reached phase close, which is the one thing this row exists to stop.
+  # The pattern deliberately matches any bullet character and any leading whitespace, and
+  # deliberately does NOT match a mid-sentence mention: the anchor on SL_OK_RE exists so prose
+  # QUOTING a state token cannot satisfy or break the check, and a stray detector that fired on
+  # `- [none]` written inside a backtick would take that property away.
+  # Runs in BOTH modes on purpose. A stray line is a WELL-FORMEDNESS failure, which is task mode's
+  # job, and the remedy is to remove the indent -- it asks for no routing decision, so it does not
+  # make capture cost a push.
+  SL_STRAY_RE='^[[:space:]]*[-*+][[:space:]]*\['
+  # The queue is keyed by the PHASE id, so the row carries a second bound -- printed with the
+  # verdict rather than left in prose, because a limit a verdict-reader never meets is the shape
+  # this repository has already filed.
+  # Whether the queue is keyed AT ALL depends on the manifest value carrying `{PHASE}`, so the
+  # bound is computed, not asserted. An independent reviewer caught the first version printing
+  # `bound:keyed-by-phase` unconditionally: an adopter still pointing `sidelines` at one fixed path
+  # keeps the per-directory defect, and telling them the queue is keyed by phase would be this row
+  # claiming a property of THEIR repository that it does not have.
+  SL_QUEUE_RAW="$(jq -r '.sidelines // empty' "$M" 2>/dev/null || true)"
+  SL_KEYED=0
+  case "$SL_QUEUE_RAW" in *'{PHASE}'*) SL_KEYED=1 ;; esac
+  if [ "$SL_KEYED" = 1 ]; then
+    SL_BOUND_PHASE="bound:keyed-by-phase — the queue path carries the phase id, so two branches sharing one phase id in one checkout share one queue, and a previous cut's drained queue would still vouch for a re-cut under the same id (separate worktrees have separate files, since the queue is untracked)"
+  else
+    SL_BOUND_PHASE="bound:NOT-keyed — the manifest's \`sidelines\` value (\`$SL_QUEUE_RAW\`) carries no \`{PHASE}\`, so this repository has ONE queue for every phase and the next phase inherits whatever this one leaves behind. That is the defect that keying the queue by phase closes, and it is live here until the value is changed"
+  fi
+  SL_BOUND_HEADING="bound:outcome-by-heading — the outcome section is recognised by its HEADING, so a heading that merely mentions side discoveries satisfies it, including one inside a fenced code block; reading the section's CONTENT would need either a machine-written fenced block (which would red every fragment written before this check existed, including the golden control) or semantic judgement, and neither is taken"
+  # The token that becomes this queue's path is validated at the TOP of this script, right
+  # after it is read, because a token containing `/` kills `g()`'s sed before any row runs -- a
+  # guard placed here was measured UNREACHABLE for both cases that justified it (`a/b` died in the
+  # accessor; an empty token is refused per-mode above, with a better message). Writing that down
+  # rather than leaving an unreachable guard in place: a check that cannot fire is indistinguishable
+  # from one that passes, which is this row's own subject.
+  if [ ! -f "$SL_QUEUE" ] && [ -e "$SL_QUEUE" ]; then
+    # From an independent reviewer: `[ ! -f ]` is true for a DIRECTORY and for a dangling
+    # symlink, so task mode printed "absent, which is fine" for a path that exists and cannot be
+    # read as a queue, and phase mode said "does not exist" about something that does. Both modes
+    # now say what is actually there.
+    bad "sidelines: \`$SL_QUEUE\` exists but is not a regular file, so nothing can read it as a queue. A directory, a dangling symlink or a device at this path is a configuration error, and it must not print the same line as an empty queue or an absent one. $SL_BOUND" sidelines
+  elif [ ! -f "$SL_QUEUE" ]; then
+    if [ "$MODE" = phase ]; then
+      # An absent queue has two very different causes, and reporting them identically is what
+      # let the PREVIOUS phase's drained queue vouch for the next one: with the queue at the fixed
+      # path, the row printed `N item line(s) ... zero untriaged` for a phase that had recorded
+      # nothing. So when the queue
+      # is absent, say whether a queue belonging to ANOTHER phase is sitting beside it -- and say how
+      # many items it holds, because the legacy file can be present and EMPTY (it is, on the worktree
+      # where this was written), and "belongs to another phase" with no count sends the reader to
+      # rescue nothing. Filesystem globbing only: no pathspec reaches git here, which is a different
+      # question from the invariant's refusal of globs (it hands its value to git).
+      SL_LEFT=""
+      # The family is only a family when the path is keyed. For an UNKEYED adopter, `dirname` is
+      # whatever directory their single queue sits in, and globbing it would list every unrelated
+      # `.md` there as "a queue belonging to ANOTHER phase" -- a reviewer measured that against
+      # `.claude/*.md`. So the family scan runs only when the manifest value is keyed; the legacy
+      # path is checked either way.
+      #
+      # `.claude/sidelines.md` is the earlier fixed path: MIGRATION SCAFFOLDING, not a correctness
+      # check, and its removal is filed with a Trigger and an Exit rather than left as a comment.
+      # Same `set -e` hazard as SL_WHERE below: a bare `[ … ] && VAR=…` is a standalone command,
+      # and a false test aborts the script.
+      SL_SCAN=".claude/sidelines.md"
+      if [ "$SL_KEYED" = 1 ]; then
+        SL_SCAN="$SL_SCAN $(dirname "$SL_QUEUE")/*.md"
+      fi
+      for _slf in $SL_SCAN; do
+        # `-f` also skips a directory named `x.md` and a dangling symlink, both of which a glob can
+        # return. The equality test this loop used to carry against `$SL_QUEUE` was DEAD CODE -- it
+        # only runs when that path is absent -- and was removed rather than left as a guard that
+        # cannot fire, which is this row's own subject.
+        [ -f "$_slf" ] || continue
+        _sln="$(grep -cE "$SL_ITEM_RE" "$_slf" 2>/dev/null || true)"
+        SL_LEFT="${SL_LEFT}
+      ${_slf} — ${_sln:-0} item line(s)"
+      done
+      if [ -n "$SL_LEFT" ]; then
+        bad "sidelines: this phase's queue \`$SL_QUEUE\` does not exist, and a queue belonging to ANOTHER phase is sitting beside it:$SL_LEFT
+      A drained queue from another phase cannot vouch for this one — its items were routed by that phase, and this phase's own discoveries were never in it. Write \`$SL_QUEUE\`, with \`- [none] <reason>\` if nothing out-of-theme surfaced. $SL_BOUND_PHASE" sidelines
+      else
+        bad "sidelines: \`$SL_QUEUE\` does not exist. An absent queue is NOT an empty one — it is gitignored, so it is absent in a fresh clone, in CI, and in another worktree, and reading absent as clean would pass this row exactly when the queue was lost. Write the file, with \`- [none] <reason>\` if nothing out-of-theme surfaced. $SL_BOUND" sidelines
+      fi
+    else
+      ok "sidelines: \`$SL_QUEUE\` absent, which is fine in task mode — a task that has captured nothing has no file to show. Phase mode requires it. $SL_BOUND" sidelines
+    fi
+  else
+    # Malformed item lines: anything opening like an item whose state token is not recognised.
+    # Counted with grep rather than an awk range: an interval counter whose end condition does not
+    # match the real document counts to the end of the file, which this repository has measured.
+    # Checked BEFORE the token check, because a stray line is why the other checks did not see it:
+    # reporting `unrecognised token` for an indented line would send the reader to the grammar when
+    # the defect is the indent. `grep -n` prefixes `N:`, so the negative match carries that prefix.
+    SL_STRAY="$(grep -nE "$SL_STRAY_RE" "$SL_QUEUE" 2>/dev/null | grep -vE '^[0-9]+:- \[' | head -5 || true)"
+    SL_BAD="$(grep -nE "$SL_ITEM_RE" "$SL_QUEUE" 2>/dev/null | grep -vE ":$(printf '%s' "$SL_OK_RE" | sed 's/^\^//')" | head -5 || true)"
+    if [ -n "$SL_STRAY" ]; then
+      bad "sidelines: \`$SL_QUEUE\` has line(s) shaped like a capture but not anchored at column 0, so every other check in this row is BLIND to them — an \`untriaged\` line written this way reaches phase close while this row reports zero untriaged. An item line is exactly \`- [\` with one space, no indent and no other bullet character:
+$(printf '%s\n' "$SL_STRAY" | sed 's/^/      /')
+      $SL_BOUND" sidelines
+    elif [ -n "$SL_BAD" ]; then
+      bad "sidelines: \`$SL_QUEUE\` has item line(s) whose state token is not recognised. The seven are untriaged | landed:fix <sha> | landed:backlog <id> | landed:mainline-proposed | refused | declined | none (grammar: skills/project-lifecycle/references/where-does-this-go.md):
+$(printf '%s\n' "$SL_BAD" | sed 's/^/      /')
+      $SL_BOUND" sidelines
+    elif [ "$MODE" != phase ]; then
+      SL_N="$(grep -cE "$SL_ITEM_RE" "$SL_QUEUE" 2>/dev/null || true)"
+      ok "sidelines: all ${SL_N:-0} item line(s) in \`$SL_QUEUE\` carry a recognised state token. Task mode checks WELL-FORMEDNESS ONLY — it does not ask whether anything was routed, because requiring that on the push path would make capturing a line block the next push. $SL_BOUND" sidelines
+    else
+      # Phase mode: the drain must have happened, and the conditional fields must be present.
+      SL_UNTRIAGED="$(grep -cE '^- \[untriaged\]' "$SL_QUEUE" 2>/dev/null || true)"
+      SL_NONE="$(grep -cE '^- \[none\]' "$SL_QUEUE" 2>/dev/null || true)"
+      SL_ITEMS="$(grep -cE "$SL_ITEM_RE" "$SL_QUEUE" 2>/dev/null || true)"
+      SL_REFUSED_BAD="$(grep -nE '^- \[refused\]' "$SL_QUEUE" 2>/dev/null | grep -vE '\| *class: *[1-4]' | head -3 || true)"
+      SL_DECLINED_BAD="$(grep -nE '^- \[declined\]' "$SL_QUEUE" 2>/dev/null | grep -vE '\| *why: *[^ ]' | head -3 || true)"
+      if [ "${SL_UNTRIAGED:-0}" -gt 0 ]; then
+        bad "sidelines: ${SL_UNTRIAGED} line(s) in \`$SL_QUEUE\` are still \`untriaged\` at phase close. Every captured discovery needs a landing — fix now, a backlog entry, a main-line candidate PROPOSED to the human, or \`refused\` with its class. The criterion is skills/project-lifecycle/references/where-does-this-go.md. $SL_BOUND" sidelines
+      elif [ "${SL_ITEMS:-0}" = 0 ]; then
+        bad "sidelines: \`$SL_QUEUE\` exists but declares nothing — not one item line and not \`- [none] <reason>\`. An empty file and a phase that genuinely tripped over nothing must not look the same; say which it was. $SL_BOUND" sidelines
+      elif [ -n "$SL_REFUSED_BAD" ]; then
+        bad "sidelines: a \`refused\` line carries no \`class:\` naming which of the four refusal classes applies, so a rising refusal rate could not be read by class:
+$(printf '%s\n' "$SL_REFUSED_BAD" | sed 's/^/      /')
+      $SL_BOUND" sidelines
+      elif [ -n "$SL_DECLINED_BAD" ]; then
+        bad "sidelines: a \`declined\` line carries no \`why:\`, and a refusal with no reason is indistinguishable from forgetting — which is the one distinction this file exists to preserve:
+$(printf '%s\n' "$SL_DECLINED_BAD" | sed 's/^/      /')
+      $SL_BOUND" sidelines
+      else
+        # THE OUTCOME MUST HAVE REACHED THE PERMANENT RECORD, and until this existed that was
+        # discipline wearing a check's clothes. The design's mode table promised phase mode
+        # verified "the outcome is in the journal fragment"; `journal` occurred ZERO times in this
+        # row: a drained queue with no untriaged items and NO journal fragment for the phase at all
+        # still printed `✓ sidelines: N item line(s) ... zero untriaged`. The half the whole design leans on --
+        # `.gitignore` and `sidelines_rationale` both say the queue is disposable BECAUSE the outcome
+        # survives in the journal -- was the unguarded half.
+        #
+        # Reads `$J`, which this gate ALREADY resolved before any row ran (archived-slice aware), so
+        # there is no second resolution to drift. Precedent: `skip_logged` greps `$J`.
+        # $1 = an ERE, $2 = `i` for case-insensitive. True if ANY fragment of this phase matches.
+        # `$J` is ONE file (`ls … | tail -1`) and a phase can have several fragments --
+        # so an outcome split across them is a correct record and must not red. The SAME
+        # search is used for the heading and for the ids: an independent reviewer pointed out that
+        # checking the heading against `$J` alone, while ids were searched across every fragment,
+        # would red a phase that wrote its outcome section in an earlier fragment.
+        sl_in_journal() {
+          # An explicit `if`, not `[ … ] && VAR=…`: both call sites are condition contexts, which
+          # disables `set -e` inside a function body, so a bare `&&` would work HERE and break the
+          # moment this function is called as a plain statement. A guard that depends on its
+          # caller's context is the shape this row exists to refuse.
+          _slgi=""
+          if [ "${2:-}" = i ]; then _slgi="-i"; fi
+          [ -n "${J:-}" ] && [ -f "$J" ] && grep -qE $_slgi "$1" "$J" 2>/dev/null && return 0
+          for _sljf in "$JD"/*phase-"$PHASE"-*.md; do
+            [ -f "$_sljf" ] || continue
+            grep -qE $_slgi "$1" "$_sljf" 2>/dev/null && return 0
+          done
+          [ -n "${JSLICE:-}" ] && [ -f "$JSLICE" ] && grep -qE $_slgi "$1" "$JSLICE" 2>/dev/null && return 0
+          return 1
+        }
+        # Where the row actually looked, named in both the red and the green so neither claims a
+        # file it did not read.
+        # Built with explicit `if`s, NOT with `$(cond && printf …)`. This script runs under
+        # `set -euo pipefail`, and an ASSIGNMENT takes the exit status of its command substitution
+        # -- so `SL_WHERE="$(… && printf …)"` with a false condition KILLS THE GATE. Measured: the
+        # first version of this line aborted every run where `$JSLICE` was empty (i.e. nearly all of
+        # them) after row 12, printing neither row 13 nor the final PASS/FAIL summary. The same
+        # construct is safe inside an `ok "…"` argument, which is why it appears there -- the status
+        # of a substitution inside a command's argument is not the command's status.
+        SL_WHERE="\`$J\`"
+        if ls "$JD"/*phase-"$PHASE"-*.md >/dev/null 2>&1; then
+          SL_WHERE="$SL_WHERE plus every \`$JD/*phase-$PHASE-*.md\`"
+        fi
+        if [ -n "${JSLICE:-}" ]; then
+          SL_WHERE="$SL_WHERE plus the archived slice"
+        fi
+        SL_JBAD=0
+        if [ -z "${J:-}" ]; then
+          # Row 5 reds on this too, with its own reason. This row still refuses to print a green it
+          # cannot support: without this branch, "no journal at all" is the ONE input for which the
+          # outcome check would pass by having nothing to read.
+          bad "sidelines: the drain cannot be verified — there is no journal fragment for phase ${PHASE}, so this row has nothing to read the outcome from. The queue is disposable BECAUSE the outcome is permanent; with no fragment, nothing is permanent. (Row 5 reds on the same cause with its own message.) $SL_BOUND_PHASE" sidelines
+          SL_JBAD=1
+        else
+          # The outcome section. Recognised by its HEADING, and the separator is tolerated because a
+          # space-only pattern was MEASURED to miss the real thing: the real fragment writes
+          # `side-discovery`, so `side discover` scored 0 hits on it and would have reddened a
+          # correct, already-merged record. That near-miss was caught by an independent cross-check
+          # before it shipped, not after.
+          if ! sl_in_journal '^#{1,6}[[:space:]].*side[ -]?discover' i; then
+            bad "sidelines: no side-discovery outcome section in this phase's journal — searched $SL_WHERE. The queue is working state and is thrown away; the phase's OUTCOME is what survives, and this row now requires it to exist rather than trusting that someone wrote it. Add a heading naming side discoveries, with what each item's landing was. $SL_BOUND_PHASE" sidelines
+            SL_JBAD=1
+          fi
+          # Every landing id must appear in the record. TWO matchers, and the difference is measured:
+          #   backlog id -- needs a RIGHT boundary. A plain substring search for `B9001` also matches
+          #     inside `B90012`, so `B90012` would have
+          #     vouched for an id nobody recorded.
+          #   fix sha -- LEFT boundary only, matched on the first 7 characters. The journal routinely
+          #     writes the short form while the queue may carry the long one; a right boundary would
+          #     red a correct record whenever the next character of a full sha happened to be a
+          #     digit. The cost is that two shas sharing 7 characters satisfy each other, which is
+          #     the same abbreviation git itself prints here.
+          SL_MISS=""
+          for _slid in $(grep -oE '^- \[landed:backlog [A-Z][0-9.]+\]' "$SL_QUEUE" 2>/dev/null | sed -E 's/^- \[landed:backlog //; s/\]$//'); do
+            # The id's own `.` is a regex wildcard if it reaches the pattern raw: `B7012.1` would then
+            # match `B1231`. Escaped before use.
+            _slide="$(printf '%s' "$_slid" | sed 's/\./\\./g')"
+            # The RIGHT boundary rejects a digit, and rejects `.` only when a digit follows it.
+            # Found by an independent reviewer and confirmed by probe: the first version used
+            # `([^0-9.]|$)`, under which `landed as B7389.` -- an id at the end of a sentence --
+            # scored 0, so a CORRECT journal would have been reddened. The golden control passed
+            # only because none of its ids sits at a sentence end, i.e. the check was shipped green
+            # by luck. The dotted form still cannot be satisfied by a longer id: `B7012` scores 0
+            # against a line holding only `B7126`, `B1234` and `B7012.1`, while `B7012.1` scores 1
+            # against itself.
+            sl_in_journal "(^|[^A-Za-z0-9])${_slide}(\$|[^0-9.]|\.\$|\.[^0-9])" || SL_MISS="$SL_MISS ${_slid}"
+          done
+          for _slsha in $(grep -oE '^- \[landed:fix [0-9a-f]{7,40}\]' "$SL_QUEUE" 2>/dev/null | sed -E 's/^- \[landed:fix //; s/\]$//'); do
+            # Bash substring, not `cut -c1-7`: that form is banned by shape (scripts/utf8-text.sh)
+            # because it counts bytes under GNU coreutils and characters on BSD. The value is
+            # `[0-9a-f]{7,40}` by the grep that produced it, so this needs no exemption -- and an
+            # exemption would be a hole where a plain expansion does the job with no subprocess.
+            _slp="${_slsha:0:7}"
+            sl_in_journal "(^|[^0-9a-f])${_slp}" || SL_MISS="$SL_MISS ${_slp}"
+          done
+          if [ -n "$SL_MISS" ]; then
+            bad "sidelines: this phase's journal does not name these landing id(s), so the queue says they were routed and the permanent record does not:${SL_MISS}
+      Searched $SL_WHERE. An id counts bare, at the end of a sentence, in a table cell, in a link, or as \`[[id]]\`. $SL_BOUND_PHASE" sidelines
+            SL_JBAD=1
+          fi
+        fi
+        # NOT an elif chain on purpose: a run that is missing BOTH the section and an id prints both,
+        # because "fix the first thing" costs another full gate run to discover the second.
+        if [ "$SL_JBAD" = 0 ]; then
+          ok "sidelines: ${SL_ITEMS} item line(s) in \`$SL_QUEUE\`, zero untriaged$([ "${SL_NONE:-0}" -gt 0 ] && printf ' (and the explicit \`[none]\` verdict is present)'), every \`refused\` carries its class and every \`declined\` its reason, and the outcome reached this phase's journal — a side-discovery section exists and every landing id appears, somewhere in $SL_WHERE. $SL_BOUND. $SL_BOUND_PHASE. $SL_BOUND_HEADING" sidelines
+        fi
+      fi
+    fi
+  fi
+fi
+
 # 9. validator_input_paths_rationale: the manifest must carry the load-bearing argument
 #    for why test_evidence_inputs stays narrow (tracked-only). Content-checked, not just
 #    presence: a placeholder string must not satisfy this row.
@@ -1608,7 +1986,7 @@ case "$RAT_TYPE" in
     # "an array of strings, at least one of which says something" -- in ONE jq expression, so the
     # sub-conditions cannot drift apart across three shell reads.
     #
-    # NOT "every element non-empty", and the difference was found by dogfooding rather than by
+    # NOT "every element non-empty", and the difference was found in use rather than by
     # design: this repository's own `why` is a multi-line prose block that uses empty strings as
     # PARAGRAPH SEPARATORS, and the first version of this rule refused it. The property that
     # actually matters is that the value says something, so `["", "", "x"]` passes and
@@ -1619,7 +1997,7 @@ case "$RAT_TYPE" in
     RAT_MISSING=""
     # A declared surface_kept is REFUSED rather than ignored. Accepting-and-ignoring it would let
     # a stale copied number sit in the manifest looking authoritative while nothing reads it --
-    # which is exactly the 77-vs-595 shape this change exists to remove.
+    # which is exactly the stale-count shape this change exists to remove.
     [ "$RAT_HAS_KEPT" = yes ] && RAT_MISSING="$RAT_MISSING surface_kept-is-derived-remove-it"
     [ "$RAT_TOTAL_TYPE" = number ] || RAT_MISSING="$RAT_MISSING surface_total-must-be-a-json-number"
     if [ "$RAT_TOTAL_TYPE" = number ]; then
@@ -1682,6 +2060,119 @@ fi  # end check 9 (RUN_EVIDENCE)
 # pre-push hook runs `task` on every push, so this is also the only placement in which the
 # warning reaches the human more than once per milestone.
 floor_arming_row
+
+# ---------------------------------------------------------------------------------------------
+# retention hot-cap rows — THESE FAIL THE GATE. That is the one deliberate difference
+# from the canonical variant, and it is written here rather than left to a reader to measure.
+# ---------------------------------------------------------------------------------------------
+#
+# WHY THESE ROWS EXIST AT ALL. `retention.hot_caps` is documented in `references/retention.md`
+# §"Policy keys" and declared in `.claude/close-gate.json` -- and until recently this file
+# contained the string `hot_caps` ZERO times. Every declared entry was inert in this variant: a config
+# that looked configured and a cap that looked enforced.
+#
+# The cost was paid, not predicted. When the journal/qa-log drain stopped running, the hot
+# documents grew far past their caps while EVERY close-gate run printed green. The
+# drain script itself worked; what was missing is the only mechanism that could notice nobody
+# ran it. Clearing the backlog by hand is stop-the-bleeding; without these rows it recurs.
+#
+# WHY THEY FAIL INSTEAD OF WARNING, and why that is not a silent divergence from canonical.
+# The canonical gate embedded in `references/close-gate.md` says `WARN-ONLY (never flips $fail)`
+# and its own self-test asserts "over-cap doc warns without failing". This repo refuses that
+# reading: "the gate can read hot_caps" tests a parser, not a guarantee. The failure path must
+# be exercised: push a hot document over budget and the gate must go RED. A check downgraded to
+# warn-only is a check that never reds.
+#
+# So a straight port would NOT have made the two variants stop disagreeing; it would have moved
+# the disagreement from "does the row exist" to "how severe is it" — the original complaint, one
+# level up. There are two acceptable resolutions (mark every key with the gate
+# variant that reads it, OR make the variants stop disagreeing) and this phase does BOTH: the rows fail
+# here, and `references/retention.md` §"Policy keys" states the severity difference with its
+# reason. A documented divergence is a different object from an undocumented one.
+#
+# ENVELOPE: jq + coreutils only. No python3 (CLAUDE.md), and `cap_val`/`cap_none` are kept
+# byte-comparable with canonical's so the two variants stay diff-able rather than merely similar.
+#
+# cap_val: read retention.hot_caps.<key>[0|1], default when absent. jq's null-safe chaining means
+# a missing `retention` block never errors — the rows run with zero configuration.
+cap_val()  { jq -r "(.retention.hot_caps.$1[$2])? // $3" "$M" 2>/dev/null; }
+cap_none() { [ "$(jq -r ".retention.hot_caps.$1 // empty" "$M" 2>/dev/null)" = "none" ]; }
+
+# ONE path for every over-cap verdict, so a subject cannot be added later with a different
+# severity by accident. `bad` (not `warn`) is the whole point of this block.
+cap_over() { # $1=label $2=over-description
+  bad "$1 over hot cap ($2) — drain at milestone close, or declare retention.hot_caps.<key>: \"none\" with a written reason"
+}
+
+# A FILE's cap: lines and KB, either dimension, 0 means unlimited for that dimension.
+cap_file() { # $1=path $2=hot_caps-key $3=default-lines $4=default-kb $5=label
+  [ -f "$1" ] || return 0
+  if cap_none "$2"; then ok "$5 exempt (retention.hot_caps: none)"; return 0; fi
+  _ml="$(cap_val "$2" 0 "$3")"; _mk="$(cap_val "$2" 1 "$4")"
+  _l=$(wc -l < "$1" | tr -d ' '); _k=$(( $(wc -c < "$1") / 1024 )); _over=""
+  [ "$_ml" -gt 0 ] && [ "$_l" -gt "$_ml" ] && _over="lines $_l>$_ml"
+  [ "$_mk" -gt 0 ] && [ "$_k" -gt "$_mk" ] && _over="${_over:+$_over, }size ${_k}K>${_mk}K"
+  if [ -n "$_over" ]; then cap_over "$5" "$_over"; else ok "$5 under hot cap"; fi
+}
+
+# A DIRECTORY's cap: KB only. The lines dimension is meaningless for a directory total, and
+# canonical says so too — kept identical rather than "improved", so the variants stay comparable.
+#
+# WHAT THE NUMBER IS, stated because it is NOT the number a content-size check gives. `du -sk`
+# reports ALLOCATED BLOCKS, not content bytes. Measured on this filesystem: a
+# directory holding a single 100-byte file reports 4 K. So a directory of many tiny fragments
+# can exceed a cap that its CONTENT does not, and the gap is (file count x block size).
+#
+# At the shipped caps (journal 100K, qa-log 50K) that difference is noise, and `du` is kept for
+# byte-comparability with canonical. But it means two honest numbers exist for one cap: a
+# content-based count (`find | cat | wc -c`) measures journal CONTENT, while this row would
+# have measured allocated size. Neither is wrong; they answer different questions, and a reader
+# comparing them should not conclude one of them is a bug. `references/retention.md` says which
+# one the policy key means.
+cap_dir() { # $1=path $2=hot_caps-key $3=default-kb $4=label
+  [ -d "$1" ] || return 0
+  if cap_none "$2"; then ok "$4 exempt (retention.hot_caps: none)"; return 0; fi
+  _mk="$(cap_val "$2" 1 "$3")"
+  _k=$(( $(du -sk "$1" | cut -f1) ))
+  if [ "$_mk" -gt 0 ] && [ "$_k" -gt "$_mk" ]; then cap_over "$4" "size ${_k}K>${_mk}K"
+  else ok "$4 under hot cap"; fi
+}
+
+# The subjects. RESUME.md and the status doc are FILES (lines + KB); the journal, qa-log and
+# changelog hot zones are DIRECTORY totals. `$JD` was resolved above at the journal check.
+#
+# RESUME.md: absent in a worktree by construction — it is gitignored and lives in the main
+# checkout only. `cap_file` returns early on a missing file, so this row is simply silent
+# there rather than failing, and that is stated because "absent" and "under cap" are different
+# facts and only one of them is being asserted.
+cap_file "RESUME.md" resume 200 25 "RESUME.md"
+_sd="$(g status_doc 2>/dev/null)"; _sd="${_sd:-docs/STATUS.md}"
+cap_file "$_sd" status 300 30 "status doc"
+#
+# TWO SUBJECTS DIFFER FROM CANONICAL, and both differences are deliberate rather than drift.
+# They are written here because the next person to diff the two variants will find them, and a
+# difference nobody wrote down reads as a port that went wrong.
+#
+#   ADDED — `CHANGELOG.md` the FILE. Canonical caps only `changelog.d/` (the fragment dir). This
+#   repo's policy declares a `changelog` cap and means the monolith by it; leaving the monolith
+#   uncapped would make the declared key inert, which is the whole defect
+#   this row exists to close. It SHARES the `changelog_hot` key with the dir row below, so one
+#   `changelog_hot: "none"` exempts file and dir together — the same shared-key behaviour
+#   canonical already gives qa-log's monolith and dir, kept rather than invented.
+#
+#   RESTORED — `docs/brainstorming-qa-log.md`, the qa-log monolith. The first draft of this port
+#   capped only the qa-log DIRECTORY and dropped this row; the omission was caught by diffing the
+#   subject lists against canonical, not by a test, and it is listed as a finding rather than
+#   quietly fixed because "the port is complete" was asserted once before it was true. It is
+#   small here, far under cap, so the restored row is green and proves nothing on its own —
+#   which is exactly why the omission was invisible.
+cap_file "CHANGELOG.md" changelog_hot 0 50 "CHANGELOG.md"
+cap_file "docs/brainstorming-qa-log.md" qa_log_hot 0 50 "qa-log monolith"
+cap_dir "$JD" journal_hot 100 "journal hot zone"
+_qd="$(g retention.qa_log_dir 2>/dev/null)"; _qd="${_qd:-docs/qa-log.d}"
+cap_dir "$_qd" qa_log_hot 50 "qa-log hot zone"
+_cd="$(g retention.changelog_dir 2>/dev/null)"; _cd="${_cd:-changelog.d}"
+cap_dir "$_cd" changelog_hot 50 "changelog hot zone"
 
 echo "──"
 # THE ONLY PLACE THIS IS SET. Everything above it counts as "the gate did not finish", and the

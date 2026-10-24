@@ -34,8 +34,8 @@ git rev-parse --git-dir >/dev/null 2>&1 || { echo "✗ not a git repo"; exit 1; 
 # Both paths are RESOLVED before comparison, never compared as strings. `--git-path hooks`
 # may answer with an absolute path while `--git-common-dir` answers with a relative one, so
 # a string compare calls the same directory two different things and refuses a repo that is
-# perfectly fine. That false positive was first found in the
-# sibling predicate (scripts/invariants/close-gate-wiring.sh), and it reappeared here the moment this check was written the
+# perfectly fine. That false positive was first found in the sibling predicate
+# (scripts/invariants/close-gate-wiring.sh) and reappeared here the moment this check was written the
 # obvious way — caught by the fixture that sets core.hooksPath TO the default directory.
 abspath() { ( cd "$(dirname "$1")" 2>/dev/null && printf '%s/%s\n' "$(pwd -P)" "$(basename "$1")" ) || printf '%s\n' "$1"; }
 HOOKS_DIR="$(abspath "$(git rev-parse --git-path hooks)")"

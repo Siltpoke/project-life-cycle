@@ -116,8 +116,24 @@ echo "  --- link check (host-native; skips a container round-trip for a pinned b
 run_lychee | sed 's/^/  /'
 echo "  full log: $OUT"
 
-# `Lint markdown` carries `continue-on-error: true` in the workflow, so it fails on real CI too
-# and does not fail the job. act reports it as a step failure regardless. Said here so a reader
-# does not chase it.
-echo "  note: a 'Lint markdown' failure is expected — that step is continue-on-error upstream."
+# TWO STEP FAILURES ARE EXPECTED HERE AND NEITHER IS A RESULT. Both are named because the first
+# run of this script from an arm64 host can spend a long time producing one of them and then has to
+# be chased.
+#
+#   `Lint markdown` carries `continue-on-error: true` in the workflow, so it fails on real CI too
+#   and does not fail the job. act reports it as a step failure regardless.
+#
+#   `Check internal markdown links` CANNOT RUN in this container on an arm64 host, by design.
+#   `scripts/lib/lychee-pin.env` pins a sha256 per platform and has `x86_64_linux` (real CI) and
+#   `aarch64_darwin` (macOS on Apple silicon) -- not `aarch64_linux`, which is what act's Linux image is on an arm64 host.
+#   `ensure-lychee.sh` then refuses rather than fetching some other version, and that refusal is
+#   correct: a binary at a different version stops testing what CI runs. The step's whole substance
+#   is covered instead by `run_lychee` below, which invokes the SAME pinned version with the SAME
+#   arguments on the host -- so what this container leaves untested is the lychee BINARY's platform
+#   (darwin/arm64 rather than linux/x86-64), and nothing about this repository's links.
+#   Adding an `aarch64_linux` pin would close even that, and is the only real fix.
+echo "  note: TWO step failures are expected and neither is a result --"
+echo "        'Lint markdown' is continue-on-error upstream, and"
+echo "        'Check internal markdown links' has no aarch64-linux lychee pin, so it cannot run in"
+echo "        this container on an arm64 host. The host-native link check above is its cover."
 exit "$rc"

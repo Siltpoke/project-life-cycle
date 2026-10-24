@@ -26,6 +26,31 @@ __pycache__/
 # looser glob.
 /.claude/tasklist.md
 
+# The side-discovery queue — working state, and the one thing
+# in a phase that is deliberately NOT durable. Lines move from `untriaged` to a landing while a
+# phase runs; what becomes permanent is the phase's OUTCOME, written into the journal at close, and
+# phase mode CHECKS that (row 13 reads the journal fragment). This repository's own rule
+# is that documents record moments and never states, and a half-drained queue is a state.
+#
+# ONE FILE PER PHASE, not per directory. This block used to say "per-branch working state", and the
+# wording is quoted rather than deleted because it was the bug: nothing read a branch name, the file
+# belonged to the directory on disk, and the PREVIOUS phase's drained queue satisfied the next
+# phase's close. The path now carries the phase id
+# (`.claude/sidelines/<phase>.md`, from the manifest's `{PHASE}` template).
+#
+# SAME LEADING-SLASH REASONING AS THE TASKLIST ABOVE, and for the same reason it is not repeated as
+# a looser glob: the queue path is overridable (`PLC_SIDELINES_FILE`), a static pattern cannot
+# follow an override, so the answer is an invariant that RESOLVES the configured path —
+# scripts/invariants/sidelines-never-tracked.sh. That script tests TRACKED before IGNORED, because
+# an ignore rule has no effect on a path already in the index and reversing the order produces a
+# true failure with a false reason.
+/.claude/sidelines/
+# The previous fixed path. KEPT so a queue left behind by the migration stays ignored rather
+# than appearing as an untracked file in someone's status. This line is MIGRATION SCAFFOLDING, not a
+# correctness rule, and its removal is filed as a backlog entry with a Trigger and an Exit rather
+# than left to a comment nobody re-reads.
+/.claude/sidelines.md
+
 # p36: the synthesized decision packets handed to the cross-family blind 2nd agent, and its raw
 # JSON replies. A cache by construction — every field they carry is transcribed verbatim into the
 # phase's qa-log fragment, which IS the audit trail. Keeping the packets too would be a second

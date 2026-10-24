@@ -2,7 +2,7 @@
 # Invariant: the ci-status producer snippet in the docs writes the schema the reader accepts.
 #
 # WHY. references/ci-cd-gates.md carries an example producer for `.claude/ci-status.json`, because
-# R1 forbids PLC shipping forge-specific code and the permitted form is a snippet an adopter copies
+# PLC does not ship forge-specific code and the permitted form is a snippet an adopter copies
 #. That leaves the snippet with NO GATE BEHIND IT -- prose asserting something no mechanism
 # checks, which is the defect class p33 spent a day on. This is the mechanism.
 #

@@ -4,33 +4,22 @@ One-time, **read-only** pass offered when the skill is adopted on an existing co
 
 ## Detection contract
 
-Anchor all checks at `git rev-parse --show-toplevel`. The **adoption entry** fires only when BOTH conditions hold:
+**The rule is runnable, and this section describes its SHAPE rather than restating its lists.**
 
-1. **Both plc anchors absent** — no RESUME file AND no iteration journal. Each anchor counts as present at **either** conventional location (`RESUME.md` at repo root or `docs/RESUME.md`; `docs/iteration-journal.md` or root `iteration-journal.md`) — a repo keeping `docs/RESUME.md` must NOT fire the adoption entry. One anchor present → existing-project branch wins (current behavior preserved).
-2. **Substantial existing code** — a recognized manifest is present, OR ≥1 recognized source file exists outside the whitelist.
+```sh
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/archaeology-preflight.sh" detect      # prints `adoption-entry` or `new-project`, and why
+```
 
-Both checks evaluate **tracked files only** (`git ls-files`), never the raw working tree — vendored/installed directories (`node_modules/`, `vendor/`, build output) are typically untracked and must not trigger detection. Manifest names match at the **repo root**; `*.csproj` / `*.sln` / `build.gradle*` globs and the source-extension check match tracked paths at **any depth**. Untracked-only repo (no commits yet) → treat as new-project.
+The **adoption entry** fires only when BOTH conditions hold:
 
-**Recognized manifests:**
+1. **Both plc anchors absent** — no RESUME file AND no iteration journal, each counting as present at **either** conventional location. One anchor present → existing-project branch wins.
+2. **Substantial existing code** — a recognized manifest, OR ≥1 recognized source file outside the whitelist.
 
-`package.json` · `Cargo.toml` · `pyproject.toml` · `go.mod` · `pom.xml` · `build.gradle*` · `Gemfile` · `composer.json` · `mix.exs` · `*.csproj` · `*.sln` · `pubspec.yaml` · `requirements.txt` · `setup.py`
+**The four lists those two conditions read — anchors, manifests, source extensions, whitelist — live in exactly one place**, the `plc-adoption-rule` block in `scripts/archaeology-preflight.sh`, and `scripts/invariants/adoption-rule-single-source.sh` keeps them there. They used to be restated in seven places across five shipped files with nothing checking they agreed; that is what this pointer replaces. To read a list, read the block — do not copy it back here.
 
-Keep this list in sync with the language-detection table in `references/init-harness.md` — every stack `/init-harness` recognizes must be detectable here, or brownfield repos of that stack misroute to new-project.
+Both conditions evaluate **tracked files only** (`git ls-files`), never the raw working tree: vendored and installed directories are typically untracked and must not trigger detection. Plain manifest names match at the **repo root**; the glob manifests and the source-extension check match at **any depth**. Untracked-only repo (no commits yet) → new-project.
 
-**Recognized source files** (the other arm of the OR): any file outside the whitelist with one of these extensions — `.ts` `.tsx` `.js` `.jsx` `.mjs` `.py` `.rs` `.go` `.java` `.kt` `.swift` `.dart` `.c` `.h` `.cpp` `.hpp` `.cs` `.rb` `.php` `.ex` `.exs` `.scala` `.clj` `.sh` `.sql` `.vue` `.svelte`. This fixed list is the deterministic floor; Phase 1 stack detection may add stack-specific extensions on top, never remove from the floor.
-
-**Whitelist** (files/dirs that do NOT count as code; create-next-app lineage, ~24 entries):
-
-| Category | Entries |
-|---|---|
-| VCS dirs | `.git` · `.hg` |
-| Dotfiles | `.gitignore` · `.gitattributes` · `.DS_Store` · `Thumbs.db` |
-| CI configs | `.travis.yml` · `.gitlab-ci.yml` |
-| IDE dirs | `.idea` · `.vscode` · `.zed` |
-| Agent dirs | `.claude` · `.cursor` |
-| Docs | `docs/` · `LICENSE` · `README.md` · `mkdocs.yml` |
-| Error logs | `npm-debug.log` · `yarn-error.log` · `yarn-debug.log` |
-| Tooling residue | `*.iml` · `.yarn` |
+Keep the manifest list in step with the language-detection table in `references/init-harness.md` — every stack `/init-harness` recognizes must be detectable here, or brownfield repos of that stack misroute to new-project. (That table answers a different question — which stack, which test command — so it legitimately names the same filenames and is deliberately not covered by the single-source guard.)
 
 **No commit-count or LOC thresholds.** Zero industry precedent (CRA/next/vite/cargo all use file-presence checks), and any numeric threshold misclassifies imported-mature-code repos (1 commit, 50k LOC).
 
@@ -61,9 +50,44 @@ An accepted pass produces exactly these drafts — no more:
 | 5 | `docs/RESUME.md` initial state (the path `/init-harness` generates; root `RESUME.md` if the project already uses that location) | controller |
 | 6 | `docs/adoption-snapshot.md` index | controller |
 
+## Pre-flight — the pass looks at what it is about to read, BEFORE it drafts
+
+**This is the first step of the pass, and it is not optional.** Run it before the fan-out below:
+
+```sh
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/archaeology-preflight.sh" check
+```
+
+**Branch on the exit code itself. Never on truthiness.** `if preflight; then … else … fi` collapses
+"a finding, which a human must weigh" and "the check could not run" into one bucket, and the report
+body — the only part that says what was actually found — is then never shown.
+
+| Exit | Meaning | What the pass does |
+|---|---|---|
+| `0` | no finding | **continue** to the fan-out below |
+| `1` | a finding; the report names it | **stop. Produce zero drafts.** Show the report and hand the decision to the human |
+| `3` | the check could not run | **stop. Produce zero drafts.** Say it could not run — never "nothing was found" |
+
+**On exit `0` with a withheld draft.** When the report says the inferred `docs/ROADMAP.md` will not
+be written, produce the other five artifacts and not that one. The project already has a file holding
+that role, and writing a competing draft over it is the failure this pre-flight exists to prevent.
+
+**Why this is a script and not another paragraph.** The pass was entirely prose. On a real
+brownfield repository it can draft confident documents from a stale checkout — anchoring on the
+branch that happens to be checked out rather than on the project as it is — and read-only agents
+can cross the evidence boundary their own prompts state. A fourth prose rule, added to a pass whose
+prose rules do not bind, would patch at the layer that failed.
+
+**What this section can and cannot enforce, stated rather than implied.** The pre-flight's own
+behaviour is covered by tests and a mutation matrix. Whether an agent reading this section actually
+runs it, and actually branches on the code rather than on truthiness, is a prose instruction like
+every other one here — and the paragraph above is the measured evidence that prose instructions do
+not always bind. The honest position is that this moves the detection from prose to code and leaves
+the *invocation* in prose.
+
 ## Pass structure
 
-Runs as **init-harness Phase 1b**, strictly read-only, only after the user accepts the offer at CHECKPOINT 1 (or invokes `/init-harness --archaeology` directly). Fan out three read-only subagents:
+Runs as **init-harness Phase 1b**, strictly read-only, only after the user accepts the offer at CHECKPOINT 1 (or invokes `/init-harness --archaeology` directly), **and only after the pre-flight above exited `0`**. Fan out three read-only subagents:
 
 | Agent | Evidence | Output draft | Boundary |
 |---|---|---|---|

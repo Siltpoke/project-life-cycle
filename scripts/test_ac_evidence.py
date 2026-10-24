@@ -740,20 +740,145 @@ def test_no_trailer_yields_an_empty_scope_and_still_exits_zero(tmp_path):
     assert r.stdout.strip() == ""
 
 
-def test_an_issue_closing_trailer_is_rejected_not_read_as_empty(tmp_path):
-    """`Closes: #204` is habitual forge idiom, not a criterion id. It must
-    error, not silently mean 'this task claims nothing'."""
-    repo = git_fixture(tmp_path, ["task\n\nCloses: #204"])
-    r = scope(repo)
-    assert r.returncode != 0
-    assert "#204" in (r.stdout + r.stderr)
+def _gate_path(tmp_path, message, phase="p1", story_body=None, criteria=None):
+    """Run the two steps the CLOSE GATE runs, in the order and with the error handling it uses.
+
+    THIS HELPER IS THE ORACLE, and a test of either step alone is not.
+    `scripts/close-gate.sh:1348` invokes the tokeniser as
+
+        ... scope-from-trailers ... > "$AC_IDS" 2>/dev/null || : > "$AC_IDS"
+
+    so a non-zero tokeniser **has its output truncated and its message discarded**. Asserting
+    that the tokeniser exits non-zero therefore says nothing about what the gate ends up
+    reporting -- which is the entire subject of these tests. The `|| : >` is reproduced here verbatim.
+    """
+    repo = git_fixture(tmp_path, [message])
+    ids = tmp_path / "ids.txt"
+    tok = subprocess.run(["/bin/bash", str(SCRIPT), "scope-from-trailers", phase, "--base", "main"],
+                         capture_output=True, text=True, cwd=repo)
+    # The gate's own error handling: keep stdout on success, truncate on failure.
+    ids.write_text(tok.stdout if tok.returncode == 0 else "", encoding="utf-8")
+    s_path = story(tmp_path, story_body if story_body is not None else BASIC_STORY)
+    e_path = evidence(tmp_path, {"phase": phase, "criteria": criteria if criteria is not None else [
+        _oracle(f"{phase}:AC1"), _oracle(f"{phase}:AC2"),
+    ]})
+    rep = subprocess.run(["/bin/bash", str(SCRIPT), "report", s_path, phase,
+                          "--evidence", e_path, "--ids", str(ids)],
+                         capture_output=True, text=True)
+    return tok, rep, ids
 
 
-def test_an_unparseable_trailer_value_is_rejected(tmp_path):
-    repo = git_fixture(tmp_path, ["task\n\nCloses: whatever"])
+def test_p164_a_comma_separated_trailer_is_malformed_and_the_gate_still_reds(tmp_path):
+    """One character decided which of two very different things the gate reported.
+
+    MEASURED (hit while writing a commit). `Closes: p1:AC1, p1:AC2` on one
+    line tokenises through `tr ' ' '\\n'`, which splits on spaces and NOT on commas, so
+    `p1:AC1,` arrived at the comparison with its comma attached. It matched the old `*:AC*`
+    glob -- a CONTAINMENT test -- so it was accepted as a well-formed id, compared against the
+    story, matched nothing, and was reported as
+
+        p1:AC1,    ORPHAN    claimed by a `Closes:` trailer, but the current story declares
+                               no such criterion
+
+    which is a factual claim about the STORY. The author's own formatting slip was reported as a
+    defect in a different file.
+
+    **AND THE OBVIOUS FIX MADE IT WORSE, which is why this test runs the gate's path and not the
+    tokeniser alone.** Anchoring the glob in the tokeniser turned its verdict into a `die`, and
+    the gate swallows that `die` and truncates the id file -- so the gate went from a RED with
+    the wrong message to a GREEN printing *"no criteria claimed by any commit on this branch"*.
+    A fix for a wrong message that turns a red into a reassuring green is worse than the message
+    it replaces.
+
+    So the assertion is four-sided: the malformed token is NAMED, the verdict is MALFORMED, the
+    orphan wording is ABSENT, and the pipeline the gate actually runs still exits non-zero.
+    """
+    tok, rep, ids = _gate_path(tmp_path, "task\n\nCloses: p1:AC1, p1:AC2")
+    assert tok.returncode == 0, f"the tokeniser must pass tokens on, not judge: {tok.stderr}"
+    assert "p1:AC1," in ids.read_text(), "the malformed token never reached the id file"
+
+    out = rep.stdout + rep.stderr
+    assert rep.returncode != 0, f"the gate's path went GREEN on a malformed trailer: {out!r}"
+    assert "MALFORMED" in out, f"not reported as a malformed trailer: {out!r}"
+    assert "p1:AC1," in out, f"the offending token is not named: {out!r}"
+    assert "no such criterion" not in out, (
+        f"still reported as a claim about the story: {out!r}"
+    )
+    assert "no criteria claimed" not in out, (
+        f"the id file was truncated and the run read as an empty claim: {out!r}"
+    )
+
+
+def test_p164_a_well_formed_sibling_in_the_same_trailer_is_still_processed(tmp_path):
+    """One bad token must not cost the good ones their rows.
+
+    The `die` it replaces aborted the whole tokenise step, so a single comma erased the scope
+    entirely. Here `p1:AC2` is well formed and still gets its oracle row beside the MALFORMED
+    one -- which is also what makes the MALFORMED row legible: it sits next to a correct row.
+    """
+    _tok, rep, _ids = _gate_path(tmp_path, "task\n\nCloses: p1:AC1, p1:AC2")
+    assert "p1:AC2" in rep.stdout
+    assert "MALFORMED" in rep.stdout
+
+
+def test_p164_an_issue_reference_keeps_its_own_sentence(tmp_path):
+    """`Closes: #32204` is habitual forge idiom and this repo files backlog items under its own ids.
+
+    It must be told apart from a typo -- it is the WRONG KIND of reference, not a malformed id --
+    and it must reach the gate rather than dying upstream where the swallow eats it.
+    """
+    tok, rep, ids = _gate_path(tmp_path, "task\n\nCloses: #32204")
+    assert tok.returncode == 0, tok.stderr
+    assert "#32204" in ids.read_text(), "the issue reference never reached the id file"
+    out = rep.stdout + rep.stderr
+    assert rep.returncode != 0, f"an issue reference passed the gate: {out!r}"
+    assert "#32204" in out
+    assert "issue" in out, f"the reader is not told it is the wrong KIND of reference: {out!r}"
+    assert "no criteria claimed" not in out
+
+
+def test_p164_an_unparseable_value_is_named_rather_than_read_as_an_empty_claim(tmp_path):
+    """The property the old `test_an_unparseable_trailer_value_is_rejected` protected, preserved.
+
+    Its words were *"It must error, not silently mean 'this task claims nothing'"* and its
+    MECHANISM was the tokeniser's exit code -- which the gate discards. The property is kept and
+    now asserted where the gate can see it; the mechanism moved.
+    """
+    tok, rep, ids = _gate_path(tmp_path, "task\n\nCloses: whatever")
+    assert tok.returncode == 0, tok.stderr
+    assert "whatever" in ids.read_text()
+    out = rep.stdout + rep.stderr
+    assert rep.returncode != 0, f"an unparseable value read as an empty claim: {out!r}"
+    assert "whatever" in out and "MALFORMED" in out
+    assert "no criteria claimed" not in out
+
+
+def test_p164_the_well_formed_id_grammar_still_passes(tmp_path):
+    """The positive control, and it is not decoration: the fix tightens an id test, and the
+    cheapest way to tighten one too far is to reject the forms the grammar allows.
+
+    The grammar this repository already uses elsewhere in this same file
+    (`[A-Za-z0-9_.-]+:AC[0-9]+(\\.[0-9]+)?[a-z]?`) admits a dotted sub-number and a trailing
+    letter, and both occur. A fix that only accepted `bNNN:ACN` would pass the tests above and
+    break these.
+    """
+    repo = git_fixture(tmp_path, ["task\n\nCloses: p1:AC4 p1:AC4.1 p1:AC4a p1:AC10.2b"])
     r = scope(repo)
-    assert r.returncode != 0
-    assert "whatever" in (r.stdout + r.stderr)
+    assert r.returncode == 0, f"a legal id was rejected: {r.stderr}"
+    assert sorted(r.stdout.split()) == ["p1:AC10.2b", "p1:AC4", "p1:AC4.1", "p1:AC4a"]
+
+
+def test_p164_another_phases_well_formed_id_is_neither_malformed_nor_orphan(tmp_path):
+    """A well-formed id belonging to a DIFFERENT phase is not this phase's business.
+
+    The phase filter still exists and still skips silently -- correctly, because that case is not
+    an error. What changed is only its POSITION: the grammar check now runs before it, so the
+    filter can no longer swallow a token that is not a well-formed id at all.
+    """
+    _tok, rep, _ids = _gate_path(tmp_path, "task\n\nCloses: p186:AC1 p1:AC1")
+    assert rep.returncode == 0, f"another phase's id was treated as an error: {rep.stdout}"
+    assert "p186:AC1" not in rep.stdout, "another phase's id should not be reported at all"
+    assert "p1:AC1" in rep.stdout
 
 
 def test_the_merge_base_it_computed_from_is_disclosed(tmp_path):
@@ -1014,12 +1139,12 @@ def test_task_mode_does_not_write_the_baseline():
 # MEASURED, NOT REASONED (p33:AC4). Mutating `scan_set` to silently skip a declared file,
 # with this test already gone, in a throwaway clone:
 #
-#     control (pristine)                 exit=0  73s   green
-#     mutant: skip scripts/ac-evidence.sh  exit=1  66s
+#     control (pristine)                 exit=0  green
+#     mutant: skip scripts/ac-evidence.sh  exit=1
 #         FAIL gate-jq-only-envelope SELF-COVERAGE: a python invocation planted in
 #         scripts/ac-evidence.sh did not turn the scan red -- that file is DECLARED but
 #         never actually read.
-#     mutant: skip scripts/ac-baseline.sh  exit=1  61s   (same shape, names ac-baseline.sh)
+#     mutant: skip scripts/ac-baseline.sh  exit=1  (same shape, names ac-baseline.sh)
 #     restored                            exit=0        green
 #
 # BOTH halves were mutated separately on purpose. Symmetry in the code is not coverage in the
@@ -1205,7 +1330,7 @@ def test_removing_the_guard_reds_the_fixture(tmp_path):
 
     The guard is the ONLY variable. An earlier shape also deleted the p4:AC10 evidence row, which
     would have produced an identical red with the guard left intact — the test would have measured
-    the deletion, not the resolution (agent B, 2026-08-11).
+    the deletion, not the resolution.
 
     THE REMOVAL NOW HAPPENS IN A COPY. This test used to rewrite the real, tracked
     `scripts/test_exit_zero_claims.py` and put it back in a `finally`. That covers exceptions and

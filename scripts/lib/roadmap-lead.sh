@@ -8,9 +8,9 @@
 #
 # WHAT A "LEAD" IS, defined here because the definition is the feature.
 # The `what` cell of a mainline row routinely runs to hundreds of characters. It is not
-# formless: it already opens with a sentence and then continues. Measured on this repo when
-# the rule was written -- first sentence median 78 columns, p75 136, max 450, while the whole
-# cell has median 953. So the lead EXISTS; nothing marked where it ended.
+# formless: it already opens with a sentence and then continues, and that first sentence is
+# usually short while the whole cell is long.
+# So the lead EXISTS; nothing marked where it ended.
 #
 # The lead is the text before the first of `。` (ideographic full stop), `. ` (a full stop and
 # a space, so `v1.1` is not a sentence end) or `<br>` (this document's own line break). If none
@@ -90,7 +90,7 @@ roadmap_lead_rows() {
     # It is NOT part of the key, so narrowing it cannot silently re-pin every row.
     # `|| true` is load-bearing under `set -o pipefail`: grep exits 1 when a row carries no
     # backlog id -- one row does -- which killed the generator MID-FILE on its first run. It
-    # printed 26 of 52 rows and exited 1; a caller that only checked the row count it got back
+    # printed half the rows and exited 1; a caller that only checked the row count it got back
     # would have pinned half the table and called it a baseline.
     _rl_pref="$(printf '%s' "$_rl_name" | { grep -oE 'B[0-9]+(\.[0-9]+)?' || true; } | head -4 | tr '\n' ' ' | sed 's/ $//')"
 

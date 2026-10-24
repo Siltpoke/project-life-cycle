@@ -2,7 +2,7 @@
 UNCHANGED parser sees.
 
 WHY THIS IS A TEST AND NOT AN INVARIANT. AC-2 was split into three
-separately-falsifiable criteria (story amendment A3): [a] the mainline table's
+separately-falsifiable criteria: [a] the mainline table's
 bytes are unchanged, [b] the new `## ` blocks cut no existing section open, and
 [c] PLC's own two parsers produce byte-identical output across the change.
 [a] and [b] are pure text and live in the gate, in
@@ -17,7 +17,7 @@ like the same job as [a]/[b].**
 
 WHY [a] IS NOT ENOUGH ON ITS OWN — the reason the review's shortcut was rejected.
 Both consumers define a section's body as "after this `## ` heading, up to the
-NEXT `## `" (the downstream consumer, `src/progress/roadmap-parse.ts:96-108`). The new blocks
+NEXT `## `" (a downstream consumer's parser). The new blocks
 are `## ` sections, so one dropped into the middle of an existing section
 truncates that section's body **while every byte of every table row is still
 exactly where it was**. "The table did not change" is necessary, not sufficient.
@@ -128,10 +128,10 @@ def test_insertion_points_are_all_safe(roadmap, baseline):
 def test_control_one_character_in_a_mainline_row(roadmap, baseline):
     """Negative control. If this passes, the bench is not reading the table."""
     # Escapes, not characters: this file is shipped bytes and the CJK rule refuses them
-    # outside docs/. The target text lives in docs/ROADMAP.md, which IS Chinese and stays
+    # outside docs/. The target text lives in docs/ROADMAP.md, which is not ASCII and stays
     # that way, so the control has to name it somehow — U+7EBF is swapped for its variant
     # U+7DBB, a one-character change that must move the fingerprint.
-    mutated = roadmap.replace("\u25cb \u6d41\u7a0b\u7ebf", "\u25cb \u6d41\u7a0b\u7dbb", 1)
+    mutated = roadmap.replace("\u25cb \u793a\u4f8b\u7ebf", "\u25cb \u793a\u4f8b\u7dbb", 1)
     assert mutated != roadmap, "mutation did not apply — the control proves nothing"
     assert _fingerprint(mutated) != baseline
 
@@ -152,7 +152,7 @@ def test_control_heading_inside_the_table(roadmap, baseline):
 
 
 def test_control_fifth_column(roadmap, baseline):
-    """Negative control. Reproduces the measurement that killed Q1's option A."""
+    """Negative control. Reproduces the measurement that ruled out a fifth column."""
     lines = roadmap.split("\n")
     head = next(i for i, l in enumerate(lines) if l.startswith("## 🛣"))
     row = next(i for i in range(head, len(lines)) if lines[i].startswith("| **○"))

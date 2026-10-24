@@ -142,7 +142,7 @@ cmd_extract() {
 
   # Corpus mode: every block is parsed, each record carrying the path and opening line it
   # came from. The loop is fed by a HEREDOC, never a pipe -- a pipe would put the loop in a
-  # subshell and `rc` would die with it, the fail-open this repo has filed twice.
+  # subshell and `rc` would die with it, the fail-open this repo has filed before.
   if [ "$corpus" -eq 1 ]; then
     local rc=0 bpath bopen bclose
     while IFS="$(printf '\t')" read -r bpath bopen bclose; do

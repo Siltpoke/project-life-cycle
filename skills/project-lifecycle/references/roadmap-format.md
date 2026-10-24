@@ -194,16 +194,16 @@ loophole.
 **Why a lead rule and not a length cap.** Twice, a reader opened the progress page and bounced
 off it with the same two words: too long. Both times the text came from this format. A cap was
 rejected because the detail is load-bearing — entries exist to preserve reasoning, and deleting
-it to fit a number is worse than the wall. But the cell was never formless: measured on this
-repo, the `what` cell has a median of 953 characters while its FIRST SENTENCE has a median of
-78. The lead already existed. Nothing marked where it ended, so nothing downstream could show
+it to fit a number is worse than the wall. But the cell was never formless: the `what` cell is
+long while its FIRST SENTENCE is
+short. The lead already existed. Nothing marked where it ended, so nothing downstream could show
 it alone — and a downstream consumer is forbidden to summarise, because a view derived from a
 hand-maintained copy drifts (measured here, not feared). Marking the lead gives a renderer
 something AUTHORED to show, and showing a declared lead is not summarising.
 
 **Enforced as a ratchet, because the honest starting point is bad.** In display columns, on the
-day this rule landed: **49 of 52 name cells and 45 of 52 leads were over the bound.** A rule
-that reds on 45 rows is a rule somebody switches off. So every row is pinned at its current
+day this rule landed: **most name cells and leads were over the bound.** A rule
+that reds on most rows is a rule somebody switches off. So every row is pinned at its current
 width in `.claude/roadmap-lead-baseline.tsv`:
 
 | the row is… | the rule |
@@ -212,12 +212,12 @@ width in `.claude/roadmap-lead-baseline.tsv`:
 | not pinned (new, or renamed — which is the same as edited) | must meet the bound outright |
 
 The pin is keyed on the **name cell**: not on position, and not on the backlog id. Position rots
-on the first reorder. The backlog id was measured rather than assumed and cannot serve — 51 of
-52 rows carry one, one carries none, and one id appears twice. Keying on the name buys the
+on the first reorder. The backlog id cannot serve: not every row carries
+one, and one id can appear twice. Keying on the name buys the
 property for free: renaming a row is touching it, so it stops being grandfathered.
 
 **What this does not do:** it makes no existing row readable. It stops the wall growing and
-makes it countable, and the count is the part that did not exist before. Shortening those 45 is
+makes it countable, and the count is the part that did not exist before. Shortening those rows is
 human work no check can do.
 
 ---

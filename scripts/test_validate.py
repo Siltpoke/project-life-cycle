@@ -3,7 +3,8 @@
 Check 9 ("all .md are valid UTF-8") used to walk the filesystem with
 ``REPO.rglob("*.md")``. In a working copy that can reach orders of magnitude more files than are
 tracked — the remainder being a co-located tool's cache directory,
-a gitignored notes tree, and other dot-directories. Two consequences:
+the ``docs/`` tree (untracked when this was written; tracked since p39), and other
+dot-directories. Two consequences:
 
 1. The validator's verdict depended on unrelated local state it never intended
    to own.
@@ -50,8 +51,11 @@ def test_tracked_md_is_checked(repo: Path) -> None:
 
 
 def test_gitignored_md_is_not_checked(repo: Path) -> None:
-    """The live case: a notes tree kept out of version control, or another
-    tool's cache landing a large number of .md files in a co-located dot-directory. Neither is a deliverable."""
+    """The live case: an ignored directory, and another tool's cache landing many .md files in
+    a co-located dot-directory. Neither is a deliverable. This reason used to name ``docs/`` as
+    the ignored tree; it is tracked now and that rule is retired. What is
+    under test is unchanged and never depended on it — an IGNORED path is skipped, and the
+    fixture below creates its own."""
     (repo / "ignored").mkdir()
     (repo / "ignored/cache.md").write_text("someone else's file\n", encoding="utf-8")
 

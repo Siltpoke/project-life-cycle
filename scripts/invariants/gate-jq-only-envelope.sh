@@ -110,14 +110,20 @@ REPO_ROOT="${1:-$(cd "$HERE/../.." && pwd)}"
 DECLARED="
 scripts/close-gate.sh
 scripts/gen-test-evidence.sh
+scripts/retention-drain.sh
+scripts/lib/fragment-sentinel.awk
 scripts/invariants/changelog-one-heading-per-category.sh
 scripts/invariants/ledger-contract-sync.sh
 scripts/invariants/manifest-version-sync.sh
 scripts/invariants/no-hook-state-tracked.sh
 scripts/invariants/no-icloud-conflict-copies.sh
+scripts/invariants/adoption-rule-single-source.sh
 scripts/backlog-closures.sh
 scripts/invariants/backlog-closure-log.sh
 scripts/invariants/backlog-no-title-markers.sh
+scripts/invariants/where-does-this-go-contract.sh
+scripts/invariants/routers-stay-scoped.sh
+scripts/invariants/sidelines-never-tracked.sh
 scripts/invariants/ci-cd-gates-names-no-mode.sh
 scripts/invariants/documented-snippet-matches-reader.sh
 scripts/invariants/skill-checkset-matches-gate.sh
@@ -129,7 +135,7 @@ scripts/invariants/closed-step-refs-resolve.sh
 scripts/invariants/station-state-consistency.sh
 scripts/invariants/no-cjk-in-shipped-files.sh
 scripts/invariants/roadmap-lead-length.sh
-scripts/invariants/test-input-map-fresh.sh
+scripts/invariants/generator-edges-declared.sh
 scripts/gen-roadmap-lead-baseline.sh
 scripts/lib/closure-corpus.sh
 scripts/lib/roadmap-lead.sh
@@ -138,6 +144,7 @@ scripts/invariants/gate-abort-is-not-success.sh
 scripts/invariants/unreleased-survives-drain.sh
 scripts/invariants/preimage-invisible-to-rollover.sh
 scripts/invariants/guide-map-covers-references.sh
+scripts/invariants/hot-cap-exemption-has-a-reason.sh
 scripts/invariants/tasklist-never-tracked.sh
 scripts/invariants/close-gate-wiring.sh
 scripts/retention-drain.sh
@@ -165,6 +172,10 @@ scripts/invariants/careful-reason-has-no-inference-words.sh
 scripts/invariants/careful-check-reads-worktree.sh
 scripts/invariants/careful-boundary-text-present.sh
 scripts/invariants/step-enforcement-table-current.sh
+scripts/invariants/one-fragment-sentinel-reader.sh
+scripts/invariants/preimage-keep-faces-agree.sh
+scripts/invariants/no-ledger-evidence-under-preimages.sh
+scripts/invariants/growth-declares-a-deletion.sh
 "
 
 # --- the exemption table. One line per file: `<path>|<reason>`. A bare name in a list is
@@ -176,6 +187,7 @@ EXEMPT="
 scripts/invariants/gate-jq-only-envelope.sh|this file -- its matcher regex and every one of its failure strings necessarily spell the token it bans
 scripts/invariants/context-floor-envelope.sh|same shape, plus its self-coverage assertion which PLANTS a python invocation into a fixture on purpose
 scripts/invariants/named-interpreter.sh|one line of prose naming python3 as explicitly OUT of that check's shell-only scope
+scripts/invariants/commands-no-bare-python.sh|same shape as this file: its matcher regex and every one of its failure strings necessarily spell the token it bans, and its EXEMPT list quotes two real call sites verbatim
 "
 
 MD="skills/project-lifecycle/references/close-gate.md"
@@ -312,6 +324,14 @@ EOF
   # This is the stale-list risk the hooks-side envelope check NAMES and does not close. Reads the
   # FILESYSTEM rather than `git ls-files`: a fixture directory is not a repo, and a git-based
   # listing would make this assertion exercise different code from the real run.
+  #
+  # WHAT IT DOES NOT COVER, written here because the sentence above sounds wider than it is: this
+  # walks `$INV_DIR/*.sh` only. A gate dependency that is not an invariant and not a `.sh` joins
+  # the envelope by being ADDED to `DECLARED` by hand and by nothing else -- two arrived in a later phase
+  # (`preimage-keep-faces-agree.sh` executes `retention-drain.sh`;
+  # `mode-provenance-recorded.sh` loads `lib/fragment-sentinel.awk` with `awk -f`), and neither
+  # would ever have been named by this loop. They are declared above. The stale-list risk for
+  # THAT class is open, not closed.
   local found=0 base rel known
   for path in "$root/$INV_DIR"/*.sh; do
     [ -e "$path" ] || continue

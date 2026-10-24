@@ -28,9 +28,9 @@ least alarmed by and most precise about.
 "how bad is it", which is the wrong question — a band-C disclosure and a band-A hole are not units of
 the same thing.
 
-- Band A rows: **14**
+- Band A rows: **15**
 - Band B rows: **12**
-- Band C rows: **11**
+- Band C rows: **13**
 
 ## What this file does not do
 
@@ -68,9 +68,24 @@ next person to widen the fingerprint knows what the candidates are — not becau
 - `skills/project-lifecycle/references/harness-primitives.md`
 - `skills/project-lifecycle/references/review-record.md`
 
-**So: 13 of the rows above sit behind a gate; 23 do not.** That split is not a stage on the way to
+**So: 16 of the rows above sit behind a gate; 24 do not.** (Derived, not counted by hand: 16 rows
+cite `SKILL.md` as their source and `SKILL.md` is the only fingerprinted file, and 16 + 24 reaches
+exactly what the three band counts declare between them. The line read **13** for a while — it was
+stale by one *before*
+the most recent row was added, which nothing in the repository was positioned to notice, since the
+invariant checks the band counts and this sentence is prose outside them. **It went stale a second
+time, the same way, later**, when two more rows were added, taking the declared counts from
+`14/12/12` to `15/12/13`, and left **both** numbers in this sentence one too low. Nothing reddened:
+`growth-declares-a-deletion` reads the three declared counts, and this sentence is not one of them.
+Caught by hand while writing the PR, which is the same detection method that failed the first time,
+so treat the fix as temporary and the gap as unclosed — a sentence derived from numbers a guard does
+check, sitting outside what that guard reads, is the same-fact-in-two-places family and
+wants a mechanism rather than a third correction. Note that the fix cannot simply restate the sum
+either: this file's own rule is per-band counts and never their total, and the guard enforces that
+against the header region, which is how the first draft of this correction reddened.) That split is not a
+stage on the way to
 full coverage — it is the current, deliberate state, chosen because both candidate files change
-often enough (measured over 60 days: 76 commits to `SKILL.md`, 39 to `close-gate.md`) that a
+often enough that a
 whole-file fingerprint would fire on ordinary edits, and a gate that fires on ordinary edits gets
 routed around. Widening it means bracketing regions inside `close-gate.md`, where the rows are
 spread across sections hundreds of lines long and every bracket boundary would be an arbitrary
@@ -99,6 +114,7 @@ is blank on purpose: **there is nobody**. That blankness is the finding.
 | AC-reference discipline for journal / review-finding / evidence-row | A | none | the test-name kind ships | the other three link-bearing kinds are unshipped (filed) | nobody | `close-gate.md:1388` |
 | the grandfathering baseline shrinks over time | A | none | what remains is printed every run | nothing forces it to shrink; printing is the whole mitigation | nobody | `close-gate.md:1595` |
 | `turns` / `tokens_est` / `cognition_loaded` accuracy | A | none | none | all three are self-reported estimates | nobody | `cognition.md:341` |
+| a side discovery is captured when it surfaces | A | none | none | nothing can see a discovery that was never written down, so a phase that captured nothing and a phase that forgot leave the same file. This is the design's one deliberately unenforced act, because no surface here can enforce it — a `PreToolUse` hook is handed one tool call and never the phase's theme, and the `Stop` hook cannot block | nobody | `references/where-does-this-go.md` |
 
 ## Band B — an enforcer exists, and it says it cannot be relied on
 
@@ -131,19 +147,21 @@ reads the surrounding prose as wider than the check actually is.**
 | tests ran before this push | C | close-gate check #7 | the evidence file is unchanged since it was generated | not proof a test ran; a hand-authored file with a valid header passes | whoever reads row 7 as "the suite is green" | `SKILL.md:112` |
 | risky changes get the careful treatment | C | `careful-paths` | paths you marked, plus three fixed signals | does not claim to find every risky change; decision is by path, never by what the change did | whoever expects risk detection | `SKILL.md:250` |
 | the drain lists real entries | C | retention drain | `^## ` matched line-wise | a `## ` line inside a fenced code block lists as an entry; a heading ending in `Index` is excluded file-wide | whoever trusts the entry count | `retention.md:868` |
-| docs do not grow unbounded | C | retention size caps | caps on size and a 50K coverage floor | blind to many-small-files growth; measured, 596 of 610 docs sat below every threshold | whoever reads a green cap as "docs are bounded" | `close-gate.md:52` |
+| docs do not grow unbounded | C | retention size caps | caps on size and a 50K coverage floor | blind to many-small-files growth: most docs sit below every threshold | whoever reads a green cap as "docs are bounded" | `close-gate.md:52` |
 | the journal fragment is fresh | C | close-gate check #5 | freshness on the hot path | not asserted on the archive path: the archive's mtime belongs to the drain, not the phase | whoever closes right after a drain | `close-gate.md:34` |
 | the journal carries FACT content | C | journal-touched check | some file in the journal range changed | it does not prove that file carries the FACT content | whoever reads the touch as content | `close-gate.md:34` |
 | every criterion has a working oracle | C | `ac-oracle-binding` | each criterion HAS an oracle | never proves the oracle is correct; an exclusion self-destructs only when its condition fails, never when its reasoning was wrong | whoever reads "bound" as "verified" | `close-gate.md:61` |
 | the context-floor hook is wired | C | gate wiring check | jq was resolvable when the gate ran | may not say the hook works, will run, or is verified; it does not parse the hooks array, so a name in a comment or in `disabledHooks` still prints the same mark | whoever reads the mark as "wired" | `close-gate.md:384` |
 | test names carry proper AC references | C | reference-discipline check | the shipped kind is checked | a green row does not mean the repo's test files are clean; measured, 39 carry a bare AC id | whoever reads green as clean | `close-gate.md:1391` |
 | a sweep deleted the right thing | C | sweep teeth | net-negative LOC direction | does not check whether the sweep deleted the right thing; the teeth stop a mislabelled add, nothing more | whoever reads a passing sweep as a correct sweep | `close-gate.md:2312` |
+| every captured side discovery has a landing at phase close | C | `close-gate.sh` row 13 (`sidelines`), armed by the `sidelines` manifest key | in `phase`: the queue file exists, no line is still `untriaged` (or `- [none]` is present), every `refused` carries a `class:` and every `declined` a `why:`. In `task`: well-formedness only, because requiring a drain on the push path would make capturing one line block the next push | it reads DECLARATIONS. It cannot see a discovery nobody wrote down, so `- [none]` is a statement and not a verified fact — the companion Band A row above is that hole. An unarmed adopter has the row printed as SKIPPED, never as a pass | the phase that captured it | `references/where-does-this-go.md`, `SKILL.md` check-set row 13 |
+| net growth on a counted surface records what it cost | C | `growth-declares-a-deletion` | per surface, the declared growth is at least the measured growth, over three counters: `*.md` directly under `skills/*/references/`, `*.md` directly under `commands/`, and the declared band total of this table | **it never judges whether a declaration is true** — `cannot-delete: nothing, actually` passes. It never counts lines (that face was measured and rejected). **Net zero records nothing**: five added and five removed on one surface owes no declaration, so neither half is written down. `steps` means **census rows**, not steps a human performs. Blind to blocking points, which is the weight actually reported (that number is prose, so nothing can read it); to untracked references; to any surface not among the three enumerated in the script; and to a `GROWTH`-shaped line written as an example, including inside a code fence. An untracked journal fragment is accepted, so a declaration that never ships can green a local run | whoever reads a declared `cannot-delete:` as evidence that nothing was removable | `SKILL.md` § Documentation & traceability |
 
 ---
 
 ## Provenance
 
-Every row was verified by opening its cited line, not by accepting a summary. Every row was checked against its cited line. The verification pass,
+Every row was verified by opening its cited line, not by accepting a summary. The verification pass,
 including five corrections made during it, is recorded outside this repository.
 
 Five rows in band A (`user-story.md`, smoke artifacts, acceptance verifier, ADR, cognition capture)

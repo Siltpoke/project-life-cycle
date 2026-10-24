@@ -25,8 +25,8 @@ import pytest
 # The subject calls bare `git` from PATH, so a harness that can only find it at one absolute path
 # is LESS portable than the thing it tests -- it would fail on a host where git lives elsewhere,
 # and fail before reaching the awk/grep behaviour these tests exist to exercise. Prefer the absolute
-# path when it is there (this repository routes shell `git` through a token-filtering proxy that has
-# been measured rewriting output), fall back to PATH when it is not.
+# path when it is there (a shell wrapper on PATH can rewrite git's output), fall back to PATH when
+# it is not.
 GIT = "/usr/bin/git" if Path("/usr/bin/git").exists() else (shutil.which("git") or "git")
 
 REPO = Path(__file__).resolve().parent.parent

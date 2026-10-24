@@ -77,9 +77,9 @@ def declaration_docs() -> list[Path]:
 # The plan's stated first assertion for this task.
 
 
-@pytest.mark.skipif(not DOCS.is_dir(), reason="gitignored docs/ absent (fresh clone or CI)")
+@pytest.mark.skipif(not DOCS.is_dir(), reason="skipped where docs/ is absent")
 def test_regression_every_existing_declaration_still_parses_alone() -> None:
-    """Fourteen documents today, each read the way the gate reads it: one block, default
+    """Every such document, each read the way the gate reads it: one block, default
     mode, no flags. A single unrecognised-line mistake in one line turns all of them red."""
     files = declaration_docs()
     assert len(files) >= 10, f"the corpus is smaller than expected: {files}"
@@ -96,7 +96,7 @@ def test_regression_every_existing_declaration_still_parses_alone() -> None:
     assert total >= 20, f"only {total} records across {len(files)} documents"
 
 
-@pytest.mark.skipif(not DOCS.is_dir(), reason="gitignored docs/ absent (fresh clone or CI)")
+@pytest.mark.skipif(not DOCS.is_dir(), reason="skipped where docs/ is absent")
 def test_regression_whole_corpus_reads_in_one_pass() -> None:
     """The mode the corpus-wide validators need. Same fourteen documents, read together, which default mode
     refuses by design (`exactly one is allowed`)."""
@@ -266,7 +266,7 @@ def test_corpus_does_not_renumber_the_fields_a_reader_depends_on(tmp_path: Path)
 
 def test_corpus_propagates_a_failure_instead_of_failing_open(tmp_path: Path) -> None:
     """A loop fed by a pipe would run in a subshell and lose `rc`; the heredoc is what
-    keeps this red. Filed twice in this repo as a fail-open, so it is asserted, not
+    keeps this red. Filed in this repo as a fail-open, so it is asserted, not
     assumed."""
     good = doc(tmp_path, "good.md", "closed: B9001")
     bad = doc(tmp_path, "bad.md", "this is not an entry")

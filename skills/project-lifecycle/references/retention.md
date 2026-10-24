@@ -1,6 +1,6 @@
 # Document retention — the hot/cold model
 
-A long-running project's `docs/` tree can reach tens of megabytes across hundreds of files, with individual hot docs and single journal months each hundreds of kilobytes — while every ring/slicing/archive mechanism is already running. The failure is not absence of mechanism; it is **coverage + regrowth**: new append-only docs escape the net, and docs that are being maintained still creep back up between maintenance passes. This reference is the fix — a small set of dual-limit caps, a coverage-discovery net, and a deterministic drain that runs at the one moment nothing else is competing for attention: milestone close. Every transition below is **event-triggered off the existing lifecycle** (phase-done, milestone-done), never a calendar chore a human has to remember.
+A long-running project's `docs/` tree can grow very large across many files, with individual hot docs and single journal months each growing large — while every ring/slicing/archive mechanism is already running. The failure is not absence of mechanism; it is **coverage + regrowth**: new append-only docs escape the net, and docs that are being maintained still creep back up between maintenance passes. This reference is the fix — a small set of dual-limit caps, a coverage-discovery net, and a deterministic drain that runs at the one moment nothing else is competing for attention: milestone close. Every transition below is **event-triggered off the existing lifecycle** (phase-done, milestone-done), never a calendar chore a human has to remember.
 
 ## The three tiers
 
@@ -41,7 +41,7 @@ The known set = files referenced by `.claude/close-gate.json` manifest keys, plu
 ⚠ coverage: docs/some-new-doc.md (62K) not in retention net — add to manifest known set or archive it
 ```
 
-This is the row that answers the failure mode that matters: a brand-new append-only doc (a second qa-log, a per-feature notes file, anything) can grow to tens of megabytes unnoticed because no existing check was ever wired to watch it. Coverage discovery watches the filesystem, not a fixed list — a new doc can't opt out just by not being named anywhere.
+This is the row that answers the failure mode that matters: a brand-new append-only doc (a second qa-log, a per-feature notes file, anything) can grow very large unnoticed because no existing check was ever wired to watch it. Coverage discovery watches the filesystem, not a fixed list — a new doc can't opt out just by not being named anywhere.
 
 ## The drain algorithm
 
@@ -136,6 +136,15 @@ gk()  { [ -f "$M" ] && jq -r --arg k "$2" ".retention.$1[\$k] // empty" "$M" 2>/
 gka() { [ -f "$M" ] && jq -r --arg k "$2" ".retention.$1[\$k][]? // empty" "$M" 2>/dev/null; }
 
 AD="$(g archive_dir)"; AD="${AD:-docs/archive}"
+# TRAILING SLASHES ARE STRIPPED, and it is not cosmetic. `$PID` is built by appending to `$AD`, so
+# `archive_dir: "docs/archive/"` yields `docs/archive//.pre-images` -- a string that no path
+# produced by `find` is ever equal to or prefixed by. Every place that EXCLUDES the ring by
+# comparing against `$PID` then excludes nothing, and the last-copy check's durable set silently
+# starts containing the ring: it finds every fragment in some older slot and refuses nothing. That
+# is the fails-open mutant the second negative control exists for, reachable through configuration instead of a
+# source edit. Normalise once, here, rather than at each comparison -- a rule applied at N sites is
+# a rule that will be applied at N-1.
+while :; do case "$AD" in */) AD="${AD%/}" ;; *) break ;; esac; done
 case "$AD" in
   docs/*) : ;;
   *) echo "⚠ retention.archive-dir '$AD' outside docs/ — config error, falling back to docs/archive"; AD="docs/archive" ;;
@@ -144,7 +153,15 @@ JD="$(g journal_dir)"; JD="${JD:-docs/journal.d}"
 QD="$(g qa_log_dir)"; QD="${QD:-docs/qa-log.d}"
 KEEP=3   # active + 2 most recent closed '## ' entries — the LAST 3 headings of the source
 
-mkdir -p "$AD" || { echo "✗ cannot create archive dir $AD"; exit 1; }
+# NOT FOR `config`. This runs at load, BEFORE the command is parsed, so
+# `retention-drain.sh config preimage_keep` used to CREATE `docs/archive` on a tree that has none --
+# while the accessor's own header calls itself read-only and `preimage-keep-faces-agree.sh` runs it
+# inside the close gate. "It moves no bytes" was true; "read-only" was not, and a gate with an
+# undeclared filesystem side effect is something this repo would otherwise find out about later.
+case "${1:-}" in
+  config) : ;;
+  *) mkdir -p "$AD" || { echo "✗ cannot create archive dir $AD"; exit 1; } ;;
+esac
 
 # newline-guard: never let an append land glued to the previous line
 ensure_trailing_nl() {
@@ -160,12 +177,36 @@ pointer_stub() { # $1 = archive path   $2 = ordering note for the archived conte
 # ── pre-image ────────────────────────────────────────────────────────────────────
 # A drain that FAILS is safe: the archive append is byte-verified before the source is
 # touched. The dangerous run is the one that succeeds at the wrong thing — every check
-# passes, the wrong bytes move, and where docs/ is gitignored git recovers neither file. The
-# pre-image is the byte-for-byte state of every file a drain is about to mutate, captured
-# before it mutates them, so `restore` can put the tree back exactly.
+# passes and the wrong bytes move. git is the cold-storage path for that case, and the SCOPE
+# of that sentence is the whole point: git recovers a mutated file only where the drain's
+# corpus is TRACKED, and only as of its last commit. This repo has tracked docs/ since p39,
+# so here git is a real second copy for anything already committed — but not for an
+# uncommitted edit, and not at all for an adopter who keeps its docs out of git.
+# The reason that used to sit here read:
+# > the wrong bytes move, and docs/ is gitignored so git recovers neither file
+# True when written, retired by p39, and quoted rather than deleted: an unrecorded deletion is
+# how the next reader rebuilds the wrong story out of the gap.
+# The pre-image is the byte-for-byte state of every file a drain is about to mutate, captured
+# before it mutates them, so `restore` can put the tree back exactly — which is what keeps this
+# store load-bearing even where git IS a second copy.
 PID="$AD/.pre-images"          # the store: numbered slots, never timestamped (a timestamp can collide)
 PIX="$AD/.pre-images.log"      # the receipt — OUTSIDE the store on purpose, see below
 PIKEEP="$(g preimage_keep)"; case "$PIKEEP" in ''|*[!0-9]*) PIKEEP=5 ;; esac
+# FLOORED AT 1, BY REFUSING RATHER THAN BY CORRECTING. `preimage_keep: 0` means "keep no undo at
+# all": the prune would evict every slot including the one this run just captured, so the drain
+# would run with no way back -- the single state this script refuses everywhere else. Silently
+# reading 0 as 5 would be the other kind of wrong: a declaration that does not do what it says,
+# which is what the faces-agree invariant exists to stop. So it is an exit, and it names the key.
+# `config` is exempt from the refusal below, and that exemption is load-bearing rather than tidy:
+# the accessor's job is to REPORT the effective value, including a value that is out of range, so
+# the declaration-time check can say "the effective value is 0" instead of "the accessor failed".
+# Refusing here for every invocation would make that check's own floor branch unreachable, and an
+# unreachable branch is an unguarded one. The drain paths still refuse.
+if [ "$PIKEEP" -lt 1 ] && [ "${1:-}" != "config" ]; then
+  echo "✗ retention.preimage_keep is $PIKEEP — a ring that keeps nothing is a drain with no undo"
+  echo "  Declare at least 1 in .claude/close-gate.json (and in CLAUDE.md's retention: block)."
+  exit 1
+fi
 PI_CAPTURED=0                  # one slot per invocation, not per internal call
 PI_KEY=""                      # the slot this invocation captured, for failure messages to name
 PI_PROTECT=""                  # a key the prune may never evict (the one being restored)
@@ -288,6 +329,142 @@ preimage_next_key() {
   printf '%04d\n' $((max + 1))
 }
 
+# ── last-copy refusal ────────────────────────────────────────────────────────────
+# The ring is an undo buffer, and an undo buffer holding the ONLY copy of something is not an undo
+# buffer any more -- it is unacknowledged primary storage with a delete queue `preimage_keep` deep.
+# So before an eviction destroys a slot, every fragment-source file in that slot is checked for a
+# copy OUTSIDE the ring, and a slot holding a last copy is refused rather than evicted.
+#
+# CONTENT, NOT A MARKER. The drain writes `<!-- fragment: <path> -->` above each block it appends,
+# and that marker is keyed by PATH: this repo's live state holds fragments whose marker is present
+# while the archived bytes differ. A marker-only test would report a copy that is not there, which
+# is the fail-OPEN direction -- it would delete the thing it was asked to protect.
+#
+# WHAT COUNTS AS A COPY, MEASURED AND NOT ASSUMED -- the first version of this check got this wrong
+# in the direction that bricks the drain. A fragment does NOT survive archival as one contiguous
+# run of lines inside one file, for two independent reasons:
+#   [1] `drain_monolith` slices the monolith entry-by-entry and reassembles NEWEST-FIRST, so a
+#       fragment's own entries come back in a different order with other phases' entries between
+#       them. Every byte is present; the fragment-shaped run is not.
+#   [2] `check_rollover` segments an archive with `split -l 2000`, which cuts at a LINE COUNT and
+#       therefore cuts THROUGH entries -- one segment can end mid-entry and the next carry
+#       the rest. No single file holds that entry contiguously; the series does.
+# Whole-file contiguity scored most ring fragments as last copies while every one
+# of them was in the archive.
+# The refusal would have blocked the next drain and every `restore`.
+# So: the needle is split at `## ` boundaries and EVERY block must appear contiguously in some
+# durable STREAM, where a `part-??.md` series counts as ONE stream because `split -l` is exactly
+# what cut it into files.
+#
+# WHERE THE DURABLE SET COMES FROM, and the one exclusion that keeps the check from being vacuous:
+# the drain's own config -- the hot qa-log monolith, the live fragment directories, and every `.md`
+# under `$AD` -- MINUS `$PID`, which lives INSIDE `$AD`. A set built recursively over `$AD` would
+# find every fragment in some older slot, never refuse once, and look exactly like a check that
+# works. That mutant is a required control, not a hypothetical.
+#
+# The live fragment directories are in the set deliberately: a pre-drain snapshot of a document
+# still sitting in `$QD`/`$JD` is not a last copy and must not block.
+#
+# $1 = a scratch directory the caller owns. Prints one path per stream; a segment series is
+# materialised there as a single concatenation in `LC_ALL=C` suffix order, which is the order
+# `split -l` assigned and therefore the order that reconstructs what it cut.
+durable_streams() {
+  local out="$1" f d series p i=0
+  [ -f docs/brainstorming-qa-log.md ] && printf '%s\n' docs/brainstorming-qa-log.md
+  for f in "$QD"/*.md "$JD"/*.md; do [ -f "$f" ] && printf '%s\n' "$f"; done
+  [ -d "$AD" ] || return 0
+  while IFS= read -r d; do
+    [ -n "$d" ] || continue
+    case "$d" in "$PID"|"$PID"/*) continue ;; esac
+    series="$(find "$d" -maxdepth 1 -type f -name 'part-??.md' 2>/dev/null | LC_ALL=C sort)"
+    if [ -n "$series" ]; then
+      i=$((i + 1))
+      : > "$out/series$i"
+      while IFS= read -r p; do [ -n "$p" ] && cat "$p" >> "$out/series$i"; done <<EOF
+$series
+EOF
+      printf '%s\n' "$out/series$i"
+    fi
+    while IFS= read -r p; do
+      [ -n "$p" ] || continue
+      case "${p##*/}" in part-??.md) continue ;; esac
+      printf '%s\n' "$p"
+    done <<EOF
+$(find "$d" -maxdepth 1 -type f -name '*.md' 2>/dev/null | LC_ALL=C sort)
+EOF
+  done <<EOF
+$(find "$AD" -type d 2>/dev/null | LC_ALL=C sort)
+EOF
+  return 0
+}
+
+# Does every `## `-delimited block of this file appear CONTIGUOUSLY in some one of the given
+# streams? Per BLOCK, not per file, because an entry is the unit the archive moves: see the
+# measurement above. Blocks may land in different streams; what may not happen is a block that is
+# nowhere.
+#
+# ERROR DIRECTION, stated because it is a choice and not an accident: the scan backtracks naively,
+# so a pattern whose own prefix recurs inside itself can be MISSED. A miss reads as "no copy
+# outside the ring", which REFUSES the eviction. THE COST OF A REFUSAL IS THE WHOLE DRAIN, not one
+# kept slot: `preimage_prune` returning 1 makes `capture_preimage` return 1, which makes the drain
+# exit non-zero having moved zero bytes. The earlier version of this sentence said the cost was
+# "a kept slot, never a deleted one" -- narrower than the consequence, in the comment whose only
+# job is to state the consequence. The direction is still the right one, because the other
+# direction deletes; it is not the cheap one.
+#
+# An empty file reports as copied, because evicting it loses nothing.
+content_copied_outside_ring() { # $1 = needle file, rest = streams to search
+  local needle="$1"; shift
+  [ -s "$needle" ] || return 0
+  [ "$#" -gt 0 ] || return 1
+  awk '
+    FNR == NR {
+      if ($0 ~ /^## /) nb++
+      if (nb == 0) nb = 1
+      len[nb]++; blk[nb SUBSEP len[nb]] = $0
+      next
+    }
+    FNR == 1 { for (b = 1; b <= nb; b++) if (!done[b]) m[b] = 0 }
+    {
+      for (b = 1; b <= nb; b++) {
+        if (done[b]) continue
+        if ($0 == blk[b SUBSEP (m[b] + 1)]) { if (++m[b] == len[b]) done[b] = 1 }
+        else m[b] = ($0 == blk[b SUBSEP 1]) ? 1 : 0
+      }
+    }
+    END {
+      for (b = 1; b <= nb; b++) if (!done[b]) exit 1
+      exit 0
+    }
+  ' "$needle" "$@"
+}
+
+# $1 = slot key, $2.. = the durable streams. Prints the first fragment-source path in that slot
+# whose content exists nowhere outside the ring, and exits 0. Exits 1 when the slot is safe to
+# evict. The streams are built ONCE per prune by the caller: materialising them per victim would
+# re-concatenate the whole archive for every file in every slot.
+slot_holds_last_copy() {
+  local dir="$PID/$1/files" f rel
+  shift
+  [ -d "$dir" ] || return 1
+  local hay=("$@")
+  # No durable file at all means nothing is copied anywhere, so every fragment in the slot is a
+  # last copy. Reported as the first one found rather than treated as "nothing to check".
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    rel="${f#"$dir"/}"
+    case "$rel" in "$QD"/*|"$JD"/*) ;; *) continue ;; esac
+    if [ "${#hay[@]}" -gt 0 ]; then
+      content_copied_outside_ring "$f" "${hay[@]}" && continue
+    fi
+    printf '%s\n' "$rel"
+    return 0
+  done <<EOF
+$(find "$dir" -type f -name '*.md' 2>/dev/null | sort)
+EOF
+  return 1
+}
+
 # Runs AFTER a successful capture, never before. Pruning first and then refusing would
 # destroy the oldest pre-image on behalf of a drain that never happened.
 preimage_prune() {
@@ -301,12 +478,63 @@ preimage_prune() {
   # eat its own source — F20 restores KEEP_N+1 times from a single key and would fail on the
   # fourth without this. Skipping it can leave one extra generation on disk; that is the correct
   # trade, because the alternative is losing the generation someone is actively using.
-  printf '%s\n' "$slots" | while IFS= read -r d; do
-    [ "$excess" -gt 0 ] || break
+  # THE VICTIM LIST IS DECIDED ONCE, IN THIS SHELL, and both the check and the eviction read it.
+  # The old loop ran inside `printf | while`, a subshell -- a refusal raised there could not reach
+  # the caller, and this function ended `return 0` regardless. Deciding the list first takes the
+  # subshell off the refusal's path instead of trying to carry a status out of one.
+  local victims=() left="$excess" blocked
+  while IFS= read -r d; do
+    [ "$left" -gt 0 ] || break
     [ -n "$d" ] || continue
     [ "$d" = "$PI_PROTECT" ] && continue
+    victims+=("$d")
+    left=$((left - 1))
+  done <<EOF
+$slots
+EOF
+  [ "${#victims[@]}" -gt 0 ] || return 0
+  # THE STREAMS ARE BUILT ONCE for the whole prune, in a scratch directory this function owns and
+  # removes on every path out from here down. A segment series is concatenated there, so a block
+  # `split -l` cut across two files is contiguous again -- see the measurement on `durable_streams`.
+  local sdir hay=()
+  sdir="$(mktemp -d "${TMPDIR:-/tmp}/plc-durable-XXXXXX")" || {
+    echo "✗ cannot create a scratch directory for the last-copy check — refusing to prune"
+    return 1
+  }
+  while IFS= read -r d; do [ -n "$d" ] && hay+=("$d"); done <<EOF
+$(durable_streams "$sdir")
+EOF
+  # EVERY victim is checked before ANY is evicted. Checking and deleting in one pass would leave a
+  # partial eviction behind the refusal, so the refusal would have already destroyed something.
+  for d in "${victims[@]}"; do
+    blocked="$(slot_holds_last_copy "$d" "${hay[@]+${hay[@]}}")" || continue
+    echo "✗ pre-image slot $d holds the only copy of $blocked — refusing to evict it"
+    echo "  The ring is an undo buffer, not storage. Get that content into a durable file (a"
+    echo "  qa-log drain compiles a fragment into the hot monolith) and run again, or raise"
+    echo "  retention.preimage_keep. Nothing was evicted and nothing was drained."
+    preimage_log "$d" "prune" "REFUSED" "last copy: $blocked"
+    rm -rf "${sdir:?}"
+    return 1
+  done
+  rm -rf "${sdir:?}"
+  # ONE RECEIPT LINE PER EVICTED SLOT, and it is counted and sized BEFORE the slot is gone --
+  # afterwards there is nothing left to measure, which is the whole reason an eviction needs its
+  # own line rather than an inference from a missing directory.
+  #
+  # THE STATUS IS NOT `OK`. `OK` means a capture happened today, and reusing it for an eviction
+  # makes every reader that counts captures wrong -- a count of OK lines that no longer matches
+  # the slots on disk.
+  #
+  # KNOWN LIMIT, documented rather than fixed: `preimage_log` swallows a write failure by design,
+  # so a drain never dies for want of a receipt line. An eviction can therefore happen without its
+  # line. That is the declared trade (a missing receipt must never be why a drain dies), and it is
+  # why the line is written where the eviction is, not somewhere a reader could mistake for proof.
+  local paths bytes
+  for d in "${victims[@]}"; do
+    paths="$(find "${PID:?}/$d" -type f 2>/dev/null | grep -c . || true)"
+    bytes="$(find "${PID:?}/$d" -type f -exec cat {} + 2>/dev/null | wc -c | tr -d ' ')"
+    preimage_log "$d" "prune" "EVICTED" "${paths:-0} paths, ${bytes:-0} bytes destroyed"
     rm -rf "${PID:?}/$d"
-    excess=$((excess - 1))
   done
   return 0
 }
@@ -371,7 +599,16 @@ capture_preimage() {
   else
     preimage_log "$key" "$mode" "OK" "$n paths → $slot"
   fi
-  preimage_prune
+  if ! preimage_prune; then
+    # The slot just published is the undo for a drain that will NOT happen, so it goes away rather
+    # than growing the ring by one on every refused attempt -- the refusal has to be repeatable
+    # without changing the thing it is protecting. Same reason the prune runs after the capture
+    # and never before: nothing in the store should belong to a drain that did not run.
+    rm -rf "${PID:?}/$key"
+    PI_CAPTURED=0; PI_KEY=""
+    preimage_log "$key" "$mode" "REFUSED" "slot removed: the prune refused, so this capture belongs to a drain that will not happen"
+    return 1
+  fi
   return 0
 }
 
@@ -1237,24 +1474,118 @@ check_rollover() {
   dated=$(awk '/^## / && $0 !~ /Index[[:space:]]*$/ && /[0-9][0-9][0-9][0-9]-[0-9][0-9]/ { c++ } END { print c+0 }' "$archive")
   if [ "$entries" -gt 0 ] && [ "$entries" -eq "$dated" ]; then
     # every entry heading carries a date → split by month into YYYY-MM.md segments
+    # EVERY line reaches a segment, including the ones ABOVE the first entry heading. The rule is
+    # "a line belongs to the segment named by the nearest PRECEDING heading", and the shape this
+    # replaces wrote nothing at all while no heading had been seen yet -- so the archive's own
+    # title, its `## 📑 Index` heading (excluded from the match on purpose), every TOC bullet the
+    # drain had just regenerated, and the `---` separator were dropped by a step whose whole
+    # contract is a verbatim move. MEASURED on the tracked script with an 8-entry fixture whose
+    # archive holds 5: 10 lines reached no segment. A fragment marker sitting in that region goes
+    # with them, and that is the one way a roll-over can turn an observed stage into a missing one.
+    #
+    # WHAT THAT COSTS, measured rather than left for the next reader to discover: the held region
+    # is mostly the archive's own GENERATED header, so it now travels into a segment instead of
+    # being dropped. First roll-over: 8 such lines (the title, `## 📑 Index`, the five then-current
+    # TOC bullets, `---`) land in the segment named by the archive's first dated heading. Each
+    # LATER roll-over adds exactly ONE more line that this change is responsible for: the previous
+    # run's stub TITLE. Its pointer-stub line was already travelling before this change -- it sits
+    # after the last heading, so the old rule printed it too, measured on a reverted copy as 0
+    # titles and 1 pointer after a second roll-over. The title lands in the segment of the first
+    # dated heading, which can be the same file twice across two roll-overs. Bounded, and the
+    # second-roll-over fixture in the drain suite is what keeps that from being a stale comment.
+    #
+    # THE NARROWER RULE WAS REJECTED ON ERROR DIRECTION, not on effort. Recognising the drain's own
+    # generated shapes and holding only the rest needs five matchers, one of them the TOC bullet
+    # `- ...`, which is a shape ordinary content uses. That would trade two generated lines per
+    # roll-over for a chance of deleting a content line, in a function whose every other ambiguity
+    # is resolved the other way. An independent review raised the accumulation; this is the answer
+    # to it, and the fixture is the part that cannot go stale.
+    #
+    # The other branch of this same function (`split -l`, below) has always moved those lines.
+    # Two branches of one verbatim-move contract disagreeing is what makes this a defect rather
+    # than a layout choice -- so the comparison is a test, not this paragraph.
+    #
+    # HELD, not written to a default segment: the first heading decides where they go, so nothing
+    # has to invent a name for a segment that has not been named yet. The END refusal below is
+    # unreachable while this branch is entered only with at least one DATED heading present; it is
+    # there so a silent drop cannot come back if that condition changes.
+    #
+    # WHAT THIS DELIBERATELY DOES NOT DO: move a marker back next to the block it names. In an
+    # archive a marker is already not above its own block -- `drain_monolith` slices entries from
+    # heading to heading, so a marker sits at the tail of the PREVIOUS entry, and the newest-first
+    # reassembly then reorders those entries. Measured on this fixture: the marker naming the
+    # 2026-02 fragment ends up at the tail of `2026-01.md`. Any "keep it with the heading below"
+    # rule here would move such a line to a second wrong file while reading as if it had fixed
+    # something. The adjacency is lost upstream, at eviction, which is filed rather than widened
+    # into this task.
     awk -v segdir="$stage" '
+      function flush(dest,   i) { for (i = 1; i <= nheld; i++) print held[i] >> dest; nheld = 0 }
       /^## / && $0 !~ /Index[[:space:]]*$/ {
         m = $0
         if (match(m, /[0-9][0-9][0-9][0-9]-[0-9][0-9]/)) mo = substr(m, RSTART, 7)
         out = segdir "/" mo ".md"
+        flush(out)
       }
-      out != "" { print >> out }
+      out == "" { held[++nheld] = $0; next }
+      { print >> out }
+      END { if (nheld > 0) exit 1 }
     ' "$archive" \
       || { echo "✗ roll-over month split failed for $archive"; rm -rf "$stage"; return 1; }
   else
     # undated (or mixed) headings → deterministic LINE-COUNT chunk split, same mechanic
-    # as drain_legacy — never an "undated.md" catch-all segment
-    split -l 2000 "$archive" "$stage/part-" \
+    # as drain_legacy — never an "undated.md" catch-all segment.
+    #
+    # THE PIECES CONTINUE THE SEQUENCE; THEY DO NOT REUSE ITS NAMES. `split -l … "$stage/part-"`
+    # restarts at `part-aa` every time, and the rename to `part-aa.md` then OVERWRITES the seeded
+    # copy of the segment an earlier roll-over wrote. So this branch DESTROYED history while the
+    # month branch above, which appends into the same seeded copy, preserved it -- two branches of
+    # one verbatim-move contract disagreeing, which the comment above already calls a defect
+    # rather than a layout choice. It was measured, not reasoned: a close drain
+    # rolled the qa-log archive over a second time and entry headings stopped
+    # existing anywhere in the working tree (archive segments were
+    # rewritten), leaving the pre-image ring as the only copy -- in the phase whose whole subject
+    # is that the ring is an undo buffer and not evidence. git held the content, which is the
+    # cold-storage path this phase rewrote this file's own comment to name.
+    #
+    # So: split into a scratch directory, then move each piece to the suffix that CONTINUES the
+    # ones already staged -- `n_existing + k`, a count, not a search for the lowest unused name.
+    # Said precisely because the difference is observable: against a non-contiguous set
+    # (`part-aa`, `part-ac`) the computed target is `part-ac`, which exists, and this refuses
+    # instead of filling the free `part-ab`. That is the fail-CLOSED direction and it is the one
+    # to be on in this branch, where silently reusing a name is exactly what went wrong -- but
+    # "the next free suffix", which this comment used to say, describes a search the code does
+    # not do. The no-overwrite property is an assertion below, not an assumption.
+    local newdir="$stage/.split" n_existing=0 k=0 target hi lo
+    # The suffix alphabet is a plain string sliced with parameter expansion, not `cut -c`: that
+    # utility counts CHARACTERS per the ambient locale, and this repo already paid for one
+    # locale-dependent truncation (`plc_utf8_head`/`plc_utf8_tail` exist because of it). The
+    # input here is ASCII, so `cut -c` would in fact be correct -- the rule it would violate is
+    # attached to the SHAPE, and an exemption for the whole drain would hide the next real one.
+    local alpha="abcdefghijklmnopqrstuvwxyz"
+    mkdir -p "$newdir" \
+      || { echo "✗ cannot stage the chunk split for $archive"; rm -rf "$stage"; return 1; }
+    split -l 2000 "$archive" "$newdir/part-" \
       || { echo "✗ roll-over chunk split failed for $archive"; rm -rf "$stage"; return 1; }
-    for s in "$stage"/part-*; do
-      case "$s" in *.md) : ;; *) mv "$s" "$s.md" \
-        || { echo "✗ rename failed for $s"; rm -rf "$stage"; return 1; } ;; esac
+    for s in "$stage"/part-*.md; do [ -f "$s" ] && n_existing=$((n_existing + 1)); done
+    for s in "$newdir"/part-*; do
+      [ -f "$s" ] || continue
+      # Two-letter suffixes in `split`'s own order, continued: aa, ab, … zz. 676 segments is a
+      # refusal rather than a wrap, because a wrapped name is an overwrite wearing a new label.
+      if [ $((n_existing + k)) -ge 676 ]; then
+        echo "✗ $segdir already holds 676 segments — refusing to roll over $archive"
+        rm -rf "$stage"; return 1
+      fi
+      hi=$(( (n_existing + k) / 26 )); lo=$(( (n_existing + k) % 26 ))
+      target="$stage/part-${alpha:hi:1}${alpha:lo:1}.md"
+      if [ -e "$target" ]; then
+        echo "✗ roll-over would overwrite $target — refusing, nothing has been swapped in"
+        rm -rf "$stage"; return 1
+      fi
+      mv "$s" "$target" \
+        || { echo "✗ rename failed for $s"; rm -rf "$stage"; return 1; }
+      k=$((k + 1))
     done
+    rmdir "$newdir" 2>/dev/null || true
   fi
   { echo "# Segment index — $name"; echo
     for s in "$stage"/*.md; do
@@ -1379,6 +1710,21 @@ archive_working() {  # $1 = path under docs/, $2 = archive dir (default: $AD, i.
 }
 
 CMD="${1:-}"; SUB="${2:-}"
+# `config <key>` exists because a policy key with no readable EFFECTIVE value cannot be checked:
+# the declaration and the number the drain acts on are two different things, and the gap between
+# them is where a malformed declaration hides behind a silent fallback. These are the same
+# variables every drain path uses -- computed once at load, above, with the same fallbacks -- so
+# the accessor cannot drift from the behaviour it reports. Read-only; it moves no bytes.
+if [ "$CMD" = "config" ]; then
+  case "$SUB" in
+    preimage_keep) printf '%s\n' "$PIKEEP" ;;
+    archive_dir)   printf '%s\n' "$AD" ;;
+    journal_dir)   printf '%s\n' "$JD" ;;
+    qa_log_dir)    printf '%s\n' "$QD" ;;
+    *) echo "✗ usage: retention-drain.sh config <preimage_keep|archive_dir|journal_dir|qa_log_dir>"; exit 1 ;;
+  esac
+  exit 0
+fi
 if [ "$CMD" = "restore" ]; then
   [ -n "$SUB" ] || { echo "✗ usage: retention-drain.sh restore <key>   (keys: $PID)"; exit 1; }
   drain_restore "$SUB"
@@ -1390,7 +1736,7 @@ if [ "$CMD" = "archive-working" ]; then
   exit $?
 fi
 if [ "$CMD" != "drain" ]; then
-  echo "✗ usage: retention-drain.sh drain <monolith.md>|journal|qa-log|legacy <file> [rollover_cap_kb]|archive-working <path> [archive_dir]"; exit 1
+  echo "✗ usage: retention-drain.sh drain <monolith.md>|journal|qa-log|legacy <file> [rollover_cap_kb]|archive-working <path> [archive_dir]|config <key>"; exit 1
 fi
 case "$SUB" in
   "")
@@ -1453,6 +1799,113 @@ Compile/drain (journal, qa-log, and — see `references/changelog.md` — CHANGE
 
 The same convention converts `qa-log` (→ hot monolith, per above) and `CHANGELOG.md` (→ `/release`, see `references/changelog.md` + `references/release-process.md`) to the fragment convention, alongside journal. All three append-doc layers are now fragment-based; no monolith in this net is still taking direct concurrent writes.
 
+### The fragment sentinel — the contract
+
+The drain writes a machine-readable marker above every block it appends to an archive, and two
+unrelated mechanisms read it: the wrap-up gate, which slices one phase's entry back out, and the
+lifecycle ledger, which asks whether a phase's fragment reached a durable file at all. Until this
+section existed the format lived only in the code that wrote it and the code that read it, which is
+how the two drift apart without either side announcing it. This is the contract; the rules below are
+the ones the shipped reader actually applies, not a paraphrase of them.
+
+**The line.**
+
+```
+<!-- fragment: <payload> -->
+```
+
+- The prefix `<!-- fragment: ` starts at column 1 and the line is the whole marker: there is no
+  in-line form, and nothing else may share the line.
+- **A blank line must come immediately above it.** The drain supplies it (`printf '\n<!-- fragment:
+  %s -->\n'`), and the reader requires it — a sentinel-shaped line in the middle of a paragraph is
+  not a boundary. This is why re-indenting or re-wrapping an archive breaks the ledger, and why
+  archived content is moved verbatim and never hand-edited.
+- The payload is one non-empty, whitespace-free token. **Two forms occur and both parse:** the
+  fragment's repo-relative path (`docs/journal.d/<date>-<branch-slug>.md`) and a bare basename with
+  no directory and no extension. The grammar was measured over the whole durable archive rather than
+  designed: those were the only two forms present, so the rule is "basename, trailing `.md`
+  optional" and nothing wider.
+- The phase name is read from the payload's basename after `phase-`. The name test itself lives in
+  the CALLER (`file_name_matches`), so "this name is that phase" has one definition across the
+  filename finder and the marker finder, not two.
+
+**Who writes it.** `scripts/retention-drain.sh`, at two sites — the journal archive append and the
+qa-log monolith compile — and both use the same line as their **idempotence sentinel**: before
+appending a fragment the drain asks `grep -qF "<!-- fragment: <path> -->"` and skips a fragment that
+is already compiled, which is what makes a retried drain safe. Those lookups are deliberately
+UNANCHORED (`printf`, `grep -qF`), which is also what keeps them outside the one-reader invariant's
+scope by construction instead of by an exemption list that would go stale.
+
+**Who reads it.** `scripts/lib/fragment-sentinel.awk` is the declared source of truth, and the
+one-reader rule is narrower than it sounds: **one source text, two pinned embeddings, two direct
+run-time readers.**
+
+| Consumer | How it reaches the program |
+|---|---|
+| `scripts/ledger-scan.sh` | runs the file directly (`awk -v emit=payload -f scripts/lib/fragment-sentinel.awk`) |
+| `scripts/invariants/mode-provenance-recorded.sh` | runs the file directly, in slice mode, to read a phase's record **after its drain** — the hot fragment is gone by then, and reading only the hot zone made that check unable to validate any drained phase |
+| `scripts/close-gate.sh` | EMBEDS the program — it is a single drop-in script, so a sibling file would not travel with it |
+| `references/close-gate.md` | EMBEDS the program — the adopter copies one file |
+
+`scripts/invariants/one-fragment-sentinel-reader.sh` holds the source and both embeddings to the
+same bytes and refuses a FOURTH anchored matcher anywhere under the scanned roots. A second DIRECT
+reader is not a fourth matcher and needs no exemption: it holds no copy of the pattern, which is
+exactly the resolution that guard's own refusal message recommends. It is **not** a claim of one physical
+implementation, and saying it were would be the claim-wider-than-mechanism defect it exists to stop.
+Two characters the pinned program may not contain, both learned by breaking something: a single
+quote (the embeddings sit inside a single-quoted shell string — an apostrophe in a comment gave
+`syntax error near unexpected token` while the byte-pinning stayed green) and a run of three or more
+backticks or tildes (it ends the markdown fence early; one such line silently cut the extracted gate
+from 79,554 bytes to 9,504).
+
+**What a reader does with a malformed one.** Every ambiguity costs a FAIL, never a PASS. Three
+shapes are malformed: a payload that is empty or all whitespace, a payload with whitespace *inside*
+it, and a comment that never closes with ` -->` on its own line. The middle one was stated in the
+grammar above from the start and **not checked** until a phase-close review pointed at the gap —
+`<!-- fragment: a b -->` parsed and handed the phase-name test a token nobody wrote. Enforcing it
+cost nothing that exists: no existing marker had whitespace in the payload.
+
+| Reader state | Slice mode | Payload mode (`-v emit=payload`) |
+|---|---|---|
+| a boundary for this phase was found | `0` | `0` (markers printed) |
+| none was found | `1` | `1` (nothing printed) |
+| a sentinel naming this phase was rejected as FENCED | `2` | — |
+| a malformed marker was seen | — | `3`, outranking anything printed |
+
+- **Fence-awareness is part of the grammar, not the caller's problem.** A marker quoted inside a
+  fenced block is not a marker — this phase's own spec quotes one — and fences are recognised at
+  column 1 only, backticks and tildes only, closing run at least as long as the opener with nothing
+  but whitespace after it. A rejected sentinel still ENDS the open slice, so no slice can reach into
+  the next fragment, and if it named the phase the reader says `2` instead of dropping it silently.
+  An unterminated fence costs every boundary after it in that file, loudly.
+- **Code 3 exists because code 1 is a fail-OPEN reading of the one shape that must fail loudly.** A
+  sentinel line with an empty payload would otherwise exit 1, which a caller reads as "this file
+  holds nothing for you".
+- **`ledger-scan.sh` refuses from the top level, once per scan, before any run is scored**: the
+  marker index is built once for the whole scan, so `die` ends the scan rather than ending one
+  command substitution and relying on `set -e` staying switched on. Malformedness is a property of
+  the ARCHIVE, not of a run — it is the same defect whichever phase is being scored. The message
+  names the file and says why: *a marker nobody can read must not be scored as a marker nobody
+  wrote.*
+
+**Registry / scanner pairing, and it cuts both ways.** A stage that declares `kind: fragment-marker`
+needs a `ledger-scan.sh` that implements that kind. The scanner dies on an unimplemented kind by
+design, and that death is **not scoped to the new stage** — a newer registry on an older scanner
+fails every stage in the run. Ship the registry change and the scanner together, or the ledger
+reports nothing at all rather than reporting less.
+
+**Roots for this kind are FILES, not directories**, because that is what the drain writes into: the
+compiled monolith, the cold archive, and a directory of roll-over segments reached by a glob. Each
+root is expanded and only regular files are read; a file declared under two stages is read once. The
+`suffix` field of a registry line has no meaning for this kind — a marker names a path, and the
+phase comes from its basename.
+
+**Not part of the contract, stated so no one infers it:** that a marker sits directly above the block
+it names. In an archive it routinely does not — `drain_monolith` slices entries from heading to
+heading, so a marker ends up at the tail of the PREVIOUS entry, and the newest-first reassembly then
+reorders those entries. Adjacency is lost upstream of any roll-over, so nothing downstream may rely
+on it; the ledger keys on the file that CONTAINS the marker, which is the property that survives.
+
 ## Distill protocol
 
 At milestone close, **after** the drain (so archive anchors exist to cite), the AI produces a distill proposal — skipped silently when `retention.distill: off`.
@@ -1472,6 +1925,7 @@ At milestone close, **after** the drain (so archive anchors exist to cite), the 
 retention:
   hot-caps: { RESUME.md: 200/25K, status: 300/30K, journal: 100K, qa-log: 50K, changelog: 50K }   # <doc>: none = exempt
   archive-dir: docs/archive
+  preimage-keep: 5     # pre-image generations the ring keeps; >= 1
   distill: on          # on | off — off skips the distill step silently
   order: { CHANGELOG.md: newest-first }   # newest-first | oldest-first; absent key = oldest-first
   non-entry-headings: { CHANGELOG.md: [How to read this file, How to contribute an entry] }
@@ -1483,6 +1937,7 @@ retention:
 "retention": {
   "hot_caps": { "resume": [200, 25], "status": [300, 30], "journal_hot": [0, 100], "qa_log_hot": [0, 50], "changelog_hot": [0, 50] },
   "archive_dir": "docs/archive",
+  "preimage_keep": 5,
   "coverage_floor_kb": 50,
   "journal_dir": "docs/journal.d",
   "qa_log_dir": "docs/qa-log.d",
@@ -1493,7 +1948,68 @@ retention:
 }
 ```
 
+`preimage_keep` is here for the same reason, and it arrived the same way: the drain kept five
+generations because a literal `5` sat in its source as the fallback, so the number was real, was
+load-bearing, and was readable only by opening the script. A number nobody can read without reading
+the code is not a policy. It is declared on both faces now, and the effective value -- the one the
+drain acts on after its own fallback -- is readable with `bash scripts/retention-drain.sh config
+preimage_keep`. The accessor exists because the declaration and the effective value are different
+things: the gap between them is exactly where a malformed declaration hides behind a silent
+fallback, which is why the shipped check compares the two faces **and** the accessor rather than
+the two faces alone. The floor is 1 and the script refuses 0 rather than correcting it: a ring that
+keeps nothing is a drain with no undo, and silently reading 0 as 5 would be a declaration that does
+not do what it says.
+
 `count_caps` is in this block because it is a key the gate reads and this block is what adopters copy; it was named only in prose further down, so a copied config silently took the built-in defaults without their owner knowing the key existed. **Every key the gate or the drain reads appears here, and nothing here is unread** — that is the property this block is supposed to have, and it is worth re-checking whenever a key is added, because a documented-but-dead key and an undocumented-but-live one fail in opposite directions and both look like a working config. (`hot_caps` accepts one entry per hot doc; a key naming a doc your gate does not measure is inert, so add caps for docs, not for hopes.)
+
+### Which gate variant reads each key, and at what severity
+
+**This table exists because the two variants disagreed and nothing said so.** An audit measured the
+state it closes: `hot_caps` was documented here, mirrored in a project's `CLAUDE.md`,
+and declared in its manifest, while `scripts/close-gate.sh` — the variant that
+project actually runs — never mentioned the string `hot_caps`. A config that looked
+configured and a cap that looked enforced, while every gate run printed green.
+
+So the omission that mattered was never a missing key. It was a missing **answer to "which gate
+in front of me reads this, and what does it do when it fires"** — and leaving a reader to find
+that out by measurement is what this table refuses.
+
+| key | canonical gate (`references/close-gate.md`) | the reference project's own gate (`scripts/close-gate.sh`) |
+|---|---|---|
+| `hot_caps.*` | reads it · **warn-only**, never flips `$fail` | reads it · **FAILS the gate** |
+| `hot_caps.<doc>: "none"` | exempt, prints the exemption | exempt, prints the exemption, **and the exemption must carry a written reason** (`hot-cap-exemption-has-a-reason`) |
+| `archive_dir` · `journal_dir` · `qa_log_dir` · `changelog_dir` | reads | reads |
+| `count_caps.*` | reads · warn-only | reads · warn-only |
+| `order` · `non_entry_headings` · `distill` | read by the **drain**, not by either gate | same |
+| `status_doc` | reads | **reads at the time of writing**, and the row is **dormant** in that project — it resolves to `docs/STATUS.md`, which that project does not have, so the row returns early and prints nothing. *"The key is read"* and *"the row ran against a real status document"* are different claims and only the first is true there. See `document-map.md`. |
+
+**Why the severities differ, stated rather than left as drift.** Canonical ships to adopters and
+its own self-test asserts *"over-cap doc warns without failing"* — raising it would change
+behaviour for every adopter who never asked. The reference project needs the opposite, because
+its failure was precisely a warning nobody saw: a check downgraded to warn-only never
+reds. **An adopter who wants the stricter behaviour changes a severity, not a mechanism** — the
+rows, the keys and the exemption word are identical in both.
+
+**`.claude/retention-state.json` has no reader, and that is now a decision rather than a gap.**
+It was written by canonical's warn path to carry one thing: whether the *same* document was still
+over cap at the **next** close, so the wording could escalate to *"SECOND consecutive over-cap
+close — this doc is not draining"*. Measured:
+
+```
+/usr/bin/grep -rl 'retention-state' scripts | grep -v '/test_'   ->  (nothing)
+```
+
+and nothing reads it. **The filter is part of the
+measurement, not a convenience** — the test that asserts this absence lives under `scripts/` and
+necessarily spells the name, so an unfiltered grep counts that test as a reader and answers the
+opposite. A *reader* here means production code that consults the file at gate time.
+
+The reference project did **not** port that escalation, and the reason is structural rather than a
+shortage of effort: **where the rows FAIL, there is no second consecutive close.** The first
+over-cap close blocks the push, so the state the file exists to remember cannot be reached. The
+escalation is a warn-only concept, and porting it would have produced a file written by a path
+nothing can traverse — the shape this whole document family exists to stop. Under canonical's
+warn-only severity it is live and useful, and it stays in that variant unchanged.
 
 **`order` and `non_entry_headings` are keyed by the source file's basename *including* its
 extension** (`CHANGELOG.md`, not `CHANGELOG`) — the drain receives a path, and keying on the path as

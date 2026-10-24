@@ -3,7 +3,7 @@
 #
 # WHY THIS EXISTS, and why it is not simply "delete the parenthetical".
 #
-# The title read `# Backlog (local-only — docs/ is gitignored)` for months after
+# The title read `# Backlog (local-only — docs/ is gitignored)` long after
 # p39 made docs/ tracked. Both halves were false. It survived hand-corrections
 # because it is not hand-written: `scripts/backlog-toc.sh` PRINTS it, so the next
 # regeneration restores it. A correction therefore produces a diff that reads as

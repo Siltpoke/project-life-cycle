@@ -460,7 +460,7 @@ PWD_PHYS="$(pwd -P 2>/dev/null)" || PWD_PHYS=""
 # A RELATIVE event cwd is resolved against the hook process's own directory, once, here. Claude
 # Code is documented to send an absolute `.cwd`, so this is defence rather than a fix -- but the
 # alternative is that `git -C`, `stat` and the string-comparing exemption each resolve it
-# separately, which is the multiple-bases defect this file has already paid for twice. One base,
+# separately, which is the multiple-bases defect this file has paid for before. One base,
 # decided before anything reads it.
 case "$CWD" in /*) ;; *) CWD="$PWD_PHYS/$CWD" ;; esac
 
@@ -1436,7 +1436,7 @@ else
   DISABLE_HINT="set PLC_CONTEXT_FLOOR=0 to disable"
 fi
 
-# WORKTREE (2026-09-01). A worktree exists to isolate one session from another,
+# WORKTREE. A worktree exists to isolate one session from another,
 # so the RESUME.md resolved inside one is, by construction, NOT this session's:
 # it was inherited from the base branch and belongs to whoever wrote it there,
 # or -- when the checkpoint is gitignored, as PLC's own is -- it does not exist
@@ -1478,7 +1478,7 @@ fi
 # and it costs one stat.
 #
 # Two rejected alternatives, both measured, so neither comes back:
-#   * `rev-parse --absolute-git-dir` alongside `--show-toplevel`: AC9 pins checkpoint
+#   * `rev-parse --absolute-git-dir` alongside `--show-toplevel`: the design pins checkpoint
 #     resolution to EXACTLY ONE git call (this hook runs ahead of every Edit/Write, so
 #     the count is a budget), and adding one took it to three.
 #   * Asking `rev-parse` for both values in one process and splitting its output on the

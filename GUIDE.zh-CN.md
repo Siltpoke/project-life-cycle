@@ -36,8 +36,6 @@ flowchart LR
 - **`/catchup`**（辅助 —— 不属于核心流水线）—— 回到 repo（`/clear` 之后）的暖场"welcome back"卡片：你在哪、shipped 了啥、在做啥、save 是否新鲜 —— 由实时 git + `RESUME.md` + 会话 digest 合成。只读；没数据的行省掉。与 `/recall`（机械 digest）+ `/handoff`（写锚）互补。
 - **`/capture`**（辅助 —— 不属于核心流水线）—— 把一个陈述出来的项目意图（"为什么"）钉进冷 cognition log。至多问两个问题，追加一条经校验的条目到 `docs/cognition-log.d/`，并对同主题的既有意图做 supersede 确认。
 - **`/cognition-distill`**（辅助 —— 不属于核心流水线）—— 从冷 intent-log 重生热 cognition 文档（`docs/cognition.md`）（regenerate-from-source）：把未被 supersede 的意图归成四个 section + 跑确定性 guard。milestone 收尾或按需运行，在 close-gate 之外。
-- **`/tasklist`**（辅助 —— 不属于核心流水线）—— 在终端渲染当前 phase 的进度（读 `.claude/tasklist.md`，tasklist 契约）：默认折叠的 done/total 行，`--tree` 展开全 glyph 概览。纯可移植 bash，只读。
-- **`/plc-status`**（辅助 —— 不属于核心流水线）—— 渲染生命周期账本：一次 run 的每个流程 stage 是 observed、只是 claimed、missing、not applicable 还是 unknown (retro)。`--run <id>` 看单个 run 及其时间线；`--all` 看所有 run 的 conformance 矩阵。只读；唯一依赖是 `jq`。
 
 命令之间：每个 PR 都要更新 `[Unreleased]` + 带恰好一个 category label + 用 Conventional Commits 标题（详见 [`CONTRIBUTING.md`](CONTRIBUTING.md)）。Validator（cadence step 2，只读）抓 builder 说谎；Acceptance Verifier（cadence step 1.5）每条 AC 写一个测试；deterministic handlers（`.claude/handlers/`）在 LLM 介入之前注入 auth / secrets / pre-flight lint / migration safety。
 
@@ -213,6 +211,7 @@ skills/project-lifecycle/
     ├── deterministic-handlers.md         harness 注入的 pre-step 模式（auth / secret / lint / migration safety / 多租户隔离）。纯代码、每个 loop 迭代在 LLM 之前触发、行动时注入 [HARNESS] 消息。6 个典型 handler 例子 + 动态 handler 路径
     ├── journal-schema.md                 6-section journal 条目模板
     ├── defer-vs-fix.md                   review finding 分流规则
+    ├── where-does-this-go.md             分流「旁生发现」—— 干活途中撞上的、不属于本 phase 题目的真问题，另外三个路由器都不收它。发现时不打断、只追一行；收官时一次定落点：现在修 / 进 backlog / 够格上主线 / 判不了交给人。它自己写明判不了的四类、给那个口子定了价、并带着必须复现的三个标定落点
     ├── diagnose-loop.md                  硬 bug 纪律：反馈循环 → 排序假说 → 修 + 回归。Iron Law + 3-Fix Rule
     ├── close-gate.md                     确定性 done-gate —— task-done / phase-done 检查（journal header / 新鲜 test-evidence / handoff sections / CHANGELOG touch / smoke / ROADMAP），可移植脚本 + manifest，pre-push hook 接线（不可绕过层）+ close-gate policy key（per-task | pr-boundary —— 人类阻塞批准的位置，自我认证攻击面写明）
     ├── review-record.md                  可信 AI review —— reviewer dispatch 约束（fresh context / 只读 / tier 不对称 / refute-first / file:line 证据门 / verdict 由代码算），PR 上的双向 review record（reviewer 报告原样 + builder 逐条回应），finding→fix 规则（reviewer snippet = untrusted input；final-pass 强制），覆盖窗口检查
@@ -266,7 +265,6 @@ commands/                                  ← skill 自带的斜杠命令（由
 ├── catchup.md                             /catchup —— /clear 后的暖场 welcome-back 卡片（实时 git + RESUME.md + digest → 你在哪/shipped/在做/save-state；只读；辅助）
 ├── capture.md                             /capture —— 把一个陈述出来的意图（"为什么"）钉进冷 cognition log（≤2 问 → docs/cognition-log.d/；同主题 supersede 确认；辅助）
 ├── cognition-distill.md                   /cognition-distill —— 从冷 intent-log 重生热 docs/cognition.md（四 section + 确定性 guard；在 close-gate 之外运行；辅助）
-├── tasklist.md                            /tasklist —— 在终端渲染当前 phase 进度（读 .claude/tasklist.md，tasklist 契约；折叠行，--tree 展开全 glyph 概览；可移植 bash，只读；辅助）
 ├── plc-status.md                          /plc-status —— 生命周期账本：每个必经 stage 是 observed / 只是 claimed / missing / 不适用 / 不可恢复（只读；唯一依赖 jq；辅助）
 └── experiment.md                          /experiment —— 一节一停地写本 phase 的实验提案（per-phase 步骤 3.5；只出文件，不跑实验）
 

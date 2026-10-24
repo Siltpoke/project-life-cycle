@@ -254,7 +254,7 @@ run_hook() {
   # function's stdout (`rc="$(run_hook ...)"`), so the whole body runs in a COMMAND-SUBSTITUTION
   # SUBSHELL: a `no` called here increments a counter that dies with the subshell, and its message
   # would be captured INTO `$rc` instead of printed. Measured -- the first cut of this check did
-  # exactly that and the mutant it was written for stayed green in all 67 rows. File writes DO
+  # exactly that and the mutant it was written for stayed green in every row. File writes DO
   # survive the subshell, so the finding is appended here and asserted once, below.
   [ -n "$stray" ] && printf 'called from line %s: %s\n' "${BASH_LINENO[0]}" \
     "$(printf '%s' "$stray" | tr '\n' ' ')" >> "$STRAYLOG"
@@ -826,10 +826,10 @@ fi
 #       marker the first one just created.
 #
 # W1 ALONE IS NOT ENOUGH, and that control is the load-bearing fact of this whole design -- but read
-# to the end of this paragraph before quoting its number. An earlier measurement put W1-widened at
-# 102 passed / 0 failed, all 8 batches granting exactly one. THAT IS A SAMPLE, NOT A BOUND, and
-# a later run falsified its absolute form: W1 alone CAN hand out a second allow (6 of 24 batches at
-# width 12, one run taking 4 of 8 under heavy load). It is rare, load-sensitive, and never enough on
+# to the end of this paragraph before relying on it. An earlier measurement found W1-widened
+# granting exactly one allow per batch. THAT IS A SAMPLE, NOT A BOUND, and
+# a later run falsified its absolute form: W1 alone CAN hand out a second allow (a minority of
+# batches at width 12, and more under heavy load). It is rare, load-sensitive, and never enough on
 # its own -- the direction holds, the absolute does not. The full measurement is in the
 # solo-configuration note further down; the correction is repeated HERE because this is where the
 # claim gets made, and a reader who stops at this paragraph would carry away the wrong one. The
@@ -1099,8 +1099,8 @@ fi
 # BOTH ARE HARD FAILURES OF THE ROW. Never a skip, and -- stated rather than left as an inference --
 # NEVER a fall back to running the batch unwidened "so the suite stays green". An unwidened run
 # reports green and that green reads as "the guard holds", which is the single outcome this whole
-# bench exists to prevent. The W1-alone control is the proof it is not hypothetical: 102 passed /
-# 0 failed with the invariant already broken.
+# bench exists to prevent. The W1-alone control is the proof it is not hypothetical: a clean pass
+# with the invariant already broken.
 #
 # P1 -- THE SHIMS ARE ACTUALLY REACHABLE, and it verifies the SAME `RL_PATH` string the batch
 # runs under. If this check assembled its own path, it could pass while the batch ran unwidened.
@@ -1951,10 +1951,10 @@ fi
 # WHAT THE SOLO CONFIGURATIONS ESTABLISHED, and the correction the measurement forced.
 #
 # The design's premise was that W1 alone reproduces NOTHING, resting on an earlier measurement's
-# "102 passed / 0 failed, all 8 batches granting exactly one". THAT IS A SAMPLE, NOT A BOUND, and
+# "every batch granting exactly one". THAT IS A SAMPLE, NOT A BOUND, and
 # re-measuring it before relying on it falsified the absolute form.
 # Measured on a many-core host, 100ms, `mkdir`-only widening (before the acquire moved to `ln`):
-#     width 12 -- 6 of 24 batches reproduced (one run took 4 of 8 under heavy load)
+#     width 12 -- a minority of batches reproduced (more under heavy load)
 #     width 24 -- 1 of 35
 #     width 32 -- 0 of 16
 # So W1 alone CAN hand out a second allow; it is rare, load-sensitive, and it never reaches N-of-N.
@@ -2946,7 +2946,7 @@ rc="$(run_hook "$d" "$(ev_t "$d" "$d/neutral" "$d/repoD")")"
 # --- AC3f: a RELATIVE event cwd is resolved once, against the hook process -------------------
 # Claude Code sends an absolute `.cwd`, so this is defence, not a fix. Without it `git -C`,
 # `stat` and the string-comparing exemption each resolve a relative cwd separately -- the
-# multiple-bases class this file has already paid for twice. Asserting the guard exists.
+# multiple-bases class this file has paid for before. Asserting the guard exists.
 d="$(sandbox)"; usage_line 160000 > "$d/t.jsonl"
 arm_old "$d"; echo fresh > "$d/RESUME.md"
 rc="$(printf '%s' "$(jq -nc --arg t "$d/t.jsonl" --arg f "$d/x/f.txt" \

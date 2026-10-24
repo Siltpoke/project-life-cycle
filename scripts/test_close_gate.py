@@ -570,11 +570,97 @@ def test_task_root_commit_touching_product_tree_passes(tmp_path: Path, gate_scri
     # make_fixture_repo's single "init" commit IS the root; put product code in it and add no second
     # commit, so HEAD has no parent — the exact case a plain `diff-tree HEAD` mis-handles.
     repo = make_fixture_repo(tmp_path, _PRODUCT_PATHS_MANIFEST, {"src/app.py": "x = 1\n"})
+    # check #1 now reads the branch range `origin/main...HEAD` and falls back to HEAD's own
+    # commit only when there is no origin/main. An adopter's very first commit has no remote yet, so
+    # the fixture's origin/main ref is removed to reproduce that case — with it left in place the
+    # range is empty, which is a different (and correctly failing) situation.
+    subprocess.run(["git", "update-ref", "-d", "refs/remotes/origin/main"], cwd=repo, check=True, capture_output=True)
     result = run_gate(repo, gate_script, "task")
     rows = [ln for ln in result.stdout.splitlines() if "product tree" in ln]
     assert rows and rows[0].startswith("✓"), (
         f"a ROOT commit touching src/ must pass the product-tree check (needs --root):\n{result.stdout}"
     )
+    assert "no origin/main" in rows[0], f"the row must say which scope it read:\n{rows[0]}"
+
+
+# --- check #1 reads the branch range, and an entry may name a file or the repo root ---
+# Measured in the v5.0.0 release test: the row read HEAD's own commit only, while the next row
+# demands a SEPARATE `docs:` journal commit that the cadence writes after the code. A correctly
+# finished task (code commit, then journal commit) failed with "changed no product-tree path" on
+# real hosts. Separately, `(…)/` could never match an entry naming a single file.
+
+
+def _row1(result: subprocess.CompletedProcess[str]) -> list[str]:
+    return [ln for ln in result.stdout.splitlines() if "product tree" in ln or "product-tree path" in ln]
+
+
+def test_p185_code_then_docs_commit_passes_the_product_tree_check(tmp_path: Path, gate_script: str) -> None:
+    """The normal cadence order — product commit, then the docs: journal commit — must pass row 1.
+    Previously HEAD was the docs commit and the row read only HEAD, so this failed."""
+    repo = make_fixture_repo(tmp_path, _PRODUCT_PATHS_MANIFEST, {"README.md": "hi\n"})
+    (repo / "src").mkdir()
+    (repo / "src/app.py").write_text("x = 1\n", encoding="utf-8")
+    _commit(repo, "feat: add app")
+    (repo / "docs").mkdir()
+    (repo / "docs/journal.md").write_text("## Plan deviations\nnone\n", encoding="utf-8")
+    _commit(repo, "docs: journal for the task")
+    rows = _row1(run_gate(repo, gate_script, "task"))
+    assert rows and rows[0].startswith("✓"), f"code-then-docs must pass row 1:\n{rows}"
+    assert "origin/main...HEAD" in rows[0], f"the row must name the range it read:\n{rows}"
+
+
+def test_p185_a_file_entry_matches_that_file(tmp_path: Path, gate_script: str) -> None:
+    """`product_paths: ["calc.py"]` — what init-harness wrote for a single-file project on real hosts —
+    must match a change to calc.py. With the old hard-appended `/` it matched nothing, ever."""
+    manifest = {**_PRODUCT_PATHS_MANIFEST, "product_paths": ["calc.py"]}
+    repo = make_fixture_repo(tmp_path, manifest, {"calc.py": "def add(a, b):\n    return a + b\n"})
+    (repo / "calc.py").write_text("def add(a, b):\n    return a + b\n\ndef sub(a, b):\n    return a - b\n", encoding="utf-8")
+    _commit(repo, "feat: subtract")
+    rows = _row1(run_gate(repo, gate_script, "task"))
+    assert rows and rows[0].startswith("✓"), f"a file entry must match itself:\n{rows}"
+
+
+def test_p185_a_directory_entry_does_not_match_a_sibling_prefix(tmp_path: Path, gate_script: str) -> None:
+    """`(/|$)` must not widen a directory entry: `src` names src/ only, never `src-old/x.py`."""
+    repo = make_fixture_repo(tmp_path, _PRODUCT_PATHS_MANIFEST, {"README.md": "hi\n"})
+    (repo / "src-old").mkdir()
+    (repo / "src-old/x.py").write_text("x = 1\n", encoding="utf-8")
+    _commit(repo, "feat: touch a sibling dir")
+    rows = _row1(run_gate(repo, gate_script, "task"))
+    assert rows and rows[0].startswith("✗"), f"src must not match src-old/:\n{rows}"
+
+
+def test_p185_a_root_entry_matches_any_change(tmp_path: Path, gate_script: str) -> None:
+    """`["."]` (a flat-layout declaration) must mean the whole repo. As a regex it was `^\\./`, which
+    no repo-relative path matches, so it failed forever."""
+    manifest = {**_PRODUCT_PATHS_MANIFEST, "product_paths": ["."]}
+    repo = make_fixture_repo(tmp_path, manifest, {"calc.py": "x = 1\n"})
+    (repo / "calc.py").write_text("x = 2\n", encoding="utf-8")
+    _commit(repo, "feat: change")
+    rows = _row1(run_gate(repo, gate_script, "task"))
+    assert rows and rows[0].startswith("✓"), f"a root entry must match any change:\n{rows}"
+
+
+def test_p185_a_root_entry_still_fails_an_empty_range(tmp_path: Path, gate_script: str) -> None:
+    """Match-everything is not pass-everything: with nothing in the range, row 1 must still fail."""
+    manifest = {**_PRODUCT_PATHS_MANIFEST, "product_paths": ["."]}
+    repo = make_fixture_repo(tmp_path, manifest, {"calc.py": "x = 1\n"})
+    rows = _row1(run_gate(repo, gate_script, "task"))
+    assert rows and rows[0].startswith("✗"), f"an empty range must fail even under a root entry:\n{rows}"
+
+
+def test_p185_verb_fallback_reads_the_range_too(tmp_path: Path, gate_script: str) -> None:
+    """With no product_paths, the legacy verb check must also read the range: a feat: commit followed
+    by the docs: journal commit passes; it used to read only HEAD's subject (`docs:`) and failed."""
+    manifest = {"test_command": "true", "test_evidence": ".claude/.last-test-run"}
+    repo = make_fixture_repo(tmp_path, manifest, {"README.md": "hi\n"})
+    (repo / "app.py").write_text("x = 1\n", encoding="utf-8")
+    _commit(repo, "feat: add app")
+    (repo / "README.md").write_text("hi\nj\n", encoding="utf-8")
+    _commit(repo, "docs: journal")
+    result = run_gate(repo, gate_script, "task")
+    rows = [ln for ln in result.stdout.splitlines() if "feat/fix commit" in ln]
+    assert rows and rows[0].startswith("✓"), f"feat then docs must pass the verb fallback:\n{result.stdout}"
 
 
 def test_task_empty_product_paths_array_fails_closed(tmp_path: Path, gate_script: str) -> None:
@@ -855,7 +941,7 @@ def test_row7_legacy_mtime_row_is_held_to_the_same_contract(
     """Both halves on the mode most adopters actually run. The helper's contract comment says the
     adjective "asserted more than EITHER mode actually checks" and names two callers; guarding one
     of them would leave the other free to regain the claim, which is how this row got repaired
-    three times already."""
+    before."""
     row = _row7_legacy_ok_row(tmp_path, gate_script)
     assert_row7_makes_no_execution_claim(row)
     assert_row7_names_its_evidence_basis(row, required=ROW7_LEGACY_REQUIRED_TOKENS)
@@ -864,7 +950,7 @@ def test_row7_legacy_mtime_row_is_held_to_the_same_contract(
 @pytest.mark.parametrize("token", ROW7_FORBIDDEN_TOKENS)
 def test_every_forbidden_token_has_an_observed_red_path(token: str) -> None:
     """Each entry in the banned list must actually redden something. Review shrank the tuple to a
-    single token and all three tests stayed green: `fresh` (the regression the list was built
+    single token and every test stayed green: `fresh` (the regression the list was built
     for), `proves` and `proving` were load-bearing in the list and inert in the tests — a guard
     nobody had watched fire is exactly what this file exists to remove."""
     row = f"✓ test-evidence non-empty; declared test_evidence_inputs are {token} unchanged"
@@ -914,7 +1000,7 @@ def test_row7_assertions_state_the_contract_when_they_fire() -> None:
 
     The first line below is not ceremony. Without it this test was SELF-CERTIFYING: both messages
     are built by interpolating `ROW7_CONTRACT_PHRASE`, so emptying that constant made every message
-    lose the locked clause and all three tests still passed — and the byte-identical cross-file
+    lose the locked clause and every test still passed — and the byte-identical cross-file
     check cannot catch it either, since both copies would be empty and still identical. The clause
     is therefore spelled out here, independent of the constant it guards."""
     assert ROW7_CONTRACT_PHRASE == (

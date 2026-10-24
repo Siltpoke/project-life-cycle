@@ -210,7 +210,26 @@ ALLOWED_EXTRA=(
   "RESUME.md"
   "RESUME-archive.md"
   ".claude/tasklist.md"
+  # The side-discovery queue -- same category as the tasklist above, and guarded by its own
+  # `sidelines-never-tracked` invariant. Gitignored on purpose because it is per-PHASE working
+  # state; what becomes durable is the phase's outcome in the journal. It is listed here rather
+  # than excluded from the scan because its lines carry `file:line` style context that is worth
+  # link-checking, exactly like the tasklist's.
+  # The earlier fixed path. Kept so a queue left behind by the migration is still explained
+  # rather than reported as a stray file. Its removal is filed, not left to a comment.
+  ".claude/sidelines.md"
 )
+# The queue became one file per PHASE, at `.claude/sidelines/<phase>.md`, so the allow-list
+# above -- which compares whole paths with `=` -- can no longer name it. A `{PHASE}` literal is NOT
+# a path and must never be written into a list that compares paths; the family is matched as a
+# prefix instead. Deliberately narrow: directly under that directory, and `.md` only.
+sidelines_family() {
+  case "$1" in
+    .claude/sidelines/*/*) return 1 ;;
+    .claude/sidelines/*.md) return 0 ;;
+  esac
+  return 1
+}
 unexplained_extra=0
 while IFS= read -r f; do
   [ -n "$f" ] || continue
@@ -218,6 +237,7 @@ while IFS= read -r f; do
   for a in "${ALLOWED_EXTRA[@]}"; do
     if [ "$f" = "$a" ]; then known=1; break; fi
   done
+  if [ "$known" -eq 0 ] && sidelines_family "$f"; then known=1; fi
   if [ "$known" -eq 0 ]; then
     echo "FAIL $NAME: scan matched an untracked file not on the declared-safe list: $f"
     unexplained_extra=1

@@ -102,13 +102,12 @@ def test_against_a_real_skewed_run_of_the_width_suite(tmp_path):
     a system python without pytest and skips, so the test this file calls the one that
     matters most is also the one most likely never to run.
 
-    Filed rather than papered over: the same green CI run reported
-    `2104 passed, 23 skipped` in that unguarded step, so widening the guard to the whole
-    suite is a real decision with 23 pre-existing skips behind it, not a one-line change.
+    Filed rather than papered over: the same green CI run prints a
+    pass-and-skip summary in that unguarded step, so widening the guard to the whole
+    suite is a real decision with pre-existing skips behind it, not a one-line change.
     """
     other = None
-    for cand in ("/Library/Frameworks/Python.framework/Versions/3.10/bin/python3",
-                 "python3.10", "python3.11", "python3.12"):
+    for cand in ("python3.10", "python3.11", "python3.12"):
         path = shutil.which(cand) if not cand.startswith("/") else (
             cand if Path(cand).exists() else None)
         if not path:
@@ -155,7 +154,7 @@ def _table_unicode_version():
 #
 # These tests EXECUTE the step's body, lifted verbatim out of validate.yml, against a stub
 # `python` whose exit codes and JUnit output are chosen per case. Asserting on the YAML text
-# instead would pass for a step that never runs, which is this repo's most-filed shape.
+# instead would pass for a step that never runs, which is a common shape.
 # ----------------------------------------------------------------------------------------
 
 WORKFLOW = REPO / ".github" / "workflows" / "validate.yml"

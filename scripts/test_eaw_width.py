@@ -29,8 +29,8 @@ tests below SKIPPED on every CI run since the table landed, and every local
 interpreter here is 3.13, so nothing anywhere was checking the table.
 
 MEASURED, both arms, with `[4352,4447]` mutated to `[4352,4448]`:
-    Python 3.10 (unidata 13.0.0)  ->  11 passed, 3 skipped, exit 0   <- a wrong table, green
-    Python 3.13 (unidata 15.1.0)  ->  3 failed                       <- the control
+    Python 3.10 (unidata 13.0.0)  ->  passes and skips, exit 0   <- a wrong table, green
+    Python 3.13 (unidata 15.1.0)  ->  failures                       <- the control
 
 So the expectations are now a pinned export, `scripts/lib/eaw-boundary-widths.json`,
 written by the same generator from the same database read as the table. The
@@ -142,9 +142,9 @@ def test_the_snapshot_covers_exactly_the_table_s_boundary_points(expected_widths
     file from a live `unicodedata` walk; it is now `sorted(expected_widths)`, i.e. whatever
     the generator chose to write. The only things left guarding that were `len > 100` and
     `set(values) == {1, 2}`, and both survive a generator that stopped probing `end + 1`:
-    the point count drops 429 -> 329, both floors pass, and THE PHASE'S OWN CANONICAL
-    MUTANT -- `[4352,4447]` -> `[4352,4448]` -- then survives with `14 passed`. On a skewed
-    interpreter that reads `14 passed, 1 skipped, exit 0`: a wrong table and a green run,
+    the point count drops, both floors pass, and THE PHASE'S OWN CANONICAL
+    MUTANT -- `[4352,4447]` -> `[4352,4448]` -- then survives with a green run. On a skewed
+    interpreter that reads as a pass with a skip, exit 0: a wrong table and a green run,
     which is the sentence this phase exists to make impossible.
 
     So assert the correspondence directly: every range in the COMMITTED table contributes
@@ -186,7 +186,7 @@ def test_the_snapshot_covers_exactly_the_table_s_boundary_points(expected_widths
 # the pinned snapshot and are gate-free by construction; the only thing still gated is
 # `test_table_and_snapshot_are_what_the_generator_produces_today`, whose claim genuinely
 # needs the live database. The gate is LOUD, and p35's CI step turns its skip into a red --
-# a silent skip is how this table went unchecked for weeks.
+# a silent skip is how this table went unchecked.
 
 
 def _declared_unicode_version() -> str:

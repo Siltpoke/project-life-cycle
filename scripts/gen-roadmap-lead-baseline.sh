@@ -4,10 +4,10 @@
 # Emits one record per mainline row:
 #     <name-digest><TAB><name-cols><TAB><lead-cols><TAB><name prefix, for a human>
 #
-# WHY A BASELINE AND NOT A REWRITE. Measured on this repo when the rule was written: 52
-# mainline rows, the name cell running to hundreds of display columns and the `what`
-# cell to 3155 (median 953). A bound that reds on 50 of 52 rows on the day it lands is not a
-# rule, it is a wall of red somebody switches off. Rewriting 52 rows of load-bearing prose by
+# WHY A BASELINE AND NOT A REWRITE. A roadmap that predates the rule can have
+# mainline rows whose name cells and `what` cells are
+# long. A bound that reds on most rows on the day it lands is not a
+# rule, it is a wall of red somebody switches off. Rewriting every row of load-bearing prose by
 # hand is hours of surgery with a real chance of losing content, and the format rules reject deleting
 # detail explicitly.
 #
@@ -17,7 +17,7 @@
 #
 # THE KEY IS THE NAME CELL, NOT THE ROW POSITION and not the backlog id. Position rots the
 # first time the table is reordered. The backlog id looked promising and was measured instead
-# of assumed: 51 of 52 rows carry one, ONE row carries none, and one id appears twice -- so it
+# of assumed: some rows carry none, and an id can appear twice -- so it
 # cannot identify a row on its own. A digest of the name cell can, and it has the property we
 # want for free: rename a row and it stops being pinned, because renaming it is touching it.
 #

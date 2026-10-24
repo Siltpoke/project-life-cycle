@@ -140,18 +140,18 @@ is **UNVERIFIED**, not "0 findings".
 | Phase delivery PR (any non-trivial feature) | **MANDATORY — never skip** |
 | Stacked PR where base is a feature branch | **MANDATORY — same as standalone** |
 
-## Copilot stand-in when billing-blocked
+## Copilot stand-in when Actions cannot run
 
-GitHub Actions billing-paused (`The job was not started because recent GitHub Actions payments have failed or your spending limit needs to be increased`) also blocks Copilot's review job because Copilot runs on Actions infrastructure. Typical failure mode: the **first** `@copilot review` returns inline findings (the job had already spun up before billing hit), but every **subsequent** `@copilot review` errors out silently — leaving the loop stuck "waiting for round 2".
+When GitHub Actions cannot start jobs on the repository, Copilot's review job is blocked too, because Copilot runs on Actions infrastructure. Typical failure mode: the **first** `@copilot review` returns inline findings (the job had already spun up), but every **subsequent** `@copilot review` errors out silently — leaving the loop stuck "waiting for round 2".
 
 When that happens:
 
-1. **Treat the 1st-pass findings as the standard 1st round.** Address every inline comment per the per-finding-reply protocol above. Fixup commits with `Fx-NN` labels. Re-trigger `@copilot review` once to confirm billing is still blocked (don't assume — sometimes it intermittently works).
+1. **Treat the 1st-pass findings as the standard 1st round.** Address every inline comment per the per-finding-reply protocol above. Fixup commits with `Fx-NN` labels. Re-trigger `@copilot review` once to confirm it is still blocked (don't assume — sometimes it intermittently works).
 2. **Dispatch an independent general-purpose reviewer (per `references/reviewer-brief.md`) as the 2nd-pass stand-in.** Brief it with:
-    > "Copilot's 2nd pass is blocked by external infra (GitHub Actions billing). You are the independent 2nd reviewer for fixup commit `<sha>` on PR #<N>. Verify each Fx label actually addresses its 1st-round Copilot finding correctly, AND spot-check for regressions the fixup might have introduced (type safety / immutability / new dead code / test coverage gaps). Report CRITICAL / IMPORTANT / MINOR / NIT with file:line."
+    > "Copilot's 2nd pass is blocked by external infra (GitHub Actions). You are the independent 2nd reviewer for fixup commit `<sha>` on PR #<N>. Verify each Fx label actually addresses its 1st-round Copilot finding correctly, AND spot-check for regressions the fixup might have introduced (type safety / immutability / new dead code / test coverage gaps). Report CRITICAL / IMPORTANT / MINOR / NIT with file:line."
 3. **Apply that subagent's findings** before merging — same standard as Copilot's findings would have been. Per-finding reply not strictly required (no Copilot thread to reply *to*), but record what was fixed + which SHA in the PR body or in the journal.
 4. **In the PR body**, note the stand-in arrangement:
-   > Copilot 2nd-pass blocked by Actions billing. An independent general-purpose reviewer stood in — found `<N>` IMPORTANT items, resolved in `<sha>`. See the journal entry for this phase for full list.
+   > Copilot 2nd-pass blocked by GitHub Actions. An independent general-purpose reviewer stood in — found `<N>` IMPORTANT items, resolved in `<sha>`. See the journal entry for this phase for full list.
 5. **Loop the stand-in TWICE max** — once to surface findings, once to confirm the fixup is clean. Pass 1 = independent review against the fixup commit; pass 2 = re-loop the same prompt against the latest HEAD. **"APPROVED-CLEAN" is the CONTROLLER'S derived label, not the reviewer's verdict**: the stand-in outputs only a findings list (CRITICAL/IMPORTANT/MINOR/NIT with file:line); the controller derives APPROVED-CLEAN from "pass-2 report contains zero open CRITICAL/IMPORTANT findings" — never from an approval string the reviewer states about its own pass (per `review-record.md` dispatch constraint 6: verdicts are computed, never self-declared). If pass 2 surfaces something, fix + commit and dispatch a fresh pass-2 attempt; if the loop fails to close in 3 fixup cycles, surface to the user — likely a design-level issue the stand-in is gesturing at.
 
 The PR can merge once the stand-in's pass-2 findings list derives to APPROVED-CLEAN (zero open CRITICAL/IMPORTANT) AND the local test-evidence comment is posted on the PR (per `ci-cd-gates.md` §"Posting test evidence"). The Copilot loop closure rule ("clean OR user signs off") is satisfied because (a) 1st-pass findings are all addressed + (b) the pass-2 findings list is clean (the equivalent of Copilot's "no actionable issues" re-trigger reply).

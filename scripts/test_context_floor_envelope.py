@@ -1,7 +1,7 @@
 """Regression rows for `scripts/invariants/context-floor-envelope.sh`.
 
 WHY THIS FILE EXISTS. The invariant carries a self-coverage assertion, and
-that assertion had an off-switch twice in a row. An earlier version let `PLC_CFE_ROOT` relocate the scanned
+that assertion once had an off-switch, and then another. An earlier version let `PLC_CFE_ROOT` relocate the scanned
 set outright; a later one gated the relocation behind `PLC_CFE_SELFTEST=1`, which a caller could set
 from OUTSIDE for the same silent pass -- an environment variable spelled in the script's own
 source is not a capability. Both times the close gate showed a bare check mark, because

@@ -23,6 +23,11 @@ set -uo pipefail
 NAME="backlog-no-title-markers"
 F="docs/BACKLOG.md"
 
+# Character-safe truncation for the FAIL diagnostic below. Sourced, not reimplemented:
+# this repository already has one correct implementation and a second would be a second thing to
+# keep right. Still jq-only -- `utf8-text.sh` is pure bash and calls no python3.
+. "$(dirname "${BASH_SOURCE[0]}")/../utf8-text.sh"
+
 pass() { printf 'PASS %s: %s\n' "$NAME" "$1"; exit 0; }
 fail() { printf 'FAIL %s: %s\n' "$NAME" "$1"; exit 1; }
 
@@ -54,9 +59,21 @@ SRC="${1:-}"
 if [ -n "$SRC" ]; then
   [ -f "$SRC" ] || fail "no such file: $SRC"
 else
-  # An absent backlog file is a legitimate state, so this branch says what it did.
-  # Silence would be indistinguishable from a guard that ran and found nothing.
-  [ -f "$F" ] || pass "$F is not present in this tree — nothing to check"
+  # WHY THIS BRANCH SPEAKS: silence would be indistinguishable from a guard that ran and found
+  # nothing. That reason is unchanged. The REASON IT GIVES had to change.
+  #
+  # It used to say absent docs/ is the normal state on every other clone, because
+  # `docs/` WAS gitignored and the tracked count WAS 0 -- true when written, retired by p39.
+  # Measured: `git ls-files docs/` returns a non-empty list. So an absent `docs/BACKLOG.md` now
+  # means a broken or partial tree, NOT a fresh clone, and the message must not hand the reader
+  # a reason that stopped being true. The old sentence is quoted here rather than deleted,
+  # because the next person to wonder why this branch exists needs to be able to read it.
+  #
+  # The verdict is deliberately still `pass`: this guard's job is closure markers in headings,
+  # and "the file I check is missing" is not a finding about headings. Whether an absent
+  # `docs/BACKLOG.md` should fail SOMETHING is a real question and it belongs to whatever owns
+  # tree completeness, not here.
+  [ -f "$F" ] || pass "$F is not present in this tree — nothing to check. NOTE: this file is tracked, so an absent copy means a partial or broken tree rather than a fresh clone"
   SRC="$F"
 fi
 
@@ -66,7 +83,28 @@ if [ -n "$OFFENDERS" ]; then
   printf 'FAIL %s: %s heading(s) still carry a closure marker. State is derived from\n' \
          "$NAME" "$(printf '%s\n' "$OFFENDERS" | grep -c '')" >&2
   printf '%s: .claude/backlog-closures.tsv — append an event there and delete the words here.\n' "$NAME" >&2
-  printf '%s\n' "$OFFENDERS" | cut -c1-140 >&2
+  # CHARACTERS, not bytes, and one line at a time.
+  #
+  # This was `cut -c1-140`, and `cut -c` counts BYTES under GNU coreutils in EVERY locale -- the
+  # finding `scripts/utf8-text.sh` exists for (p39: a generator sliced a CJK row mid-character
+  # and rewrote a backlog file as invalid UTF-8, reported by
+  # CI). `$OFFENDERS` is derived from heading PROSE, and this file's own header says prose is a
+  # legal subject, so non-ASCII input is expected rather than exceptional. Measured: under
+  # `LC_ALL=C` a CJK heading came out of this line with a dangling \351 lead byte -- mojibake in
+  # the terminal.
+  #
+  # It does NOT reproduce on a macOS shell, where BSD `cut -c` is character-aware in a
+  # UTF-8 locale, so the first measurement here said the bug was absent. `LC_ALL=C` is the
+  # portable oracle; the test pins it.
+  #
+  # Per line, because `plc_utf8_head` takes one string and `$OFFENDERS` holds one row per
+  # offending heading. The bound stays 140 -- now 140 characters -- because the reason for a
+  # bound is unchanged: this can hold every offending heading in a large file.
+  while IFS= read -r _line; do
+    printf '%s\n' "$(plc_utf8_head "$_line" 140)" >&2
+  done <<EOF_OFFENDERS
+$OFFENDERS
+EOF_OFFENDERS
   fail "closure markers found in $SRC"
 fi
 

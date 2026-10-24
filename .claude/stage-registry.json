@@ -88,14 +88,21 @@
         {
           "kind": "phase-file",
           "roots": [
-            "docs/qa-log.d",
-            "docs/archive/.pre-images/*/files/docs/qa-log.d"
+            "docs/qa-log.d"
           ]
         },
         {
           "kind": "archive-heading",
           "roots": [
             "docs/archive/brainstorming-qa-log"
+          ]
+        },
+        {
+          "kind": "fragment-marker",
+          "roots": [
+            "docs/brainstorming-qa-log.md",
+            "docs/archive/brainstorming-qa-log-archive.md",
+            "docs/archive/brainstorming-qa-log/*.md"
           ]
         }
       ],
@@ -185,14 +192,19 @@
         {
           "kind": "phase-file",
           "roots": [
-            "docs/journal.d",
-            "docs/archive/.pre-images/*/files/docs/journal.d"
+            "docs/journal.d"
           ]
         },
         {
           "kind": "archive-heading",
           "roots": [
             "docs/archive/journal"
+          ]
+        },
+        {
+          "kind": "fragment-marker",
+          "roots": [
+            "docs/archive/journal/*.md"
           ]
         }
       ],
