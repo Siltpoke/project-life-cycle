@@ -33,6 +33,7 @@ can never be attributed to the fixture's shape.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -51,19 +52,19 @@ MANIFEST: dict = {
     "product_paths": ["skills/", "commands/", "scripts/", ".claude-plugin/"],
     "retention": {
         "journal_dir": "docs/journal.d",
-        # 8 KB, NOT 1 KB, and the reason is measured rather than stylistic: a directory cap is
-        # `du -sk`, which reports ALLOCATED BLOCKS, not content bytes. On this filesystem a
-        # directory holding one 100-byte file already reports 4 K, so a
-        # 1 KB cap is breached by any non-empty directory and the under-cap row below could
-        # never be satisfied. 8 KB leaves one 4 K block of headroom for the under-cap fixture
-        # while a 40 KB fragment (44 K allocated) still breaches it decisively.
+        # 8 KB. This directory cap measures CONTENT BYTES
+        # (`find -type f -exec cat {} + | wc -c`), not `du` allocated blocks, so the old
+        # block-rounding reason for avoiding a small cap no longer applies. 8 KB is kept because
+        # the paired fixtures below are sized to it: UNDER_CAP (100 B -> 0 KB) lands under it and
+        # OVER_CAP (40 KB of content -> 39 KB) clears it decisively, so each row sits
+        # unambiguously on its intended side of the cap.
         "hot_caps": {"journal_hot": [0, 8]},
     },
     "invariants": [],
 }
 
-OVER_CAP = "x" * 40000     # ~44 K allocated against an 8 KB cap -- breaches on any block size
-UNDER_CAP = "x" * 100      # one 4 K block against an 8 KB cap -- fits, with a block to spare
+OVER_CAP = "x" * 40000     # 39 K of content against an 8 KB cap -- over
+UNDER_CAP = "x" * 100      # ~0 K of content against an 8 KB cap -- under
 
 
 def _repo(tmp_path: Path, fragment: str | None, caps_override: dict | None = None) -> Path:
@@ -168,6 +169,81 @@ def test_the_string_check_is_a_precondition_not_the_oracle() -> None:
         "scripts/close-gate.sh no longer mentions hot_caps at all -- the hot_caps port has been "
         "reverted or lost in a merge. This is the precondition, not the guarantee; the rows "
         "above are what prove the cap refuses."
+    )
+
+
+#  du blocks vs bytes
+#
+# WHAT THIS IS. `cap_dir` measured the hot zone with `du -sk` -- ALLOCATED BLOCKS, not content
+# bytes. Each tiny fragment rounds up to a 4 K block, so a directory of many small fragments
+# reports a `du` size far above the bytes it holds. Measured on the skill-diet-baseline phase
+# (2026-11-13): 10 qa-log fragments, 31 K of content, reported 52 K by `du` -> a 50 K cap refused
+# a phase whose content was well under it, on a feature branch where a drain is banned and the
+# other fragments belong to merged phases. The cap measured the wrong number.
+#
+# THE ORACLE IS THE PAIR, not either row alone. A gate that is always-quiet and a gate that is
+# always-loud both satisfy one row; only "quiet on content-under-cap AND loud on content-over-cap,
+# with the SAME dir size in du terms" proves the measurement changed from blocks to bytes.
+#
+# BOTH VARIANTS. The defect is identical in canonical (`references/close-gate.md`, warn severity)
+# and this repo's gate (`scripts/close-gate.sh`, fail severity). The severities differ on purpose
+# (retention.md 1986) and are NOT what this change touches; the measurement is. This repo's gate
+# runs the row in `diff` mode, so it is tested here. Canonical reaches the row only in `phase`
+# mode behind a full fixture, so its false-over twin lives in test_close_gate.py
+# (test_hotcap_canonical_journal_hot_zone_measures_content_not_du_blocks).
+
+# Many tiny fragments: n files of `size` bytes. Content total n*size (<< 8 KB), but each file is a
+# separate 4 K block, so `du` reports >= n*4 K -- over the 8 KB cap once n >= 3. This is the exact
+# shape measured here, in miniature.
+TINY_N = 6
+TINY_SIZE = 100
+
+
+def _many_tiny_fragments_repo(tmp_path: Path) -> Path:
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    files = {"CHANGELOG.md": "# Changelog\n\n## [Unreleased]\n"}
+    for i in range(TINY_N):
+        files[f"docs/journal.d/2026-10-{i + 10:02d}-frag.md"] = "x" * TINY_SIZE
+    return make_fixture_repo(tmp_path, manifest=json.loads(json.dumps(MANIFEST)), files=files)
+
+
+def test_hotcap_many_tiny_fragments_under_content_cap_do_not_fail_this_repo(tmp_path: Path) -> None:
+    """This repo's gate (fail severity). Content is ~600 B against an 8 KB cap, but `du` rounds the
+    six fragments to >= 24 K. Under the old `du` measurement the gate REFUSED here; the fix makes
+    it measure content bytes, so it is quiet. Paired with a real over-cap so the quiet is not a
+    gate that stopped emitting the row entirely."""
+    quiet = _run(_many_tiny_fragments_repo(tmp_path / "tiny"))
+    loud = _run(_repo(tmp_path / "real", OVER_CAP))
+
+    assert "over hot cap" in (loud.stdout + loud.stderr), (
+        "the paired real-over fixture produced no cap row, so the quiet below would be vacuous -- "
+        f"the gate is doing nothing, not measuring content\n{loud.stdout}{loud.stderr}"
+    )
+    out = quiet.stdout + quiet.stderr
+    assert "over hot cap" not in out, (
+        "du block-rounding false positive: many tiny fragments whose CONTENT is far under "
+        f"the cap were refused because their allocated block count exceeded it\n{out}"
+    )
+
+
+def test_hotcap_unreadable_fragment_fails_closed_this_repo(tmp_path: Path) -> None:
+    """FAIL-CLOSED (flagged in review). The content sum reads bytes, so an unreadable fragment is a
+    read error. It must RED the gate, not be silenced and counted as 0 bytes — that is the fail-open
+    `du` never had (du reads block allocation, not content). The fixture is otherwise well under the
+    cap, so the ONLY thing that can fail it is the unreadable file."""
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        pytest.skip("root bypasses chmod 000, so the unreadable-file path cannot be exercised here")
+    repo = _repo(tmp_path, UNDER_CAP)
+    frag = repo / "docs/journal.d/2026-01-06-fragment.md"
+    frag.chmod(0o000)
+    try:
+        r = _run(repo)
+    finally:
+        frag.chmod(0o644)  # restore so the tmp_path teardown can remove it
+    out = r.stdout + r.stderr
+    assert r.returncode != 0, f"an unreadable fragment did not fail the gate — fail-open\n{out}"
+    assert "cannot be measured" in out, (
+        f"the gate failed, but not with the read-failure reason — a different row reddened\n{out}"
     )
 
 

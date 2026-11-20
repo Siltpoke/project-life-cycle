@@ -1,5 +1,6 @@
 """The canonical close-gate bash lives inside references/close-gate.md.
 These tests extract it and actually run it — nothing else in this repo does."""
+import json
 import os
 import re
 import shlex
@@ -202,6 +203,90 @@ def test_docs_total_row_warns_over_cap(tmp_path: Path, gate_script: str) -> None
     repo = make_fixture_repo(tmp_path, MANIFEST, _docs(6, "specs"))
     result = run_gate(repo, gate_script, "phase", "1.0")
     assert "⚠ count: docs/**/*.md 6 files (cap 5)" in result.stdout
+
+
+#  du blocks vs bytes
+#
+# The journal/qa-log/changelog hot-zone caps measured the directory with `du -sk` (ALLOCATED
+# BLOCKS), so a directory of many tiny fragments reported a size far above the bytes it held and
+# a cap refused content that was well under it. Measured on skill-diet-baseline (2026-11-13): 10
+# qa-log fragments, 31 K of content, reported 52 K by du. The fix measures content bytes.
+#
+# This is canonical (warn severity, reached only in `phase` mode behind a full fixture). This
+# repo's own gate runs the same row in `diff` mode and its twin lives in test_hot_caps_gate.py.
+
+
+def _passing_phase_with_small_journal_cap(tmp_path: Path, frags: dict[str, str]) -> Path:
+    """An otherwise-passing phase fixture whose journal hot-zone cap is tightened to 8 KB, with
+    `frags` written into docs/journal.d. 8 KB lets a handful of 4 K-block fragments exceed the
+    cap in du terms while their content stays far under it — the exact shape, in miniature.
+    The fragment names are 2025-* so the fixture's own 2026-01-01 FACT fragment stays NEWEST and
+    the journal FACT check still passes."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    repo = _make_otherwise_passing_phase_fixture(tmp_path, spec_count=1)
+    man_path = repo / ".claude/close-gate.json"
+    manifest = json.loads(man_path.read_text(encoding="utf-8"))
+    manifest.setdefault("retention", {}).setdefault("hot_caps", {})["journal_hot"] = [0, 8]
+    man_path.write_text(json.dumps(manifest), encoding="utf-8")
+    # The gate picks the newest journal fragment by mtime, and these are written last, so each
+    # carries the FACT block — otherwise the newest-by-mtime fragment would trip the FACT check
+    # and the fixture would fail for an unrelated reason instead of isolating the hot-zone row.
+    jd = repo / "docs/journal.d"
+    for name, body in frags.items():
+        (jd / name).write_text(body + _FACT_BLOCK, encoding="utf-8")
+    return repo
+
+
+def test_hotcap_canonical_journal_hot_zone_measures_content_not_du_blocks(
+    tmp_path: Path, gate_script: str
+) -> None:
+    """The oracle is the PAIR. A gate always-quiet and a gate always-loud each satisfy one half;
+    only quiet-on-content-under + loud-on-content-over, at a du size that is over in BOTH, proves
+    the measurement moved from blocks to bytes."""
+    # false-over: four 100-byte fragments. Content ~400 B; du rounds each to a 4 K block -> >=16 K,
+    # over the 8 KB cap. Under the old du measurement this warned.
+    quiet = _passing_phase_with_small_journal_cap(
+        tmp_path / "quiet", {f"2025-12-{i:02d}-tiny.md": "x" * 100 for i in range(1, 5)}
+    )
+    qr = run_gate(quiet, gate_script, "phase", "1.0")
+    # loud: one fragment whose CONTENT (20 K) exceeds the 8 KB cap -> must still warn after the fix.
+    loud = _passing_phase_with_small_journal_cap(
+        tmp_path / "loud", {"2025-12-01-big.md": "x" * 20000}
+    )
+    lr = run_gate(loud, gate_script, "phase", "1.0")
+
+    assert "journal hot zone over hot cap" in lr.stdout, (
+        "the paired content-over fixture drew no warn row, so the quiet assertion below would be "
+        f"vacuous\n{lr.stdout}"
+    )
+    assert "journal hot zone over hot cap" not in qr.stdout, (
+        "du block-rounding false positive in canonical: fragments whose content is far "
+        f"under the cap drew a warn row from their allocated block count\n{qr.stdout}"
+    )
+
+
+def test_hotcap_canonical_unreadable_fragment_warns_not_silent(
+    tmp_path: Path, gate_script: str
+) -> None:
+    """FAIL-CLOSED, canonical/warn severity (flagged in review). An unreadable fragment must not be
+    silenced and counted as 0 bytes; canonical surfaces it as a warn row (its severity), never a
+    silent pass. The unreadable fragment is an OLDER one so the newest-by-mtime fragment (carrying
+    the FACT block) still reads and the journal FACT check is not what reddens."""
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        pytest.skip("root bypasses chmod 000, so the unreadable-file path cannot be exercised here")
+    repo = _passing_phase_with_small_journal_cap(
+        tmp_path, {f"2025-12-0{i}-tiny.md": "x" * 100 for i in range(1, 4)}
+    )
+    bad = repo / "docs/journal.d/2025-12-01-tiny.md"
+    bad.chmod(0o000)
+    try:
+        r = run_gate(repo, gate_script, "phase", "1.0")
+    finally:
+        bad.chmod(0o644)  # restore so the tmp_path teardown can remove it
+    assert "journal hot zone" in r.stdout and "could not be read" in r.stdout, (
+        "canonical silenced an unreadable fragment instead of surfacing it as a warn row "
+        f"(fail-open)\n{r.stdout}"
+    )
 
 
 def test_screenshots_are_never_counted(tmp_path: Path, gate_script: str) -> None:

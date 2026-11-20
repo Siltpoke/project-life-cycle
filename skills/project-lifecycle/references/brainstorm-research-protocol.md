@@ -447,12 +447,21 @@ the human's `Locked` / `User decision`. Re-ordering a row here silently re-order
 | 19 | `User decision (verbatim)` | — | ✅ |
 | 20 | `Decision note` | — | ✅ (`none` is a valid value) |
 | 21 | `Resolution date` | — | ✅ |
+| 22 | `Revisit if:` | — | ✅ (`none` is a valid value) |
 
-Three of these are **never droppable**, because the empty answer is itself information:
-`2nd-agent's own suggestion` and `Decision note` take a required `none`, and `Same family` a
-required `n/a — compressed (<criterion>)`. An omitted field cannot be told apart from one that was
-checked and came back clean, and that ambiguity is expensive;
-writing the empty answer out is the whole point.
+Field 22 records **the condition under which this locked decision should be reopened** — the
+decision's own expiry clause, the counterpart to a backlog item's `Trigger` / `Exit` and an ADR's
+revisit semantics (`references/adr.md`), which a locked decision otherwise lacks. Without it a
+decision's shelf life is implicit: its premise can lapse and nothing says so. Measured case:
+"no second consumer, so don't build the registry" was a correct decision whose premise lapsed weeks
+later, and the lapse surfaced through a chance conversation, not any mechanism. Had it carried
+`Revisit if: a second usable foreign CLI is installed`, it would have rung on its own.
+
+Four of these are **never droppable**, because the empty answer is itself information:
+`2nd-agent's own suggestion`, `Decision note`, and `Revisit if:` take a required `none`, and
+`Same family` a required `n/a — compressed (<criterion>)`. An omitted field cannot be told apart
+from one that was checked and came back clean, and this project has now paid for that ambiguity
+three separate times; writing the empty answer out is the whole point.
 
 **Meaning:** PROPOSED = researched, reviewed, waiting on the human. LOCKED = the human answered; the decision is final. PROPOSED is written by steps 1-6; the LOCKED-only fields are written from the user's answer at step 7.
 

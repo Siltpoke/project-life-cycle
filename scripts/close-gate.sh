@@ -631,6 +631,8 @@ RUN_DIVERGENCE=0
 RUN_CLOSURE_DECL=0
 RUN_EXPERIMENT_GATE=0
 RUN_SIDELINES=0
+RUN_UI_MOCK=0
+RUN_STORY_SMOKE=0
 SKIP_WHY=""
 
 # 13 is armed by the MANIFEST KEY, read HERE where the check-set line is computed -- the
@@ -665,12 +667,37 @@ case "$MODE" in
       *)            RUN_EXPERIMENT_GATE=0 ;;
     esac
     RUN_SIDELINES="$SL_ARMED"
-    SKIP_WHY="nothing skipped — phase close runs every declared check"
+    # 14 ui-mock-contract: PHASE-ONLY, armed by `ui_change:true` and read HERE (row 12/13's
+    # placement, not row 11's) so an unarmed non-UI phase prints as SKIPPED, never vanishes. A phase
+    # that does not change UI does not declare the key and is not asked for a mock. The machine
+    # verifies a mock LINK + a checked confirm box are present; it cannot verify the user actually
+    # confirmed — that half is a human marker, stated in the row and in the output.
+    [ "$(g ui_change)" = "true" ] && RUN_UI_MOCK=1
+    # 15 story-driven-smoke: PHASE-ONLY, armed by `smoke_a_glob` (a project that configures a
+    # Track A manual smoke). A project with no Track A smoke is not asked to story-drive one. It
+    # verifies every user-story AC id is NAMED in the Track A file; it cannot verify the step walked
+    # the UI correctly — the human smoke run does that.
+    [ -n "$(g smoke_a_glob)" ] && RUN_STORY_SMOKE=1
+    # Built from EMPTY, one `if` per off-check (never `[ … ] && VAR=`, which this repo measured as a
+    # set -e abort), joined with "; ". "nothing skipped" is the fallback ONLY when nothing is off --
+    # an earlier version led with it and then appended "; 14 is off", so the line claimed both
+    # "nothing skipped" and "14 skipped" at once (caught in review). Each reason keeps its full text;
+    # the old `${SKIP_WHY%% —*}` trim silently dropped the prior reason's tail.
+    SKIP_WHY=""
     if [ "$RUN_EXPERIMENT_GATE" = 0 ]; then
       SKIP_WHY="12 is off: experiment_gate is ${EG_POLICY:-<unset>} — an adopter who has not configured it is not failed by it, and this line is why \"off\" and \"this gate has no check 12\" do not look the same"
     fi
     if [ "$RUN_SIDELINES" = 0 ]; then
-      SKIP_WHY="${SKIP_WHY%% —*}; 13 is off: no \`sidelines\` key in the manifest — an adopter who has not configured a side-discovery queue is not failed by it, and this line is why \"off\" and \"this gate has no check 13\" do not look the same"
+      SKIP_WHY="${SKIP_WHY:+$SKIP_WHY; }13 is off: no \`sidelines\` key in the manifest — an adopter who has not configured a side-discovery queue is not failed by it, and this line is why \"off\" and \"this gate has no check 13\" do not look the same"
+    fi
+    if [ "$RUN_UI_MOCK" = 0 ]; then
+      SKIP_WHY="${SKIP_WHY:+$SKIP_WHY; }14 is off: no \`ui_change:true\` in the manifest, so this non-UI phase is not asked for a confirmed-mock link (\"off\" and \"this gate has no check 14\" must not look the same)"
+    fi
+    if [ "$RUN_STORY_SMOKE" = 0 ]; then
+      SKIP_WHY="${SKIP_WHY:+$SKIP_WHY; }15 is off: no \`smoke_a_glob\` in the manifest, so a project with no Track A smoke is not asked to story-drive it"
+    fi
+    if [ -z "$SKIP_WHY" ]; then
+      SKIP_WHY="nothing skipped — phase close runs every declared check"
     fi
     ;;
   task)
@@ -987,6 +1014,8 @@ cs "$RUN_AC"           "10(ac-oracle-binding)"
 cs "$RUN_CLOSURE_DECL" "11(closure-declaration)"
 cs "$RUN_EXPERIMENT_GATE" "12(experiment-gate)"
 cs "$RUN_SIDELINES" "13(sidelines)"
+cs "$RUN_UI_MOCK"      "14(ui-mock-contract)"
+cs "$RUN_STORY_SMOKE"  "15(story-driven-smoke)"
 echo "check-set ($MODE): running ${CS_RAN:-none}"
 echo "check-set ($MODE): skipped ${CS_SKIPPED:-none} — $SKIP_WHY"
 echo "check-set ($MODE): product_paths declared [${PP_DISPLAY:-<none: unusable product_paths>}] · touched by $RANGE [${PP_MATCHED:-none}]"
@@ -1832,8 +1861,8 @@ $(printf '%s\n' "$SL_DECLINED_BAD" | sed 's/^/      /')
             SL_JBAD=1
           fi
           # Every landing id must appear in the record. TWO matchers, and the difference is measured:
-          #   backlog id -- needs a RIGHT boundary. A plain substring search for `B9001` also matches
-          #     inside `B90012`, so `B90012` would have
+          #   backlog id -- needs a RIGHT boundary. A plain substring search for `B7012` returned 3
+          #     hits on the real fragment, every one of them inside `B7126`, so `B7126` would have
           #     vouched for an id nobody recorded.
           #   fix sha -- LEFT boundary only, matched on the first 7 characters. The journal routinely
           #     writes the short form while the queue may carry the long one; a right boundary would
@@ -1857,7 +1886,7 @@ $(printf '%s\n' "$SL_DECLINED_BAD" | sed 's/^/      /')
           done
           for _slsha in $(grep -oE '^- \[landed:fix [0-9a-f]{7,40}\]' "$SL_QUEUE" 2>/dev/null | sed -E 's/^- \[landed:fix //; s/\]$//'); do
             # Bash substring, not `cut -c1-7`: that form is banned by shape (scripts/utf8-text.sh)
-            # because it counts bytes under GNU coreutils and characters on BSD. The value is
+            # B7146) because it counts bytes under GNU coreutils and characters on BSD. The value is
             # `[0-9a-f]{7,40}` by the grep that produced it, so this needs no exemption -- and an
             # exemption would be a hole where a plain expansion does the job with no subprocess.
             _slp="${_slsha:0:7}"
@@ -1873,6 +1902,103 @@ $(printf '%s\n' "$SL_DECLINED_BAD" | sed 's/^/      /')
         # because "fix the first thing" costs another full gate run to discover the second.
         if [ "$SL_JBAD" = 0 ]; then
           ok "sidelines: ${SL_ITEMS} item line(s) in \`$SL_QUEUE\`, zero untriaged$([ "${SL_NONE:-0}" -gt 0 ] && printf ' (and the explicit \`[none]\` verdict is present)'), every \`refused\` carries its class and every \`declined\` its reason, and the outcome reached this phase's journal — a side-discovery section exists and every landing id appears, somewhere in $SL_WHERE. $SL_BOUND. $SL_BOUND_PHASE. $SL_BOUND_HEADING" sidelines
+        fi
+      fi
+    fi
+  fi
+fi
+
+# 14. ui-mock-contract. A UI-changing phase must carry a user-CONFIRMED mock as the UI
+#     contract -- a mock artifact LINK embedded in the story/spec plus a CHECKED confirmation
+#     marker -- so the builder and the acceptance verifier diff against the mock, not prose.
+#     ARMED BY `ui_change:true`, read at the check-set so a non-UI phase prints SKIPPED and never
+#     vanishes. WHAT IT VERIFIES IS PRESENCE, AND THE ✓ SAYS SO: a mock link + a checked `- [x]`
+#     box are present. It CANNOT verify the user actually confirmed -- that half is a human marker,
+#     the same surface as every human-approval marker in this skill. A pass read as "the user
+#     signed off on this exact mock" is the claim-wider-than-mechanism failure this repo files
+#     against itself.
+if [ "$RUN_UI_MOCK" = 1 ]; then
+  UIM_FILES=""
+  for _uig in "$(g user_story_glob)" "$(g phase_docs_glob)"; do
+    [ -n "$_uig" ] || continue
+    # shellcheck disable=SC2086
+    set -- $_uig
+    for _uif in "$@"; do [ -f "$_uif" ] && UIM_FILES="$UIM_FILES $_uif"; done
+  done
+  if [ -z "${UIM_FILES# }" ]; then
+    bad "ui-mock-contract: \`ui_change:true\` is declared but no story or spec file resolves via \`user_story_glob\`/\`phase_docs_glob\` for phase $PHASE -- there is nowhere for the UI contract to live"
+  else
+    # shellcheck disable=SC2086
+    UIM_LINK="$(grep -hiE '(mock|ui contract).*\]\([^)]+\)' $UIM_FILES 2>/dev/null | head -1 || true)"
+    # shellcheck disable=SC2086
+    # Require BOTH "confirm" and "mock" on the checked line, in either order. An earlier pattern
+    # accepted `(confirm|signed).*(mock|ui)`, and the `ui` alternative matched the letters inside
+    # "build"/"guide"/"quick", so `- [x] Reviewer confirmed the build passes` -- a checked box with
+    # nothing to do with the mock -- greened this check (caught in review). "mock" is mandatory now.
+    UIM_CONFIRM="$(grep -hiE '^[[:space:]]*- \[x\].*confirm.*mock|^[[:space:]]*- \[x\].*mock.*confirm' $UIM_FILES 2>/dev/null | head -1 || true)"
+    if [ -z "$UIM_LINK" ]; then
+      bad "ui-mock-contract: no confirmed-mock artifact LINK in the story/spec for phase $PHASE (a \`[label](path-or-url)\` on a Mock / UI Contract line). A prose description of the UI is exactly what this check rejects -- build the mock, embed its link"
+    elif [ -z "$UIM_CONFIRM" ]; then
+      bad "ui-mock-contract: a mock link is present but no CHECKED user-confirmation marker (\`- [x] … confirmed … mock\`) -- \"approved-in-concept\" words are not confirmation. The machine verifies the box is checked; it cannot verify the user truly confirmed"
+    else
+      # the approved visual must land INLINE in the spec/story (references/output-format.md
+      # Artifact 1), not only be linked. EXISTENCE of a Markdown image `![alt](src)` or an HTML
+      # `<img` tag -- never that it is the right image (human marker, same boundary as above).
+      # shellcheck disable=SC2086
+      UIM_IMG="$(grep -hE '!\[[^]]*\]\([^)]+\)|<img[[:space:]]' $UIM_FILES 2>/dev/null | head -1 || true)"
+      if [ -z "$UIM_IMG" ]; then
+        bad "ui-mock-contract: no inline image embed (\`![alt](path-or-url)\`) in the story/spec for phase $PHASE -- the approved mock/screenshot must be embedded in the final spec, a link alone is not the visual landing in the spec. EXISTENCE is what is checked; whether it is the right image stays a human call"
+      else
+        ok "ui-mock-contract: a mock artifact link, a checked user-confirmation marker AND an inline image embed are present for phase $PHASE -- PRESENCE/EXISTENCE only, NOT proof the user confirmed this exact mock or that the embedded image is the approved one (that half is a human marker, by design)"
+      fi
+    fi
+  fi
+fi
+
+# 15. story-driven-smoke. A Track A manual smoke must WALK THE USER STORY -- every
+#     acceptance-criterion id in the story appears in the Track A checklist -- so "smoke passed"
+#     means the promises were walked, not that some steps ran. ARMED BY `smoke_a_glob` (a project
+#     that configures a Track A smoke). It verifies each AC id is NAMED in Track A; it CANNOT verify
+#     the step walked the UI correctly -- the human smoke run does that. Presence, not proof. When
+#     armed but there is no story to drive it (exempt_user_story or no user_story_glob), it prints a
+#     visible ⊘ skip rather than a pass -- "off" and "nothing to check" must not look the same.
+if [ "$RUN_STORY_SMOKE" = 1 ]; then
+  SDS_STORY_GLOB="$(g user_story_glob)"
+  SDS_SMOKE_GLOB="$(g smoke_a_glob)"
+  SDS_EXEMPT="$(jq -r '.exempt_user_story // false' "$M" 2>/dev/null || echo false)"
+  if [ "$SDS_EXEMPT" = "true" ] || [ -z "$SDS_STORY_GLOB" ]; then
+    echo "⊘ story-driven-smoke: \`smoke_a_glob\` is declared but there is no user story to drive it (exempt_user_story:true or no \`user_story_glob\`) -- skipped, not a pass"
+  else
+    # shellcheck disable=SC2086
+    set -- $SDS_STORY_GLOB
+    SDS_STORY_N=$#
+    SDS_STORY="${1:-}"
+    # shellcheck disable=SC2086
+    set -- $SDS_SMOKE_GLOB
+    SDS_SMOKE="${1:-}"
+    if [ "$SDS_STORY_N" -gt 1 ]; then
+      bad "story-driven-smoke: \`user_story_glob\` matched $SDS_STORY_N files for phase $PHASE -- exactly one is required, never a silent pick (check 10 also guards this; kept here so check 15 is correct in isolation)"
+    elif [ "$#" -gt 1 ]; then
+      bad "story-driven-smoke: \`smoke_a_glob\` matched $# Track A files for phase $PHASE -- exactly one is required, never a silent pick"
+    elif [ ! -f "$SDS_STORY" ]; then
+      bad "story-driven-smoke: no user story resolves for phase $PHASE via \`$SDS_STORY_GLOB\` -- a Track A smoke is armed but there is no story to walk (set exempt_user_story:true if this phase legitimately has none)"
+    elif [ ! -f "$SDS_SMOKE" ]; then
+      bad "story-driven-smoke: no Track A smoke file resolves for phase $PHASE via \`$SDS_SMOKE_GLOB\` -- the user-visible phase has not written its manual smoke"
+    else
+      SDS_ACS="$(grep -oE '\*\*AC[0-9]+' "$SDS_STORY" 2>/dev/null | grep -oE 'AC[0-9]+' | sort -u || true)"
+      if [ -z "$SDS_ACS" ]; then
+        bad "story-driven-smoke: no acceptance-criterion ids (\`**AC1**\`, …) found in the user story \`$SDS_STORY\` -- a story with no numbered ACs cannot drive a smoke"
+      else
+        SDS_MISSING=""
+        for _sdsac in $SDS_ACS; do
+          # Explicit boundary, not `grep -qw`: -w treats `.` as a word edge, so a sub-id `AC1.2`
+          # would satisfy the parent `AC1`. The id must not be followed by a digit, letter or `_`, nor by `.`+digit (a sub-id); a sentence-final `AC1.` still matches.
+          grep -Eq -- "(^|[^[:alnum:]_])${_sdsac}($|[^[:alnum:]_.]|[.]([^[:digit:]]|$))" "$SDS_SMOKE" 2>/dev/null || SDS_MISSING="$SDS_MISSING $_sdsac"
+        done
+        if [ -n "${SDS_MISSING# }" ]; then
+          bad "story-driven-smoke: Track A \`$SDS_SMOKE\` does not name these user-story AC id(s):${SDS_MISSING} -- the smoke does not walk the whole story, so those promises ship unwalked. Add a step per AC"
+        else
+          ok "story-driven-smoke: Track A \`$SDS_SMOKE\` names every user-story AC id ($(printf '%s' "$SDS_ACS" | tr '\n' ' ' | sed 's/ $//')) -- NAMED, not proof each step walked the UI correctly (the human smoke run does that)"
         fi
       fi
     fi
@@ -2115,25 +2241,36 @@ cap_file() { # $1=path $2=hot_caps-key $3=default-lines $4=default-kb $5=label
   if [ -n "$_over" ]; then cap_over "$5" "$_over"; else ok "$5 under hot cap"; fi
 }
 
-# A DIRECTORY's cap: KB only. The lines dimension is meaningless for a directory total, and
-# canonical says so too — kept identical rather than "improved", so the variants stay comparable.
+# A DIRECTORY's cap: KB of CONTENT only. The lines dimension is meaningless for a directory total.
 #
-# WHAT THE NUMBER IS, stated because it is NOT the number a content-size check gives. `du -sk`
-# reports ALLOCATED BLOCKS, not content bytes. Measured on this filesystem: a
-# directory holding a single 100-byte file reports 4 K. So a directory of many tiny fragments
-# can exceed a cap that its CONTENT does not, and the gap is (file count x block size).
-#
-# At the shipped caps (journal 100K, qa-log 50K) that difference is noise, and `du` is kept for
-# byte-comparability with canonical. But it means two honest numbers exist for one cap: a
-# content-based count (`find | cat | wc -c`) measures journal CONTENT, while this row would
-# have measured allocated size. Neither is wrong; they answer different questions, and a reader
-# comparing them should not conclude one of them is a bug. `references/retention.md` says which
-# one the policy key means.
+# MEASURES CONTENT BYTES, not `du` allocated blocks. `du -sk` reports blocks: a directory of
+# many tiny fragments rounds each file up to a filesystem block (4 K here) and reports a size far
+# above the bytes it holds. Measured on phase skill-diet-baseline: 10 qa-log fragments,
+# 31 K of content, reported 52 K by `du` — a 50 K cap refused a phase whose content was well under
+# it, on a feature branch where a drain is banned and the other fragments belong to merged phases.
+# The cap measured the wrong number. `find -type f -exec cat {} + | wc -c` sums the real content, so
+# the cap polices bytes — matching cap_file above and the file cap's own evidence (`find | cat | wc -c`).
+# `-exec cat {} +` invokes cat only when files exist, so an empty directory yields a clean 0 (cat is
+# never run against a terminal). Canonical (references/close-gate.md) measures the same way as of
+# This cap; the two variants stay comparable in MEASUREMENT and differ only in SEVERITY — this one fails
+# the gate, canonical warns (references/retention.md §"Which gate variant reads each key").
 cap_dir() { # $1=path $2=hot_caps-key $3=default-kb $4=label
   [ -d "$1" ] || return 0
   if cap_none "$2"; then ok "$4 exempt (retention.hot_caps: none)"; return 0; fi
   _mk="$(cap_val "$2" 1 "$3")"
-  _k=$(( $(du -sk "$1" | cut -f1) ))
+  # FAIL-CLOSED read (flagged in review): if any fragment cannot be read, cat exits non-zero and
+  # `find -exec … +` propagates it, so we RED rather than silently undercount. A swallowed read
+  # error would count the unreadable file as 0 bytes and let a real overflow pass — the fail-open a
+  # gate must never have, and one `du -sk` did not have (it reads block allocation, not content).
+  # stderr stays quiet; the VERDICT is what goes loud. `</dev/null` keeps cat off the terminal.
+  _szt="$(mktemp)"
+  if find "$1" -type f -exec cat {} + </dev/null >"$_szt" 2>/dev/null; then
+    _k=$(( $(wc -c < "$_szt") / 1024 )); rm -f "$_szt"
+  else
+    rm -f "$_szt"
+    bad "$4 cannot be measured — a file under \`$1\` could not be read; a content-byte cap that silenced that would undercount and pass a real overflow"
+    return 0
+  fi
   if [ "$_mk" -gt 0 ] && [ "$_k" -gt "$_mk" ]; then cap_over "$4" "size ${_k}K>${_mk}K"
   else ok "$4 under hot cap"; fi
 }

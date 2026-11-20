@@ -1,27 +1,45 @@
 name: Validate
 
+# pull_request only. The full suite runs once per change, at PR time. The redundant
+# re-run on the merge-push to main was dropped here — strict branch protection ("require branches
+# up to date before merging") already forces a PR behind main to rebase and re-run before it can
+# merge, so the main re-run proved nothing a PR run had not. A tiny alarm on push:main lives in
+# main-smoke.yml. See the design spec.
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
 
-# Least privilege for GITHUB_TOKEN: this job reads the tree, installs pinned tools and runs
-# tests. It writes nothing back to the repository, so a compromised step holds a token that
-# cannot push, edit a PR or create a release.
+# Least privilege for GITHUB_TOKEN, because the default is whatever the repository setting says
+# and that can be read/write. This job reads the tree, installs pinned tools and runs tests; it
+# writes nothing back to the repository, opens no PR and posts no comment. Spelling that out here
+# means a step that is later compromised -- an action update, a fetched binary -- holds a token
+# that cannot push, cannot edit a PR and cannot create a release.
+#
+# Reported by CodeQL as `actions/missing-workflow-permissions` (medium) against the published
+# mirror; `release.yml` already carried its own block (`contents: write`), which is why only this
+# file was flagged. Filed and fixed rather than dismissed: a PR from a fork is already downgraded
+# to read-only by GitHub, so this is not urgent, and it is two lines.
 permissions:
   contents: read
 
-# A new push to a PR cancels that same PR's run still in flight. The group is the PR number, so
-# one PR never cancels another's run; every other event gets a group of its own run id, so a
-# run on main is never cancelled or queued.
+# A new push to a PR cancels that same PR's run still in flight: a run on a superseded commit
+# costs ~55 billed minutes and its verdict is about code nobody will merge. Measured: the job
+# averages 48 min over October's 45 executed runs, and nothing cancelled a superseded one.
+#
+# The group is the PR number, so one PR can never cancel another PR's run. Since the lean-CI change this
+# workflow triggers on pull_request only, so every run is a PR run and the group is always the
+# PR number — there is no push:main run to key separately any more.
+#
+# Known edge, same PR only: "Re-run jobs" on a run for an OLDER commit joins the same group and
+# cancels the run for the newest commit. Re-run the newest run instead. Keying the group on the
+# head SHA would remove the edge but also remove the cancellation this block exists for.
 concurrency:
-  group: validate-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: validate-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -41,13 +59,88 @@ jobs:
       - name: Validate manifests + skill references
         run: python3 scripts/validate.py
 
-      - name: Gate + hook unit tests
+      # install the leak gate BEFORE the suite, because one row refuses to be skipped.
+      #
+      # Until that change the leak checks lived only in .git/hooks/pre-push on one machine. Ten rows
+      # asserting their content were gated on that file existing, so on CI they SKIPPED -- and a
+      # skip prints the same green tick as a pass. The checks are tracked now, so those ten rows
+      # read the tracked file and need nothing installed. One row does need it:
+      # test_the_block_is_installed_and_reachable asks whether the block is actually wired into
+      # the hook git runs, which no tracked file can answer about itself. It carries no suppression
+      # marker ON PURPOSE -- that guard exists because a clone with no protection looked exactly like a
+      # clone with it -- so it FAILS where the gate is not installed. That is the row working, and
+      # this step is why CI is not such a place.
+      #
+      # --check runs straight after, so a failure here names its own cause (which of five clauses)
+      # instead of surfacing two steps later as a puzzling pytest failure.
+      - name: Install the leak gate
         run: |
-          python -m pip install --quiet pytest pyyaml
-          python -m pytest scripts/ -q --durations=30
+          bash scripts/install-leak-gate-hook.sh
+          bash scripts/install-leak-gate-hook.sh --check
+
+      # run the two invariants this phase declared, because three places said they do.
+      #
+      # An independent review, 2026-10-14, found the claim false: nothing in the tree ran either
+      # script and no CI step did either, while scripts/leak-gate-prepush.sh,
+      # private/leak-gate/patterns.txt and scripts/invariants/leak-gate-installed.sh all asserted
+      # "runs in CI". AC2, AC3 and AC4 are phrased as "when the repo-integrity INVARIANTS are
+      # run", so a declared-but-never-executed invariant closes none of them. `close-gate.sh` is
+      # not run here (it needs phase artifacts and a branch range), so the two are invoked
+      # directly -- which is what the sentences claim and all that they claim.
+      #
+      # They are invoked AFTER the install step on purpose: leak-gate-installed asks whether this
+      # checkout has the block wired in, and the answer before that step is legitimately no.
+      - name: The leak-gate invariants, actually run 
+        run: |
+          rc=0
+          /bin/bash scripts/invariants/leak-patterns-present.sh || rc=$?
+          /bin/bash scripts/invariants/leak-gate-installed.sh || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::a declared leak-gate invariant failed — read its own message above; it names which clause and what to do"
+            exit 1
+          fi
+
+      # zero skips for "the hook is untracked", MEASURED rather than argued.
+      #
+      # The step below prints one green tick whether a row passed or skipped, which is exactly how
+      # ten rows went unverified on CI for as long as the hook was untracked. This re-runs the two
+      # files that carry those rows for a machine-readable report and refuses ANY skip in it.
+      #
+      # It deliberately does not know WHY a row might skip. A guard that restates the skip
+      # conditions drifts from the suite the first time a new reason is added; this one only knows
+      # that something skipped, so a reason invented later is covered by construction. An empty
+      # report fails too: zero collected cases is indistinguishable from zero skips.
+      #
+      # Same two-verdict shape as the width table's step below, and for the same measured reason --
+      # a single exit code made that step report "did not all run" for a FAILING suite, sending the
+      # reader to look for a skip that was not there.
+      - name: The leak-gate content rows may not skip 
+        run: |
+          python -m pip install --quiet pytest
+          rc_tests=0
+          python -m pytest scripts/test_cjk_exemption_scope.py \
+                           scripts/test_retired_docs_enforcers.py -q \
+            --junit-xml=leakgate-junit.xml || rc_tests=$?
+          rc_skips=0
+          python scripts/assert_no_skipped_tests.py leakgate-junit.xml || rc_skips=$?
+          if [ "$rc_tests" -ne 0 ]; then
+            echo "::error::the leak-gate content rows RAN and FAILED — the tracked gate and what these rows assert about it disagree; see above"
+          fi
+          if [ "$rc_skips" -ne 0 ]; then
+            echo "::error::the leak-gate content rows did not all RUN — something skipped, so this run verified less than it looks like. Before that guard the reason was always 'the pre-push hook is untracked'; that reason is gone, so a skip here is a NEW one and needs reading, not re-suppressing"
+          fi
+          if [ "$rc_tests" -ne 0 ] || [ "$rc_skips" -ne 0 ]; then
+            exit 1
+          fi
+
+      # the gate + hook unit tests moved to the `pytest-shard` job below, split over four
+      # machines. They were one serial step here that took 57 of the run's 62 minutes.
+      # pyyaml stays installed on this job: the hook behaviour suite below needs it.
+      - name: Install pyyaml (hook behaviour suite)
+        run: python -m pip install --quiet pyyaml
 
       # p35: the durable half. The step above prints one green tick whether a test passed
-      # or skipped, and that is exactly how the width table went unchecked here
+      # or skipped, and that is exactly how the width table went unchecked here for weeks
       # while every run reported success. This step re-runs the width suite for a machine-
       # readable report and refuses ANY skip in it.
       #
@@ -97,8 +190,8 @@ jobs:
             exit 1
           fi
 
-      # pyyaml is needed by the frontmatter assertion inside test-hooks.sh, not by the
-      # gate tests — it is installed in the step above because both run on this job.
+      # pyyaml is needed by the frontmatter assertion inside test-hooks.sh; it is installed by
+      # the "Install pyyaml" step above.
       - name: Hook behaviour suite
         run: |
           # `|| rc=$?` is load-bearing: GitHub runs `run:` blocks under `bash -e`, and
@@ -155,3 +248,140 @@ jobs:
           # dot-prefixed directories (measured, see lychee-pin.env next to LYCHEE_TARGET_HIDDEN)
           # -- .claude/ is one, and it holds tracked .md files this scan must reach.
           "$LYCHEE" $LYCHEE_ARGS_COMMON "$LYCHEE_TARGET" "$LYCHEE_TARGET_HIDDEN"
+
+  # the gate + hook unit tests, split over four machines.
+  #
+  # Until the CI split this was one serial step in `validate`: 2641 tests, 57 of the run's 62 minutes
+  # (run 40800675287, ubuntu-24.04). About thirty tests run the whole close gate and are most of
+  # that time. They cannot run in parallel on ONE machine: several run the gate in the real
+  # checkout and write and delete its ledger files there. Four machines each have their own
+  # checkout, so the split cannot make two tests share a file.
+  #
+  # Until a later change these tests existed but ran nowhere: validate.py has no pytest reference and there
+  # is no Makefile, so the suites protected nothing unless a human remembered to run them.
+  #
+  # The split is round-robin over the collected order (scripts/pytest_shard.py). Each shard
+  # uploads a manifest -- the full list it collected and the part it ran -- and the
+  # `pytest-shards-whole` job refuses unless the parts cover the list exactly once. Without that
+  # job, a bug in the split would make the suite smaller and every shard still green.
+  pytest-shard:
+    name: Gate + hook unit tests (shard ${{ matrix.shard }}/4)
+    runs-on: ubuntu-24.04
+    strategy:
+      # Every shard reports, so one red shard does not hide what the other three found.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      # Same checkout as `validate`, for the same reason: some tests read history.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      # test_the_block_is_installed_and_reachable asks whether the leak gate is wired into the
+      # hook git runs, and fails where it is not. Whichever shard holds it needs this.
+      - name: Install the leak gate
+        run: |
+          bash scripts/install-leak-gate-hook.sh
+          bash scripts/install-leak-gate-hook.sh --check
+
+      # --durations=30 only prints the slowest test phases after the summary; it does not change
+      # which tests run or the exit code. It says where each shard's time went.
+      #
+      # `-n 2 --dist loadfile` runs this shard's slice on both of the runner's two
+      # vCPUs instead of leaving one idle. `-n 2` states the 2-vCPU contract explicitly rather
+      # than trusting `-n auto`'s CPU detection (surprised on shared runners). Rollback is `-n 0`
+      # here (xdist stays installed, parallelism off) PLUS relaxing the `-n 2` assertion in
+      # the parallelism contract test (BL-9) pins the parallel contract and
+      # WILL red on `-n 0` by design, so a rollback is a conscious two-file act, not a silent
+      # revert. It is NOT a one-token change; the test is the thing that makes sure of that.
+      #
+      # `--dist loadfile` keeps every test collected from one FILE on one worker. It NARROWS but
+      # does NOT close the collision this suite was split over four machines to avoid: ~30 tests
+      # run the whole close gate in the real checkout and write/delete its ledger files there (see
+      # the job comment above). Two DIFFERENT files that each do this can still land on the two
+      # workers at once and collide. s4b's equivalence run (serial vs `-n 2`, same pass/fail set)
+      # is the oracle that says whether that happens here; a parallel-only failure is isolated
+      # (own temp checkout / `xdist_group`) before this lands, never silenced. loadfile is the
+      # flag; the equivalence run is the proof.
+      - name: Gate + hook unit tests
+        env:
+          PLC_PYTEST_SHARD: ${{ matrix.shard }}/4
+          PLC_PYTEST_SHARD_MANIFEST: pytest-shard-${{ matrix.shard }}.json
+        run: |
+          python -m pip install --quiet pytest pytest-xdist pyyaml
+          python -m pytest scripts/ -q --durations=30 -n 2 --dist loadfile
+
+      # if: always() -- a red shard still uploads, so the completeness check can say whether the
+      # split was whole even on a run whose tests failed.
+      - name: Upload the shard manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-shard-${{ matrix.shard }}
+          path: pytest-shard-${{ matrix.shard }}.json
+          if-no-files-found: error
+
+  pytest-shards-whole:
+    name: Every unit test ran in exactly one shard
+    needs: pytest-shard
+    # always(): this job is the one place that reports a red shard as a red run summary line
+    # AND checks the split. Skipping it when a shard fails would leave only the shard's own red.
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download the shard manifests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: pytest-shard-*
+          merge-multiple: true
+
+      - name: Check the split
+        run: |
+          rc=0
+          python3 scripts/pytest_shard.py check pytest-shard-1.json pytest-shard-2.json \
+            pytest-shard-3.json pytest-shard-4.json || rc=$?
+          if [ "${{ needs.pytest-shard.result }}" != "success" ]; then
+            echo "::error::a unit-test shard did not succeed (result: ${{ needs.pytest-shard.result }})"
+            rc=1
+          fi
+          exit "$rc"
+
+  # the single required status check for branch protection.
+  #
+  # Branch protection can require ONE check by name, but the matrix job `pytest-shard` reports
+  # under expanded names ("Gate + hook unit tests (shard 1/4)" ...) that a bare required-check
+  # name never matches -- so requiring the shards directly is brittle. This job fans every CI
+  # job into ONE stable name; make THIS the only required check.
+  #
+  # It requires every dependency to be `success`, NOT merely "not failure". A GitHub required
+  # check that is `skipped` counts as PASSING -- so a dependency that silently did not run (a
+  # path-skip, a cancelled matrix, an `if:` that evaluated false) must be caught here as a
+  # NON-pass, or the whole suite could be skipped and the PR still go green. `cancelled` and
+  # `failure` fail too.
+  #
+  # if: always() is mandatory. Without it this job inherits `skipped` from a failed dependency,
+  # the required check never reports, and the PR hangs forever at "Expected -- waiting for
+  # status". With it, the job always runs and always reports success or failure.
+  all-tests-passed:
+    name: All tests passed
+    needs: [validate, pytest-shard, pytest-shards-whole]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      # The gate body lives in a tested script, not inline shell, for the same reason every
+      # other CI check in this repo does (assert_no_skipped_tests.py, pytest_shard.py): inline
+      # `run:` shell runs nowhere but CI and is proven by nothing. scripts/ci-require-all-success.sh
+      # takes each dependency's result as an argument and is exercised by
+      # scripts/test_ci_require_all_success.py (the skipped-must-not-pass and empty-is-not-pass
+      # cases among them).
+      - name: Require every CI job succeeded
+        run: bash scripts/ci-require-all-success.sh '${{ needs.validate.result }}' '${{ needs.pytest-shard.result }}' '${{ needs.pytest-shards-whole.result }}'

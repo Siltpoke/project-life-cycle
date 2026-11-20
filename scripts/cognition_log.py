@@ -109,6 +109,9 @@ def main(argv=None) -> int:
     a.add_argument("--author", default="unknown")
     a.add_argument("--source", default="capture")
     a.add_argument("--root", default=".")
+    a.add_argument("--now", default=None,
+                   help="ISO timestamp to stamp this entry with (default: current time); "
+                        "mirrors cognition_measure --now, for deterministic fixtures / historical backfill")
     ns = p.parse_args(argv)
     entry = {"intent": ns.intent, "subject": ns.subject, "criterion": ns.criterion,
              "rejected": ns.rejected, "status": ns.status, "salience": ns.salience,
@@ -121,7 +124,7 @@ def main(argv=None) -> int:
     for r in related:
         print(f"related prior intent [{r.get('id')}] {r.get('subject')}: "
               f"{r.get('intent')} — confirm supersede if this replaces it", file=sys.stderr)
-    now = datetime.now().astimezone().isoformat(timespec="seconds")
+    now = ns.now or datetime.now().astimezone().isoformat(timespec="seconds")
     rec = append_entry(entry, root=ns.root, branch=ns.branch,
                        now=now, author=ns.author, source=ns.source)
     print(json.dumps(rec, ensure_ascii=False))

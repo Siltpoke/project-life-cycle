@@ -26,6 +26,13 @@ __pycache__/
 # looser glob.
 /.claude/tasklist.md
 
+# spine (phase spine-consumer): the journal id-index is DERIVED from the journal by
+# `python3 scripts/spine/spine.py reindex` and changes on every journal append, so
+# committing it would make it a cross-branch conflict magnet in a repo whose whole
+# discipline is parallel-branch hygiene. It is regenerable and additive; git never
+# stores the generated artifact. The code that builds it (scripts/spine/) IS tracked.
+/docs/spine/journal-index.json
+
 # The side-discovery queue — working state, and the one thing
 # in a phase that is deliberately NOT durable. Lines move from `untriaged` to a landing while a
 # phase runs; what becomes permanent is the phase's OUTCOME, written into the journal at close, and
@@ -124,3 +131,8 @@ __pycache__/
 # one `git add -A` away from entering history unreviewed.
 /.codex/
 /AGENTS.md
+
+# skill-diet golden set = owner-local private session data, never committed
+docs/superpowers/skill-diet/golden-set/
+# skill-diet judge raw = frozen agent answers + judge replies, owner-local, never committed
+docs/superpowers/skill-diet/judge-raw/

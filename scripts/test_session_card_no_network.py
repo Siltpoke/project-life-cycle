@@ -64,7 +64,9 @@ def test_clean_copy_passes(tmp_path):
     # the two shipped grammar readers rather than re-parsing either format in Python.
     # The guard's own header carries the design reason; this line carries the number.
     assert "subprocess call sites: 3 (pinned 3)" in r.stdout
-    assert "injected-runner call sites: 6 (pinned 6)" in r.stdout
+    # 6 -> 7 in the bare-repo read: the card reads the tracked ROADMAP/STATUS from origin/main via one new
+    # injected-runner `run(["show", ...])` call when the repo is bare (local reads, not network).
+    assert "injected-runner call sites: 7 (pinned 7)" in r.stdout
 
 
 def test_a_new_subprocess_call_site_goes_red(tmp_path):
@@ -133,10 +135,10 @@ def test_aliasing_the_module_itself_goes_red(tmp_path):
     assert "subprocess call sites: 0 found, 3 expected" in r.stdout
 
 
-def test_a_seventh_git_command_goes_red(tmp_path):
-    """The second count, which is the one the CI row actually MOVED (5 -> 6). Without
-    it, "one additional invocation of the existing runner" would be a claim in
-    prose rather than a checked statement."""
+def test_an_eighth_git_command_goes_red(tmp_path):
+    """The second count, which an earlier change moved 5 -> 6 and the bare-repo read moved 6 -> 7 (the bare-repo
+    `show`). Without it, "one additional invocation of the existing runner" would be a
+    sentence in a commit message rather than a checked statement."""
     dst = _tree(tmp_path)
     src = dst.read_text(encoding="utf-8")
     needle = '    clean = run(["status", "--porcelain"]).strip() == ""\n'
@@ -147,7 +149,7 @@ def test_a_seventh_git_command_goes_red(tmp_path):
     )
     r = _run(tmp_path)
     assert r.returncode == 1
-    assert "injected-runner call sites: 7 found, 6 expected" in r.stdout
+    assert "injected-runner call sites: 8 found, 7 expected" in r.stdout
 
 
 def test_a_networking_import_goes_red(tmp_path):

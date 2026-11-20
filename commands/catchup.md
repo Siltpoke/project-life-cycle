@@ -160,6 +160,15 @@ Voice rules:
      saying it is, is the defect this design closed: a current, correct
      `RESUME.md` with no `#N` in it rendered as "no checkpoint yet — clean
      start", and a session that believed it would re-derive everything from zero.
+   - `bare` → "the repo is bare (no working tree), so the card read ROADMAP/STATUS
+     from `origin/main`; the local HEAD is structurally behind the upstream and
+     that is not something to act on". A bare checkout's local HEAD
+     never advances, so the upstream comparison the other tiers make is structural
+     noise, not an actionable `code-behind`. The `ANCHOR:` COMPARISON rows
+     (checkout/upstream/remote) are empty in this tier; the saved-anchor header
+     line still prints (it echoes the handoff snapshot, not a verdict). Never
+     render it as `code-behind` (do not send the reader to /reconcile
+     over a structural gap) and never as "clean start" (a handoff exists).
    - `unknown` is **gone**. If you ever see it in a blob, the script predates
      this change — say so rather than guessing which of the two it meant.
 3b. The `ANCHOR:` block is rendered as rows, not folded into the save-state

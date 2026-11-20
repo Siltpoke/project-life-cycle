@@ -280,6 +280,47 @@ def test_self_coverage_proves_every_declared_file_was_read(real_run):
     ), real_run.stdout
 
 
+def test_self_coverage_attribution_survives_a_slow_writer(tmp_path):
+    """The attribution check must not depend on the writer outliving the reader.
+
+    The flake was NOT traversal order (the scan walks DECLARED in a fixed order and reports every
+    offender, not the first). It was `printf '%s\\n' "$out" | grep -qF <needle>` under `pipefail`:
+    `grep -q` exits at the first match, and if the writer is still emitting the remainder (glibc
+    flushes a pipe in 4 KiB chunks, the scan output is ~9.6 KB) it dies of SIGPIPE; pipefail then
+    makes the pipeline non-zero and a CORRECT, named red is reported as "not attributable". That is
+    scheduler-dependent, hence Linux-under-load only (reproduced in a container at ~4 per 9000).
+
+    Here the race is forced instead of hoped for: a `printf` shim emits the first 4 KiB, waits
+    for the reader to have matched and exited, then emits the rest. Pre-fix this is a deterministic
+    false-red; the property is that every declared file's plant is still named.
+    """
+    stripped = tmp_path / "checker-no-tail.sh"
+    lines = INVARIANT.read_text().splitlines(keepends=True)
+    cut = next(i for i, l in enumerate(lines) if l.startswith('scan_set "$REPO_ROOT"; RC=$?'))
+    stripped.write_text("".join(lines[:cut]))
+    driver = tmp_path / "driver.sh"
+    driver.write_text(
+        f'''source "{stripped}" "{REPO}"
+printf() {{
+  if [ "$1" = '%s\\n' ] && [ "${{#2}}" -gt 8000 ]; then
+    local s="$2"
+    builtin printf '%s' "${{s:0:4096}}"
+    sleep 0.1
+    builtin printf '%s\\n' "${{s:4096}}"
+  else
+    builtin printf "$@"
+  fi
+}}
+self_coverage "$REPO_ROOT"
+'''
+    )
+    r = subprocess.run(["/bin/bash", str(driver)], cwd=str(REPO), capture_output=True, text=True)
+    n = len(declared_files())
+    assert r.returncode == 0, r.stdout[-2000:] + r.stderr[-500:]
+    assert f"each of the {n} declared files was proven readable" in r.stdout, r.stdout[-2000:]
+    assert "not attributable" not in r.stdout, r.stdout
+
+
 @pytest.mark.parametrize(
     "target",
     ["scripts/close-gate.sh", "scripts/invariants/tasklist-never-tracked.sh"],
@@ -459,13 +500,18 @@ def test_the_checker_itself_invokes_no_python_interpreter():
 # beside it is a row that has never been shown capable of failing.
 # --------------------------------------------------------------------------------------------
 
+# a later change folded the matcher into a single `is_python()` awk function shared by every scan, so the
+# one line to blind is its `return`, not a per-call-site `if`. This is the SAME property these
+# mutants always asserted (a blinded matcher loses the planted row; a loud one reds the control) --
+# and it is now stronger, because darkening this single source darkens the batched whole-set scan
+# and the per-file range scan together, where the old needle only reached the one call site.
 BLIND_MATCHER = (
-    'if (code ~ /(^|[^[:alnum:]_])python[0-9]*/) print NR ": " $0',
-    'if (0) print NR ": " $0',
+    "return code ~ /(^|[^[:alnum:]_])python[0-9]*/",
+    "return 0",
 )
 LOUD_MATCHER = (
-    'if (code ~ /(^|[^[:alnum:]_])python[0-9]*/) print NR ": " $0',
-    'if (1) print NR ": " $0',
+    "return code ~ /(^|[^[:alnum:]_])python[0-9]*/",
+    "return 1",
 )
 
 

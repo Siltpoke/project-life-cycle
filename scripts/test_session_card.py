@@ -374,6 +374,95 @@ def test_gather_bare_repo_degrades(tmp_path):
     }
 
 
+def test_gather_bare_reads_roadmap_from_origin_main(tmp_path):
+    # on-disk ROADMAP is the STALE debris; origin/main carries the current one.
+    # A bare repo's on-disk docs are frozen; the card must read tracked docs from the ref.
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "ROADMAP.md").write_text(
+        "**V** v\n**Now** STALE on-disk direction\n## \U0001f6e3 S\n")
+    run = _fake_run({
+        "rev-parse --abbrev-ref HEAD": "main\n",
+        "status --porcelain": "",
+        "log origin/main --oneline -8 --pretty=%s": "\n",
+        "show origin/main:docs/ROADMAP.md":
+            "**V** v\n**Now** CURRENT direction from origin/main\n## \U0001f6e3 S\n",
+        "show origin/main:docs/STATUS.md": "",
+        "show origin/main:STATUS.md": "",
+    })
+    facts = sc.gather_card_facts(tmp_path, run, resume_runner=lambda root: {"found": False}, bare=True)
+    assert "CURRENT direction from origin/main" in facts["roadmap"]["current"]
+    assert "STALE on-disk" not in facts["roadmap"]["current"]
+
+
+def test_gather_bare_no_origin_degrades_not_crash(tmp_path):
+    run = _fake_run({
+        "rev-parse --abbrev-ref HEAD": "main\n", "status --porcelain": "",
+        "log origin/main --oneline -8 --pretty=%s": "\n",
+        "show origin/main:docs/ROADMAP.md": "", "show origin/main:ROADMAP.md": "",
+        "show origin/main:docs/STATUS.md": "", "show origin/main:STATUS.md": "",
+    })
+    facts = sc.gather_card_facts(tmp_path, run, resume_runner=lambda r: {"found": False}, bare=True)
+    assert facts["sources_present"]["roadmap"] is False  # degrades, no crash
+
+
+def test_gather_bare_roadmap_root_fallback(tmp_path):
+    run = _fake_run({
+        "rev-parse --abbrev-ref HEAD": "main\n", "status --porcelain": "",
+        "log origin/main --oneline -8 --pretty=%s": "\n",
+        "show origin/main:docs/ROADMAP.md": "",   # not under docs/ on the ref
+        "show origin/main:ROADMAP.md": "**V** v\n**Now** root copy\n## \U0001f6e3 S\n",
+        "show origin/main:docs/STATUS.md": "", "show origin/main:STATUS.md": "",
+    })
+    facts = sc.gather_card_facts(tmp_path, run, resume_runner=lambda r: {"found": False}, bare=True)
+    assert "root copy" in facts["roadmap"]["current"]
+
+
+def test_station_facts_override_parses_active_from_ref_text(tmp_path):
+    # bare mode: on-disk ROADMAP's active is readability-line; the ref text's is ci-line.
+    # _station_facts must parse the ref text (via stdin), not the frozen on-disk file —
+    # this is what makes the card's `doing` come from origin/main rather than the debris.
+    rm = (
+        "## \U0001f9ed plan\n<!-- plc-station-plan v1 -->\n"
+        "### %s\n- binds-to: **X**\n- depends-on: none\n- steps:\n  - s1 a\n\n"
+        "## \U0001f6a6 active\n<!-- plc-station-active v1 -->\n- %s\n"
+    )
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "ROADMAP.md").write_text(rm % ("readability-line", "readability-line"))
+    out = sc._station_facts(tmp_path, roadmap_text=rm % ("ci-line", "ci-line"))
+    assert out["active"] == ["ci-line"]
+
+
+def test_gather_bare_save_state_is_bare_not_code_behind(tmp_path):
+    (tmp_path / "RESUME.md").write_text(
+        "## ⏳ CURRENT — 2026-11-19 — x\n"
+        "> snapshot: HEAD %s · main · 2026-11-19T10:00:00Z\n#1\n" % SA)
+    run = _fake_run({
+        "rev-parse --abbrev-ref HEAD": "main\n", "status --porcelain": "",
+        "log origin/main --oneline -8 --pretty=%s": "\n",
+        "show origin/main:docs/ROADMAP.md": "", "show origin/main:ROADMAP.md": "",
+        "show origin/main:docs/STATUS.md": "", "show origin/main:STATUS.md": "",
+    })
+    # run_git mapping has NO reconcile keys on purpose: bare must short-circuit BEFORE reconcile.
+    run_git = _fake_run_git({**_in_git()})
+    facts = sc.gather_card_facts(tmp_path, run, resume_runner=lambda r: {"found": False},
+                                 run_git=run_git, bare=True)
+    assert facts["save_state"]["tier"] == "bare"
+    assert facts["save_state"]["exit_code"] == 0
+    assert "SAVE-STATE: bare" in sc.render_facts_text(facts)
+
+
+def test_gather_bare_without_handoff_stays_no_handoff(tmp_path):
+    # the bare tier replaces only the upstream-comparison tiers; a real absence still wins.
+    run = _fake_run({
+        "rev-parse --abbrev-ref HEAD": "main\n", "status --porcelain": "",
+        "log origin/main --oneline -8 --pretty=%s": "\n",
+        "show origin/main:docs/ROADMAP.md": "", "show origin/main:ROADMAP.md": "",
+        "show origin/main:docs/STATUS.md": "", "show origin/main:STATUS.md": "",
+    })
+    facts = sc.gather_card_facts(tmp_path, run, resume_runner=lambda r: {"found": False}, bare=True)
+    assert facts["save_state"]["tier"] == "no-handoff"
+
+
 def test_gather_code_behind_via_the_upstream_range(tmp_path):
     """Exercises the real range lookup end to end, not a stubbed is_code predicate.
 
@@ -1980,7 +2069,7 @@ def test_main_injects_a_real_git_runner_into_the_production_path(monkeypatch):
     """
     seen = {}
 
-    def spy(root, run, resume_runner=None, now=None, run_git=None, refresh=False):
+    def spy(root, run, resume_runner=None, now=None, run_git=None, refresh=False, bare=False):
         seen["run_git"] = run_git
         seen["refresh"] = refresh
         return {"git": {"branch": "x", "clean": True, "merges": [], "head_sha": None},
@@ -2002,7 +2091,7 @@ def test_main_injects_a_real_git_runner_into_the_production_path(monkeypatch):
 # --- The exit status ---------------------------------------------------------------
 
 def _spy_facts(save_state):
-    def spy(root, run, resume_runner=None, now=None, run_git=None, refresh=False):
+    def spy(root, run, resume_runner=None, now=None, run_git=None, refresh=False, bare=False):
         return {"git": {"branch": "x", "clean": True, "merges": [], "head_sha": None},
                 "status": {"wip": "", "locked_next": []}, "checkpoint": None, "digest": None,
                 "save_state": save_state, "ci": None, "roadmap": None,
@@ -2146,7 +2235,7 @@ def test_main_passes_refresh_through_from_argv(monkeypatch, capsys):
     """
     seen = {}
 
-    def spy(root, run, resume_runner=None, now=None, run_git=None, refresh=False):
+    def spy(root, run, resume_runner=None, now=None, run_git=None, refresh=False, bare=False):
         seen["refresh"] = refresh
         return _spy_facts(_SS_CLEAN)(root, run, resume_runner, now, run_git, refresh)
 
@@ -2164,7 +2253,7 @@ def test_main_reads_sys_argv_when_argv_is_omitted(monkeypatch, capsys):
     """The production call passes nothing, so `argv=None` must mean sys.argv[1:], not "no flags"."""
     seen = {}
 
-    def spy(root, run, resume_runner=None, now=None, run_git=None, refresh=False):
+    def spy(root, run, resume_runner=None, now=None, run_git=None, refresh=False, bare=False):
         seen["refresh"] = refresh
         return _spy_facts(_SS_CLEAN)(root, run, resume_runner, now, run_git, refresh)
 

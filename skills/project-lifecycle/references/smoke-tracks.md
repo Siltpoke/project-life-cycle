@@ -35,15 +35,30 @@ Track A catches what humans see; Track B catches what code asserts. Neither is s
 
 **Per-step format:**
 ```
-| # | Step | Pass criteria | Notes |
-|---|---|---|---|
-| S1 | Navigate to /foo + click Bar | Modal opens with section X visible | new surface from this phase |
+| # | Step | Pass criteria | AC | Notes |
+|---|---|---|---|---|
+| S1 | Navigate to /foo + click Bar | Modal opens with section X visible | AC3 | new surface from this phase |
 ```
+
+The `AC` column ties each step to the user-story acceptance criterion it walks; every AC id must appear in at least one step.
 
 **Rules:**
 - Steps must be executable by a non-author. No "you know what I mean."
 - Pass criteria must be observable (a string appears, a number matches, a button changes color), not inferable.
 - Group steps in sections: Setup (S0) / Core flow / Validation surface / Edge cases / Audit log spot check.
+- **Story-driven: name every AC.** When a `user-story.md` exists, Track A walks the story — each acceptance-criterion id (AC1, AC2, …) appears in a step and is exercised in the real UI. A checklist of steps unrelated to the story's promises can pass while the promises are untested; binding the steps to the AC ids is what makes "Track A passed" mean "the promises were walked". Extra steps beyond the ACs are fine; a *missing* AC is a gap.
+
+**Plan reference.** The plan's verification for a user-visible phase references this Track A checklist — the plan does not invent a separate smoke; walking the user story in the real UI is part of the plan's verify step, not only unit + Track B E2E.
+
+### Track A evidence goes in the PR body — screenshots, each with a description
+
+A smoke that was run but whose evidence sits in a chat message or on the agent's disk is invisible to the person who merges. Many reviewers read the PR in a terminal or on a phone and never see a file the agent "sent". **When a Track A smoke runs on a visual surface, the screenshots and their descriptions go into the PR body.**
+
+1. **Every screenshot gets a description.** Name the page and the state, name the line or element to look at, and say why it looks that way ("the badge is gone on this view because the filter excludes archived rows"). An image alone does not tell the reader where to look. Also state the smoke setup once: sandbox or real data, what was seeded, whether a paid agent ran.
+2. **Check each screenshot BEFORE it is uploaded.** Look for secrets, tokens, personal paths, emails, and private project names. Do this before the upload, not after: an upload creates a permanent link at once (see step 3), so on a public repo the upload itself is the publish.
+3. **Put the images in the PR body, not in the repo.** `gh` has no image upload, and committing images bloats the repo. Where the host can drive a browser: open the PR page, give the images to the comment box's file input, read the generated `https://github.com/user-attachments/...` image tags out of the text box, clear the text box **without posting**, then put the tags and descriptions into the body (`gh pr edit <n> --body-file <file>`). Clearing the comment does not delete the uploaded files; their links stay valid. On a public repo those links can be read by anyone who has them.
+4. **Where the host cannot drive a browser**, list each screenshot's path in the body, marked `not uploaded`, with the same description. Say so in the body. Do not present a path list as if the images were attached.
+5. **The PR stays a draft until the human has seen them.** Open it as a draft (`gh pr create --draft`). Mark it ready (`gh pr ready <n>`) only after the screenshots and descriptions are in the body and the human has confirmed them. Record that in the body: `<who> confirmed the screenshots <YYYY-MM-DD>`.
 
 ## Track B — Playwright E2E
 
@@ -110,3 +125,4 @@ For other stacks substitute equivalents — e.g. Go + React: `go test ./...` + `
 - Writing Track A AFTER Track B passes — defeats the catch-different-bugs purpose; write them in parallel.
 - Track A steps so vague that anyone could pass them ("verify the UI looks right") — make pass criteria observable.
 - Marking a step PASS when "it almost worked" — log it as a finding, even if low-tier.
+- **Track A steps that don't cover the user story** — if a `user-story.md` has AC1–AC5 and Track A only walks AC1 and AC3, the smoke is not story-driven; the untested promises ship unwalked. Every AC id appears in a step.

@@ -196,7 +196,7 @@ Create empty scaffolds with TOC stubs (per `references/document-indexing.md`) so
 
 #### 7b. `docs/ROADMAP.md` whole-plan-map stub
 
-Seed `docs/ROADMAP.md` (per `references/roadmap.md`) with the one-sentence goal (ask user if not obvious from README), an empty milestone table with the status legend, and the standard "how a milestone runs" loop block. The milestone rows are filled in during the first milestone's brainstorm once the breakdown is known — at bootstrap it's a stub so the whole-plan map exists from day one. An optional `docs/ROADMAP.html` companion can be generated on request under the normal `html-policy` key — ad-hoc, not one of the counted artifacts (`references/output-format.md`).
+Seed `docs/ROADMAP.md` (per `references/roadmap.md`) with the one-sentence goal (ask user if not obvious from README) — **the vision is REQUIRED and gate-enforced**: the stub always carries a `## The one-sentence goal` section (or, on the emoji layout, a column-0 `**vision** <sentence>` line before the first `## `), and the `roadmap-has-vision` invariant (close-gate check 8) goes RED while that body is empty or still the unfilled `<placeholder>`, so a bootstrapped project cannot ship a ROADMAP with no north-star; if the goal cannot be inferred, leave the `<what this project is, in one sentence>` placeholder in place rather than inventing one — the gate then names it as the thing to fill — plus an empty milestone table with the status legend, and the standard "how a milestone runs" loop block. The milestone rows are filled in during the first milestone's brainstorm once the breakdown is known — at bootstrap it's a stub so the whole-plan map exists from day one. An optional `docs/ROADMAP.html` companion can be generated on request under the normal `html-policy` key — ad-hoc, not one of the counted artifacts (`references/output-format.md`).
 
 #### 8. `.claude/commands/` project-shared slash commands (skeleton)
 
@@ -286,6 +286,7 @@ If `.claude-plugin/` was created, ship a validator workflow too.
 16. Write all approved files. For files marked as MERGE, write the merge diff (show user once more before each merge write).
 17. Run `git status` to surface what changed.
 18. If `scripts/validate.py` exists in the repo (this is the skill's own repo or another project that uses it), run it. Abort + revert (`git checkout -- .`) on validator failure.
+18b. **Run the bootstrap self-check and keep its output verbatim:** `bash "${CLAUDE_PLUGIN_ROOT}/scripts/init-harness-check.sh"` (from the repo root). It counts the nine required items on disk — `CLAUDE.md`, `CONTEXT.md`, `RESUME.md`, the journal home, `CHANGELOG.md` with `[Unreleased]`, the `.gitignore` tasklist line, `scripts/close-gate.sh` **byte-equal to the shipped template**, a valid `.claude/close-gate.json` with a `test_command`, and an **active** pre-push hook that calls the gate. Exit 0 = `COMPLETE`; exit 1 = `INCOMPLETE` plus the list of what is missing; exit 3 = the check could not run. On exit 1, go back and create what it names (each item is in §Phase 2), then run it again. Do not reach checkpoint 4 on a non-zero exit unless the user, shown the list, says to commit anyway.
 
 ### ⏸ HUMAN CHECKPOINT 4 — Approve commit
 
@@ -309,6 +310,7 @@ If `.claude-plugin/` was created, ship a validator workflow too.
 ### Phase 4 — Report
 
 21. Show the user:
+    - **First, the self-check's output from step 18b, verbatim.** The report's opening line is the check's first line, `COMPLETE -- …` or `INCOMPLETE -- …`. Never write "Bootstrap complete" (or any equivalent) unless that check exited 0; if it exited 3, say the check could not run and why.
     - List of files created / merged
     - Next-step suggestions:
       - "Run `/ship <first feature>` to try the per-task cadence on a real change."

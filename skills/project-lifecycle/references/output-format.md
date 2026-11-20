@@ -74,6 +74,8 @@ This is one artifact (`docs/superpowers/specs/YYYY-MM-DD-phase-N-<slug>-design.h
 
 If yes: generate `…-design.html` alongside the MD. **Use the structural pattern + reusable skeleton in `references/html-companion-template.md` + `references/html-companion-skeleton.html`** — these capture the mandatory section list (customer voice / stakeholder lens / side-by-side comparison / mockup / state machine / decisions + disagreements / phase timeline / glossary / inline-clickable citations) and the shared CSS token palette so every project's HTML companion looks consistent.
 
+> **If the UI being changed already runs, build the mockup ON the live UI — do not hand-rebuild it from scratch.** Open the real page, clone its own components, use its own `--color-*` vars, inject the proposed elements into the live DOM, then screenshot. A from-scratch standalone mock is rejected even with correct tokens/fonts — the reader must see the change against the base they already have. The field-annotation spec (pre-filled / placeholder / error / AI-suggestion rows) is `references/html-companion-template.md` §M+1. This applies to the quick exploration mockup here, not only to a fully opted-in companion; the from-scratch skeleton is only for a surface that does not yet exist.
+
 **1b. At spec finalization (re-opt-in)** (SKILL.md step 4) — if user declined at 1a but now wants stakeholder-ready locked spec, re-ask:
 
 > Generate HTML stakeholder view of locked spec? (renders mockups + dataflow + evidence-strength tags)
@@ -81,6 +83,8 @@ If yes: generate `…-design.html` alongside the MD. **Use the structural patter
 If yes: regenerate the same `…-design.html` from the now-locked MD using the template in `references/html-companion-template.md`. If already accepted at 1a, skip — the file already exists and can be refreshed in-place by a normal regen prompt.
 
 The two timings exist because exploration HTML may be wasted if the spec drifts during post-decision revision. User may prefer to wait until lock-in.
+
+> **The approved visual lands in the spec MD itself — not only in the optional HTML companion.** When a UI design was confirmed from a mockup or from screenshots of the real surface (the live-UI mockup of §1a), finalizing the spec MUST **embed that approved visual in the Markdown design doc**: commit the image into the repo (e.g. under `docs/superpowers/specs/assets/`) and reference it inline. The prose describes *behaviour*; the embedded image **is the design of record** for layout, spacing, and colour, and the reviewer signs off against it. This is independent of the HTML-companion opt-in above — declining the companion does **not** make a prose-only UI spec acceptable. A UI spec that was confirmed from a visual but carries no image is not finalized.
 
 ### Artifact 2. Milestone-done summary — 1 moment: milestone close
 
@@ -122,6 +126,7 @@ domain-docs: ./CONTEXT.md          # or ./CONTEXT-MAP.md for multi-context repos
 comprehension: off | lite | full
 audience: adaptive | plain | technical
 close-gate: per-task | pr-boundary
+experiment-gate: required | ask | off    # gate on an experiment proposal at plan→execute; see references/experiment-gate.md
 archaeology: done YYYY-MM-DD | skipped   # one-time brownfield archaeology pass (references/archaeology.md)
 archetype: auto | builder | prototyper | sweeper | grower | maintainer | off
 second-agent-family: auto | same-family | foreign:codex | foreign:<name> | off   # brainstorm blind-2nd-agent lineage; default auto = same-family (byte-identical); see references/cross-family-review.md

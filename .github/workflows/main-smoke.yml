@@ -1,0 +1,42 @@
+name: Main smoke
+
+# the cheap alarm on pushes to main, NOT a merge gate.
+#
+# The full suite runs once per change, at PR time, in validate.yml (which no longer triggers on
+# push:main). Merge safety is held by strict branch protection: a PR behind main must rebase and
+# re-run the full suite before it can merge, so the main re-run this phase removed proved nothing
+# a PR run had not. What is left uncovered is NOT ordinary semantic interaction — it is a bypass
+# push, a misconfigured required check, a GitHub UI race/outage, a merge-method surprise. This job
+# is a ~1-minute alarm for those: if a broken tree reaches main some way other than a green PR,
+# `validate.py` reddens here. It still costs >=1 billed minute (GitHub rounds each job up).
+#
+# It runs validate.py ONLY — the manifest + skill-reference check, seconds of work — and
+# deliberately NOT the leak gate / width table / shard suites: a full alarm would be a second full
+# run, which is exactly what s4d removed. Growing this into a full suite is caught by the pinned
+# the no-double-run contract test.
+on:
+  push:
+    branches: [main]
+
+# Least privilege, matching validate.yml: this job reads the tree and runs one script; it writes
+# nothing back, opens no PR, posts no comment.
+permissions:
+  contents: read
+
+jobs:
+  main-smoke:
+    name: Main smoke (validate.py)
+    runs-on: ubuntu-24.04
+    # A ~1-minute alarm; bound a hang far below GitHub's 6-hour default so a stuck smoke never
+    # burns real minutes (s4d review, Minor 6).
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Validate manifests + skill references
+        run: python scripts/validate.py

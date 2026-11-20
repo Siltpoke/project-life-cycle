@@ -1,0 +1,3 @@
+{"role": "user", "text": "Use a blue primary button on the settings page, same as the design file says: #2563eb, 8px radius, label 'Save changes'."}
+{"role": "tool", "text": "Edit src/settings/SaveButton.tsx: background #2563eb; border-radius 8px; label 'Save changes'"}
+{"role": "assistant", "text": "Button updated exactly to the design file values."}

@@ -144,6 +144,10 @@ Capture verbatim (`cmd 2>&1 | tee /tmp/demo.txt`); never hand-retype output
 this appendix) so it's attached to the PR, not lost in chat. Skip only for
 pure-infra / non-observable phases (no console/GUI surface a human watches).
 
+### Smoke evidence — screenshots (REQUIRED when a Track A smoke ran on a visual surface)
+
+The GUI counterpart of the console demo above. Put the smoke's screenshots **in the PR body**, each with a description: which page and state, what to look at, and why it looks that way. State the smoke setup once. Check each image for secrets and personal data before it is uploaded; the PR stays a draft until the human has confirmed the screenshots, and the body records who confirmed them and when. The full procedure, including the fallback for hosts that cannot upload images, is in `references/smoke-tracks.md` §"Track A evidence goes in the PR body".
+
 **Optional sections after the mandatory 3** (in this order):
 
 ```markdown

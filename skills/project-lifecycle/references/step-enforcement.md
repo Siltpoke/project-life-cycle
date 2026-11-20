@@ -30,7 +30,7 @@ the same thing.
 
 - Band A rows: **15**
 - Band B rows: **12**
-- Band C rows: **13**
+- Band C rows: **15**
 
 ## What this file does not do
 
@@ -156,6 +156,8 @@ reads the surrounding prose as wider than the check actually is.**
 | a sweep deleted the right thing | C | sweep teeth | net-negative LOC direction | does not check whether the sweep deleted the right thing; the teeth stop a mislabelled add, nothing more | whoever reads a passing sweep as a correct sweep | `close-gate.md:2312` |
 | every captured side discovery has a landing at phase close | C | `close-gate.sh` row 13 (`sidelines`), armed by the `sidelines` manifest key | in `phase`: the queue file exists, no line is still `untriaged` (or `- [none]` is present), every `refused` carries a `class:` and every `declined` a `why:`. In `task`: well-formedness only, because requiring a drain on the push path would make capturing one line block the next push | it reads DECLARATIONS. It cannot see a discovery nobody wrote down, so `- [none]` is a statement and not a verified fact — the companion Band A row above is that hole. An unarmed adopter has the row printed as SKIPPED, never as a pass | the phase that captured it | `references/where-does-this-go.md`, `SKILL.md` check-set row 13 |
 | net growth on a counted surface records what it cost | C | `growth-declares-a-deletion` | per surface, the declared growth is at least the measured growth, over three counters: `*.md` directly under `skills/*/references/`, `*.md` directly under `commands/`, and the declared band total of this table | **it never judges whether a declaration is true** — `cannot-delete: nothing, actually` passes. It never counts lines (that face was measured and rejected). **Net zero records nothing**: five added and five removed on one surface owes no declaration, so neither half is written down. `steps` means **census rows**, not steps a human performs. Blind to blocking points, which is the weight actually reported (that number is prose, so nothing can read it); to untracked references; to any surface not among the three enumerated in the script; and to a `GROWTH`-shaped line written as an example, including inside a code fence. An untracked journal fragment is accepted, so a declaration that never ships can green a local run | whoever reads a declared `cannot-delete:` as evidence that nothing was removable | `SKILL.md` § Documentation & traceability |
+| a UI-changing phase carries a user-confirmed mock contract | C | `close-gate.sh` row 14 (`ui-mock-contract`), armed by the `ui_change: true` manifest key | a mock artifact link and a checked confirm marker are both present in the phase's story or spec | presence only — it cannot verify the user actually confirmed, nor that the mock is the right surface; an unarmed (non-UI) project prints SKIPPED, never a pass | whoever reads the ✓ as "the user signed off on this exact mock" | `SKILL.md` check-set row 14 |
+| the Track A smoke walks the whole user story | C | `close-gate.sh` row 15 (`story-driven-smoke`), armed by the `smoke_a_glob` manifest key | every user-story AC id appears in the Track A checklist | presence only — a named AC is not a walked AC, and it cannot see whether the step exercised the UI; armed-but-no-story prints a visible ⊘, an unconfigured project SKIPPED | whoever reads a green smoke as "the whole story was exercised" | `SKILL.md` check-set row 15 |
 
 ---
 

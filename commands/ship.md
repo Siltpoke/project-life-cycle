@@ -2,6 +2,8 @@
 description: Ship one vertical-slice feature end-to-end via the project-lifecycle factory chain. Chains researcher → story → spec → BE builder → FE builder → acceptance verifier → validator → fix loop → PR. 3 human checkpoints (story / spec / PR).
 ---
 
+> ⚠️ **Deprecated (Unreleased).** The normal per-task cadence plus the intent-gate's dynamic size routing (trivial → inline / medium → cadence / large → brainstorm) + archetype + `mode` already orchestrate a vertical slice without a separate command; the one-command wrapper earned no use. `/ship` still works but is scheduled for removal in the next MAJOR.
+
 # /ship — Vertical-Slice Feature Factory
 
 Thin orchestrator over the existing `project-lifecycle` skill's per-task cadence. Use for **one user-observable feature inside an active phase** — not a full phase, not a milestone.

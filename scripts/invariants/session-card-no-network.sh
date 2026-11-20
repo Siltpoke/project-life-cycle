@@ -76,8 +76,13 @@ NAME="session-card-no-network"
 # touches the network; both are bounded by a 20-second timeout and degrade to `available: False`
 # with a stated reason rather than raising, so a missing reader makes a position print `-` instead
 # of making the card fail. `-` and `0/N` are deliberately different strings.
+# GIT MOVED 6 -> 7 IN THE BARE-REPO READ, and this paragraph is the record the line above asks for. In a bare
+# repo the on-disk docs are frozen debris, so the card reads the tracked ROADMAP/STATUS from
+# origin/main via one new injected-runner call, `run(["show", "origin/main:<path>"])`, in
+# gather_card_facts's `_read_tracked`. `show` is a LOCAL object read, not network-capable, so
+# WANT_NETGIT stays 0; this is a new git command the card asks, not a new reach to the network.
 WANT_NET=3
-WANT_GIT=6
+WANT_GIT=7
 WANT_TOKEN_EXTRA=0
 WANT_NETGIT=0
 # The card spells no runner call sites of its own -- every git command added for the reconciliation lives in the

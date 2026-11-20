@@ -7,8 +7,80 @@ third-party dependency, a database schema change, the deploy configuration.
 This file is the exception channel. When a task's changes touch one of those places, **that task's
 verification tail runs at `detailed`**, and it says which rule fired.
 
+## Behavior capture (MED+ / careful-paths) -- lock what must not regress
+
+A hit also arms the **Behavior Lock**. A hit makes this a MED+ task; the Lock binds the behavior
+that ALREADY worked and is now at risk to the test that proves it, so a regression goes red
+instead of slipping through a green suite. This is separate from the acceptance verifier (which
+binds the story's ACs to new tests); do it as the Protect step, before the first edit where
+practical:
+
+1. **Name the at-risk behaviors the user story does NOT mention.** For a MED+ task, at least one.
+2. **Bind each to its carrier** -- the existing test that actually asserts it; add a targeted test
+   only where a critical behavior has none (exercise the real behavior, never a mock of the thing
+   being changed). The carrier MUST resolve (`scripts/behavior-lock.sh --resolve`), or the
+   `behavior-lock-carriers-resolve` invariant (close-gate check #8) is red.
+3. **Register the row** in `.claude/behavior-lock.tsv` (`id  class  behavior  carrier  why`, class
+   PRESERVE for these). `BL-<n>` is its own id namespace, separate from backlog `B<n>`; the next id
+   is one past the max in `--list-ids`, never eyeballed from a stale view.
+4. **Baseline it** -- run the carrier on the ORIGINAL code and record it with
+   `scripts/behavior-baseline.sh --record <id> before <exit> "<cmd>" "<env>"`; after the change,
+   record `after` and run `--check-transition <id>`. PRESERVE must read pass->pass, FIX fail->pass,
+   NEW na->pass, or the transition is surfaced as a contradiction, not swallowed.
+
+LOW tasks (no `careful-paths` hit and no higher declaration) add nothing here -- the Behavior Lock
+is risk-adaptive, not ceremony on every task. **Graduation:** once a behavior is pinned by a
+permanent test in the normal suite, move its row out with `scripts/behavior-lock.sh --graduate <id>`
+so the registry stays the churn list, not a whole-codebase inventory; the guarantee then lives in
+the test.
+
 **It does not claim to find every risky change. It cannot, and saying it can would be a lie.**
 Read §"What this will miss" before relying on it.
+
+## The 3-tier risk call -- what M1's binary hit grew into
+
+M1 was a binary switch: a `careful-paths` hit armed the Lock, nothing else did. M2 makes risk a
+three-position dial, and a hard-fail gate (`risk-tier-evidence-floor`, close-gate check #8 family)
+enforces that the EVIDENCE on the branch matches the tier -- never that the declared tier is
+"correct" (that is your judgment; the gate does not second-guess it).
+
+**Declare the tier** in the phase's qa-log fragment, one line (parsed by `scripts/risk-tier.sh`):
+
+    risk: LOW | reason: <why>
+    risk: MEDIUM | reason: <why>
+    risk: HIGH | reason: <why>
+
+**The effective tier = max(objective floor, your declaration).**
+- The **objective floor** is the `careful-paths` hit: a hit forces at least MEDIUM. A declaration
+  cannot drop below it -- calling a careful-paths change LOW does not escape MEDIUM. You may always
+  go *higher* than the floor, never lower.
+- A **malformed or ambiguous** `risk:` line fails safe to HIGH (never silently to LOW). **No hit
+  and no declaration** is LOW -- silence on a quiet branch is not punished into declaring.
+
+**The evidence floor the gate enforces** (the *sizing* column is judgment, not gated):
+
+| Effective tier | What the branch must carry | Sizing (not gated) |
+|---|---|---|
+| LOW | nothing | implement + one focused check |
+| MEDIUM | >=1 behavior-lock row added/changed this branch (the Protect step above) | name the 3-5 behaviors most likely to break; a targeted test only where a critical one has none |
+| HIGH | MEDIUM's row AND a recorded before+after baseline for at least one of them | capture failure paths / negative cases before editing; a before-baseline of the critical behaviors |
+
+**Waiver -- the anti-starvation escape.** A floor you genuinely cannot meet (a MEDIUM/HIGH branch
+with no behavior to lock) is not a dead end: write one line in the journal,
+`SKIP: risk-floor -- <reason>`, and the gate passes and records it. The waiver sits in git, so it
+is attributable by commit. The gate refuses an *undeclared, unjustified* gap, not a declared one.
+
+**The tier also sizes the progress checkpoint.** The same effective tier decides how
+much a phase reports while it works: LOW owes no progress checkpoint, MEDIUM/HIGH owe one mid-phase
+checkpoint recorded in the qa-log. That checkpoint informs, it never blocks -- you post it and keep
+going. The shape, the qa-log marker, and the `checkpoint-floor` gate live in
+`references/checkpoint-modes.md`.
+
+**Proving it.** What counts as "it works" -- the VERIFIED/FAIL/PARTIAL/UNVERIFIED/BLOCKED
+enum, regression-vs-validation, the per-behavior evidence fields, and the Implemented!=Tested!=Verified
+!=Accepted ladder -- is one vocabulary in `references/prove.md`. It also carries the `test-weakening-guard`
+gate: a net drop in test-function count across all test files reds unless the journal declares a
+`SKIP: test-weakening -- <reason>`.
 
 ---
 

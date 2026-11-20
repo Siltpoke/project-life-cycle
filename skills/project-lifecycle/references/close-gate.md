@@ -32,6 +32,7 @@ State #1 makes skips *obvious*; gate #2 makes them *impossible to hide*.
 - [ ] the journal was touched in this phase's commit range — a change under manifest `retention.journal_dir` (default `docs/journal.d/`) **or** the manifest `journal` path (monolith fallback for projects not yet on the fragment convention) satisfies this (per-task completeness is a reviewer concern, not deterministically gated)
 - [ ] the newest `*.md` fragment under `retention.journal_dir` (or the monolith fallback) contains a complete FACT entry — `Date`, `Decision`, `Why`, **`Backing`**, `Rejected`, `Source`
       - **After the milestone-close drain, look in the archive.** The drain is mandated and it empties the hot directory (`references/retention.md`: *"the hot directory drains to zero"*), so a gate that only reads `retention.journal_dir` demands an artifact another mandated step deletes, and reports "write this phase's FACT entry" about an entry that was written and archived. This is not only a close-time annoyance: the same row runs in **task** mode, which the pre-push hook runs on every push of a `feat/phase-*` branch, so a drained branch stops being pushable. When no fragment for the phase exists, fall back to **`<archive_dir>/journal/*.md` specifically** — not `<archive_dir>/*.md`. The qa-log archive sits in the same directory, is written by the same drain, and carries **the same sentinel format and the same `<date>-phase-<id>-<slug>.md` fragment names**, so the wider glob reads a locked Q&A decision as though it were this phase's journal entry. Match this phase's `<!-- fragment: … -->` sentinel and evaluate **only that fragment's slice**, from its sentinel to the line before the next one. Reading the whole archive would let another phase's complete FACT fields turn these rows green, which is the same failure the cross-phase fallback below is already fenced against. **A sentinel is a position, not a string** — a line counts as a fragment boundary only when it is outside any fenced code block **and** preceded by a blank line or the start of the file, both conditions and not either. Match the fence, do not count it: remember the opening delimiter's character and run length, and close only on the same character, at least as long, with nothing but whitespace after it — a ``` block quoting a `~~~` line is one block, not two, and a parity counter inverts on it for the rest of the file. **Then stop claiming to parse markdown.** The mechanism claims exactly one property and can be checked against it: **every ambiguity costs a FAIL, never a PASS.** Three rules deliver that, and each is chosen for its error direction rather than its correctness. (i) A boundary is accepted only when the fence state is closed at it, so an unterminated fence is *not* discarded — it propagates, and every later boundary in that archive stops being readable. That is a loud false FAIL, and the gate must name the archive rather than telling the operator to write an entry that already exists. Discarding the fence instead is what lets a fence holding *two* quoted sentinels have its second one accepted — a false PASS built out of the repair for a false FAIL. (ii) A slice ends at **any** sentinel-shaped boundary, fenced or not: ending early can only make the gate demand more, while running long is exactly how one phase collects another's FACT fields. (iii) Report the ambiguous case; do not resolve it. Recognise fences at column 1 only. Scanning for the literal marker cannot tell a boundary from a passage that merely *quotes* one, and archives full of tooling notes quote it, so a phase that wrote no journal at all can read as `close-gate PASS`, exit 0, on the strength of a code block in another entry. The same rule governs choosing **which** archive file to read, not just where the slice starts — the two scans have the same blind spot and must be the same scan. Freshness is **not** asserted on the archive path — the archive's mtime belongs to the drain, not to the phase, so claiming mtime evidence there would be a `✓` about something the gate cannot see. The FACT fields must all be present as `- **Field:**` markdown bullets (the canonical form — matches what journals written under this schema use; see `references/journal-schema.md` §"The FACT entry"). Any missing field → hard fail naming exactly which. This is where the retired handoff file's one non-derivable section (§7 findings/gotchas) is *actually* enforced, not merely asserted to be — the journal-touched check above only proves some file changed, not that it carries the FACT content. **`Backing` is required for the same reason the other five are**: without a slot for the evidence, a distilled `Why` degrades into an assertion and drops the statistic its argument rested on.
+      - **Merging `origin/main` into a phase branch re-stales the journal fragment — re-touch it after the merge.** The fragment's freshness is checked by **mtime against the branch point** (`merge-base(origin/main, HEAD)`): it must be newer than that point (`close-gate.sh`: `journal fragment newer than the branch point, by mtime`). Merging `origin/main` in mid-phase **moves the branch point forward** to the just-merged commit, so a FACT entry that was correct minutes ago is suddenly "older than the branch point" and pre-push rejects with `✗ journal fragment … is older than the branch point — write this phase's FACT entry`. **The gate is not wrong** — it asks that the phase's work be described relative to its *actual* baseline, and the merge changed that baseline. Remedy: after the merge, re-save (re-touch) the phase's journal fragment so its mtime is newer than the moved point — no content change is strictly required, though updating the FACT to reflect the merged state is the honest form. A phase that has **not yet written** a FACT fragment never hits this (there is nothing to stale), which is why a parallel session doing the same merge may not reproduce it.
 - [ ] `CHANGELOG.md` `[Unreleased]` was touched in this phase's commit range — a change under manifest `retention.changelog_dir` (default `changelog.d/`) **or** `CHANGELOG.md` itself satisfies this (unless `exempt_changelog`)
 - [ ] smoke artifacts exist — Track A checklist + Track B spec — when `user_visible` true
 - [ ] acceptance tests exist for the phase (glob `acceptance_glob`), unless `exempt_user_story` true (cadence step 1.5)
@@ -51,6 +52,9 @@ State #1 makes skips *obvious*; gate #2 makes them *impossible to hide*.
 - [ ] **(warn-only, never fails the gate)** qa-log citation coverage: each `### Q` section in a `retention.qa_log_dir` fragment (default `docs/qa-log.d/`) that carries a `**Locked:**` decision but **no `http(s)` URL** → `⚠` row naming the fragment + Q header. Enforces the brainstorm protocol's "no citation, no send" rule (`references/brainstorm-research-protocol.md`) — the #1 silent degradation is skipping research and opinion-polling. Deliberately **warn-only, not hard-fail**: a compressed established-pattern decision may legitimately cite a prior-phase lock (`M2.3 Q4`) rather than a URL, which a URL-only hard gate would false-block; the row informs the human at PR instead. Scoped to the fragment dir (current-phase, short-lived); the compiled monolith is historical and not re-litigated (v1 limitation — un-adopted projects that write only the monolith get no row).
 - [ ] **(warn-only at `task`/`phase`; BLOCKING at `milestone` — see §"Milestone mode")** retention **count** caps: the number of `.md` files under `docs/superpowers/specs/`, `docs/superpowers/plans/`, and `docs/**` (excluding `*/screenshots/*` **and** `retention.archive_dir` — an archived doc must be able to clear the cap that told you to archive it) is compared against manifest `retention.count_caps` (defaults: specs 10, plans 10, docs_total 150 — applied by `cc()`'s default arg even when `count_caps` or the whole `retention` block is absent from the manifest; never silently unlimited). `0` = unlimited, `"none"` = exempt. **Why a count axis exists at all:** the size caps and the 50K coverage floor are blind to many-small-files growth: a directory of hundreds of small drafts can sit below every size threshold and stay invisible to the net in its entirety. See `references/retention.md` §"The count axis".
 - [ ] **(non-blocking `⊘` at `task`/`phase`; BLOCKING at `milestone`, unconditionally — see §"Milestone mode")** required-artifact manifest keys `phase_docs_glob`, `plan_glob`, `acceptance_glob`: an absent key prints a visible `⊘ <key> not configured in manifest` row (never a ✓, never silent) but never fails task/phase. At milestone close — `PHASE` arg or not — any of these three still unconfigured is a hard failure — the accumulated, ignored `⊘` finally stops being free. (`handoff_glob` is deliberately not in this set — the handoff file was retired.)
+
+- [ ] **(armed by the manifest; absent key = the check does not run at all)** `ui-mock-contract` — a **UI-changing** phase carries a user-confirmed mock as the UI contract. Armed by `ui_change: true`, read at the check-set so a non-UI phase (the common case, and this repo itself) prints as SKIPPED, never vanishes. When armed, the phase's story or spec (`user_story_glob` / `phase_docs_glob`) must contain a **mock artifact link** (`[label](path-or-url)` on a Mock / UI Contract line) **and** a **checked** user-confirmation marker (`- [x] … confirmed … mock`) **and** an **inline image embed** (`![alt](src)` or `<img`) so the approved visual lands in the spec itself. **What it proves and nothing more:** the link, the checked box and an image reference are *present* (existence only, never that the image is the approved one). It cannot verify the user actually confirmed — that half is a human marker, the same surface as every human-approval marker in this skill. "Approved-in-concept" words are not a mock link, which is exactly what this check rejects. Phase mode only.
+- [ ] **(armed by the manifest; absent key = the check does not run at all)** `story-driven-smoke` — the Track A manual smoke **walks the user story**: every acceptance-criterion id in `user-story.md` is **named** in the Track A checklist (`smoke_a_glob`). Armed by `smoke_a_glob` (a project that configures a Track A smoke); when armed but there is no story to drive it (`exempt_user_story: true` or no `user_story_glob`) it prints a visible `⊘` skip, not a pass. **What it proves and nothing more:** each AC id appears in Track A. It cannot verify the step walked the UI correctly — the human smoke run does that. A checklist of steps unrelated to the story's promises is exactly what this rejects. Phase mode only.
 
 Checks are deliberately **deterministic + greppable** (file exists / header present / commit in range / mtime fresh). The gate does NOT judge quality — that is the validator + code-quality reviewer. The gate only proves the *ceremony actually happened*.
 
@@ -127,6 +131,15 @@ The gate is stack-agnostic; per-project specifics live in a small manifest the g
   "ac_heading_set": ["acceptance criteria"]
 }
 ```
+
+**`ui_change` is a deliberately-omitted opt-in key**. Set `"ui_change": true` to arm the
+`ui-mock-contract` check for this project's phases; **leave it out and the check never runs** — the
+same absence-is-the-disarm rule `closure_declaration` follows, and for the same measured reason (a
+check that fires on projects which never configured it goes red where the gate cannot see it). It is
+NOT in the template above on purpose: a default `true` would demand a confirmed mock on every phase of
+every adopter, including backend-only ones, the moment they copied the template. Arm it only in a
+project whose phases change UI. (`story-driven-smoke` needs no new key — it arms off the `smoke_a_glob`
+already in the template, and is a visible `⊘` skip when there is no user story to drive it.)
 
 The last five keys drive `ac-oracle-binding`, and **they are in this template on purpose**: without
 `user_story_glob` the check prints `⊘ … not configured` on every run and the gate still passes, so an
@@ -1188,9 +1201,15 @@ elif [ "$MODE" = phase ]; then
   if [ -d "$QD" ]; then
     if cap_none qa_log_hot; then ok "qa-log hot zone exempt (retention.hot-caps: none)"; else
       QMK="$(cap_val qa_log_hot 1 50)"
-      QK=$(( $(du -sk "$QD" | cut -f1) ))
-      if [ "$QMK" -gt 0 ] && [ "$QK" -gt "$QMK" ]; then ret_warn "$QD" "qa-log hot zone" "size ${QK}K>${QMK}K"
-      else ok "qa-log hot zone under cap"; fi
+      # fail-closed: an unreadable fragment must not count as 0 bytes and pass (flagged in review)
+      _qt="$(mktemp)"
+      if find "$QD" -type f -exec cat {} + </dev/null >"$_qt" 2>/dev/null; then
+        QK=$(( $(wc -c < "$_qt") / 1024 )); rm -f "$_qt"
+        if [ "$QMK" -gt 0 ] && [ "$QK" -gt "$QMK" ]; then ret_warn "$QD" "qa-log hot zone" "size ${QK}K>${QMK}K"
+        else ok "qa-log hot zone under cap"; fi
+      else
+        rm -f "$_qt"; ret_warn "$QD" "qa-log hot zone" "a file could not be read — measurement would undercount"
+      fi
     fi
   fi
   # qa-log citation coverage — WARN-ONLY (never flips $fail). The brainstorm protocol's #1 silent
@@ -1228,20 +1247,37 @@ elif [ "$MODE" = phase ]; then
   if [ -d "$CD" ]; then
     if cap_none changelog_hot; then ok "changelog hot zone exempt (retention.hot-caps: none)"; else
       CMK="$(cap_val changelog_hot 1 50)"
-      CK=$(( $(du -sk "$CD" | cut -f1) ))
-      if [ "$CMK" -gt 0 ] && [ "$CK" -gt "$CMK" ]; then ret_warn "$CD" "changelog hot zone" "size ${CK}K>${CMK}K"
-      else ok "changelog hot zone under cap"; fi
+      # fail-closed: an unreadable fragment must not count as 0 bytes and pass (flagged in review)
+      _ct="$(mktemp)"
+      if find "$CD" -type f -exec cat {} + </dev/null >"$_ct" 2>/dev/null; then
+        CK=$(( $(wc -c < "$_ct") / 1024 )); rm -f "$_ct"
+        if [ "$CMK" -gt 0 ] && [ "$CK" -gt "$CMK" ]; then ret_warn "$CD" "changelog hot zone" "size ${CK}K>${CMK}K"
+        else ok "changelog hot zone under cap"; fi
+      else
+        rm -f "$_ct"; ret_warn "$CD" "changelog hot zone" "a file could not be read — measurement would undercount"
+      fi
     fi
   fi
-  # journal hot zone: directory total, KB only (lines dimension is unused for a directory).
+  # journal hot zone: directory total, KB of CONTENT only (lines dimension is unused for a dir).
   # Same exemption (cap_none) + same warn/escalate/record path (ret_warn) as the file caps.
-  # $JD was resolved above at the journal-touched check.
+  # MEASURES CONTENT BYTES via `find -type f -exec cat {} + | wc -c`, NOT `du` allocated blocks
+  #: `du` rounds each fragment up to a filesystem block, so a directory of many tiny
+  # fragments reports a size far above its bytes and a cap refuses content well under it. The
+  # qa-log and changelog dir rows above measure the same way, for the same reason — `-exec cat
+  # {} +` runs cat only when files exist, so an empty directory yields a clean 0. $JD was resolved
+  # above at the journal-touched check.
   if [ -d "$JD" ]; then
     if cap_none journal_hot; then ok "journal hot zone exempt (retention.hot-caps: none)"; else
       JMK="$(cap_val journal_hot 1 100)"
-      JK=$(( $(du -sk "$JD" | cut -f1) ))
-      if [ "$JMK" -gt 0 ] && [ "$JK" -gt "$JMK" ]; then ret_warn "$JD" "journal hot zone" "size ${JK}K>${JMK}K"
-      else ok "journal hot zone under cap"; fi
+      # fail-closed: an unreadable fragment must not count as 0 bytes and pass (flagged in review)
+      _jt="$(mktemp)"
+      if find "$JD" -type f -exec cat {} + </dev/null >"$_jt" 2>/dev/null; then
+        JK=$(( $(wc -c < "$_jt") / 1024 )); rm -f "$_jt"
+        if [ "$JMK" -gt 0 ] && [ "$JK" -gt "$JMK" ]; then ret_warn "$JD" "journal hot zone" "size ${JK}K>${JMK}K"
+        else ok "journal hot zone under cap"; fi
+      else
+        rm -f "$_jt"; ret_warn "$JD" "journal hot zone" "a file could not be read — measurement would undercount"
+      fi
     fi
   fi
   # persist the over-cap list for the consecutive-close escalation. jq merge (not python3 —

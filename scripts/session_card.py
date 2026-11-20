@@ -359,8 +359,15 @@ def _bound_station(facts: dict, cleaned_name: str) -> str | None:
     return None
 
 
-def _station_facts(root: Path) -> dict:
+def _station_facts(root: Path, roadmap_text: str | None = None) -> dict:
     """Station plans, the active list, and which steps the corpus says are closed.
+
+    `roadmap_text` overrides the on-disk ROADMAP source: when given (bare-repo mode,
+    where the on-disk `docs/ROADMAP.md` is frozen debris), the station/active grammar is
+    parsed from this text, fed to the same single awk reader via stdin — not a second
+    shell-out site. `None` keeps the original filesystem read. The closure corpus is still
+    read from the working tree under `root`; in a bare repo that half can lag, which is why
+    the active list (what drives `doing`) is the part routed through the ref here.
 
     NOTHING HERE PARSES EITHER FORMAT. The station-block grammar is read by
     `scripts/lib/station-blocks.awk` and the closure grammar by
@@ -387,28 +394,38 @@ def _station_facts(root: Path) -> dict:
     awk_prog = here / "lib" / "station-blocks.awk"
     extractor = here / "closure-declaration.sh"
     corpus_lib = here / "lib" / "closure-corpus.sh"
-    roadmap = next((root / n for n in ("docs/ROADMAP.md", "ROADMAP.md")
-                    if (root / n).exists()), None)
-
     out: dict = {"blocks": {}, "active": [], "closed": {},
                  "available": False, "why": ""}
-    if roadmap is None:
-        out["why"] = "no ROADMAP.md"
-        return out
+    if roadmap_text is not None:
+        # bare mode: the on-disk ROADMAP is frozen debris; parse the ref text via stdin.
+        if not roadmap_text.strip():
+            out["why"] = "no ROADMAP.md"
+            return out
+        roadmap = None
+    else:
+        roadmap = next((root / n for n in ("docs/ROADMAP.md", "ROADMAP.md")
+                        if (root / n).exists()), None)
+        if roadmap is None:
+            out["why"] = "no ROADMAP.md"
+            return out
     for needed in (awk_prog, extractor, corpus_lib):
         if not needed.exists():
             out["why"] = "reader missing: %s" % needed.name
             return out
 
-    def _sh(argv: list[str]) -> tuple[int, str]:
+    def _sh(argv: list[str], stdin: str | None = None) -> tuple[int, str]:
         try:
             r = subprocess.run(argv, capture_output=True, text=True,
-                               timeout=20, cwd=str(root))
+                               timeout=20, cwd=str(root), input=stdin)
             return r.returncode, r.stdout
         except Exception as exc:                       # noqa: BLE001 - degrade, never raise
             return 255, "%s: %s" % (type(exc).__name__, exc)
 
-    rc, blocks_out = _sh(["awk", "-f", str(awk_prog), str(roadmap)])
+    if roadmap_text is not None:
+        awk_argv, awk_stdin = ["awk", "-f", str(awk_prog)], roadmap_text
+    else:
+        awk_argv, awk_stdin = ["awk", "-f", str(awk_prog), str(roadmap)], None
+    rc, blocks_out = _sh(awk_argv, stdin=awk_stdin)
     if rc != 0:
         out["why"] = "station-blocks.awk exited %d" % rc
         return out
@@ -1050,29 +1067,42 @@ def read_ci_status(root, head_sha, now=None):
     }
 
 
-def gather_card_facts(root, run, resume_runner=_run_resume, now=None, run_git=None, refresh=False):
+def gather_card_facts(root, run, resume_runner=_run_resume, now=None, run_git=None, refresh=False,
+                      bare=False):
     """`run_git` is the returncode-aware runner this needs and `run` cannot be.
 
     It is NOT defaulted to the real one. A caller that does not inject it gets `unverified`
     with "no git runner was provided" as the cause -- fail-closed AND visible, rather than a
     default that quietly executes git in whatever directory the process happens to be in and
     lets a test pass for the wrong reason. Production injects it in `main()`.
+
+    `bare` is injected the same way (detected in `main()` with `--is-bare-repository`) and for
+    the same reason: a bare repo has no legitimate working tree, so the tracked docs on disk are
+    frozen debris. When true, ROADMAP/STATUS are read from `origin/main` via `git show` instead
+    of the filesystem, and the station/active grammar is parsed from that same ref text. RESUME
+    stays on disk (it is gitignored, in no ref). The default `False` keeps every non-bare adopter
+    and every existing test on the untouched filesystem path.
     """
     git = gather_git_facts(run)
-    status_md = ""
-    for name in ("docs/STATUS.md", "STATUS.md"):
-        p = root / name
-        if p.exists():
-            status_md = p.read_text()
-            break
+
+    def _read_tracked(names):
+        if bare:
+            for name in names:
+                out = run(["show", "origin/main:%s" % name])
+                if out and out.strip():
+                    return out
+            return ""
+        for name in names:
+            p = root / name
+            if p.exists():
+                return p.read_text()
+        return ""
+
+    status_md = _read_tracked(("docs/STATUS.md", "STATUS.md"))
     status = parse_status(status_md)
-    roadmap_md = ""
-    for name in ("docs/ROADMAP.md", "ROADMAP.md"):
-        p = root / name
-        if p.exists():
-            roadmap_md = p.read_text()
-            break
-    roadmap = parse_roadmap(roadmap_md, _station_facts(root))
+    roadmap_md = _read_tracked(("docs/ROADMAP.md", "ROADMAP.md"))
+    roadmap = parse_roadmap(roadmap_md,
+                            _station_facts(root, roadmap_text=roadmap_md if bare else None))
     roadmap_has_signal = _roadmap_has_signal(roadmap)
     # Distinguish "no ROADMAP.md" from "ROADMAP.md the parser could not read" —
     # otherwise the card renders both identically (a silent-miss defect).
@@ -1110,20 +1140,29 @@ def gather_card_facts(root, run, resume_runner=_run_resume, now=None, run_git=No
     if checkpoint:
         block = "\n".join([checkpoint.get("header") or ""] + list(checkpoint.get("lines") or []))
         anchor = hr.read_anchor(block)
-    if anchor is not None and run_git is not None:
-        rec = hr.reconcile(anchor, run_git, refresh=refresh)
-        files = hr.files_changed(run_git, rec.upstream_range)
-    if anchor is not None and run_git is None:
-        save_state = _unverified_state(
-            "anchor", "no git runner was provided to gather_card_facts")
+    if bare and resume_md and anchor is not None:
+        # A bare repo's local HEAD never advances, so comparing the anchor against the upstream is
+        # structural noise, not an actionable `code-behind`. Report `bare` and skip reconcile. The
+        # `anchor is not None` guard keeps a real ABSENCE (no handoff, or an unparseable anchor)
+        # falling through to `no-handoff`/`unverified` below -- the bare tier replaces only the
+        # upstream-comparison tiers, never the absence ones.
+        save_state = {"tier": "bare", "rows": [], "unverified": [],
+                      "exit_code": 0, "has_code": None}
     else:
-        save_state = classify_save_state(
-            has_handoff=bool(resume_md), anchor=anchor, rec=rec, files=files,
-            anchor_absent_cause=(
-                "the handoff's `snapshot: HEAD <sha>` line could not be parsed"
-                if hr.snapshot_line_present(block) else
-                "the handoff carries no `snapshot: HEAD <sha>` line"),
-        )
+        if anchor is not None and run_git is not None:
+            rec = hr.reconcile(anchor, run_git, refresh=refresh)
+            files = hr.files_changed(run_git, rec.upstream_range)
+        if anchor is not None and run_git is None:
+            save_state = _unverified_state(
+                "anchor", "no git runner was provided to gather_card_facts")
+        else:
+            save_state = classify_save_state(
+                has_handoff=bool(resume_md), anchor=anchor, rec=rec, files=files,
+                anchor_absent_cause=(
+                    "the handoff's `snapshot: HEAD <sha>` line could not be parsed"
+                    if hr.snapshot_line_present(block) else
+                    "the handoff carries no `snapshot: HEAD <sha>` line"),
+            )
     save_state["anchor"] = anchor
     # The five rows are decided ONCE, from ONE value. The `SOURCES:`
     # booleans below and the render branch further down both read THIS object;
@@ -1288,6 +1327,15 @@ def render_facts_text(f: dict) -> str:
         ]
     out += [
         f"SAVE-STATE: {ss['tier']}",
+        # In a bare repo the local HEAD never advances, so its distance from the upstream is
+        # structural, not an action. One honest line, and deliberately not the word the
+        # upstream-comparison tiers use (so a reader does not read it as "behind, go reconcile")
+        # and not "clean start" (a handoff exists). The anchor COMPARISON rows (checkout/upstream/
+        # remote) are empty by construction; the saved-anchor header line still renders from the
+        # handoff, which is honest -- it is the snapshot you saved, not a comparison verdict.
+        *(["  bare repo -- card read tracked docs (ROADMAP/STATUS) from origin/main; local HEAD "
+           "is structurally behind the upstream and that is not something to act on"]
+          if ss["tier"] == "bare" else []),
         *_anchor_rows(),
         *_unverified_rows(),
         f"LOCKED-NEXT: {' · '.join(f['status']['locked_next'])}" if f["status"]["locked_next"] else "",
@@ -1394,6 +1442,11 @@ def main(argv=None) -> int:
     def _run(args):
         return subprocess.run(["git", *args], capture_output=True, text=True).stdout
 
+    # A bare repo has no legitimate working tree, so its on-disk docs are frozen debris; in that
+    # case the card reads tracked docs from origin/main (see gather_card_facts). Definitive, binary
+    # signal -- a normal adopter is never bare, so their path is untouched.
+    bare = _run(["rev-parse", "--is-bare-repository"]).strip() == "true"
+
     try:
         # `run_git=hr.run_git` is the PRODUCTION injection, and it is load-bearing rather than
         # tidy. `gather_card_facts` deliberately does not default it (a default would let a test
@@ -1401,7 +1454,7 @@ def main(argv=None) -> int:
         # it leaves the whole reconciliation reporting `unverified / no git runner was provided`
         # -- fail-closed and honest, and completely non-functional. That is exactly what shipped
         # for one commit, and only running the real command found it.
-        facts = gather_card_facts(_P.cwd(), _run, run_git=hr.run_git, refresh=refresh)
+        facts = gather_card_facts(_P.cwd(), _run, run_git=hr.run_git, refresh=refresh, bare=bare)
         print(render_facts_text(facts))
     except Exception as exc:
         # STILL never a traceback -- but no longer exit 0. Nothing was printed, so returning 0

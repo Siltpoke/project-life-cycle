@@ -196,7 +196,7 @@ skills/project-lifecycle/
     │  ── onboarding + ergonomics (start here for new contributors) ──
     ├── onboarding.md                     Day 1 protocol — codebase Q&A only, no edits. Anchor checklist (CLAUDE.md / CONTEXT.md / RESUME.md / journal / .claude/commands/). Day 2+ gradient to /ship. Includes project-level .claude/commands/ schema for team-shared slash commands.
     ├── ergonomics.md                     Claude Code session habits — 5 to internalize: # memory append, ! bash mode, shift-tab auto-accept, escape interrupt, drag-drop multimodal. Full keybinding + claude -p SDK + multi-Claude parallelism reference.
-    ├── archaeology.md                    brownfield adoption pass — one-time READ-ONLY derivation of the baseline artifacts a greenfield project would have accumulated (ROADMAP, glossary, backfilled ADRs, journal start, RESUME), every one marked an AI-inferred draft; re-running is an idempotent merge, never a refresh
+    ├── archaeology.md                    brownfield adoption pass — one-time READ-ONLY derivation of the baseline artifacts a greenfield project would have accumulated (ROADMAP, glossary, backfilled ADRs, journal start, RESUME) plus a behavior baseline, every one marked an AI-inferred draft; re-running is an idempotent merge, never a refresh
     ├── repo-intake.md                    GitHub onboarding for non-technical users — fires at new-project / first-milestone kickoff to settle where the code will live
     │
     │  ── per-phase building blocks ──
@@ -220,11 +220,13 @@ skills/project-lifecycle/
     ├── reviewer-brief.md                 the PLC-native review prompt dispatched to a read-only general-purpose agent — the button behind `/review`, and the referent every cadence/CI review site points at, replacing any by-name dependency on an external reviewer agent
     ├── builder-split.md                  backend-builder + frontend-builder w/ folder-scoped tools + Builder Summary contract (API handoff)
     ├── verify-loop.md                    feedback-loop pattern (3 canonical loops: test / visual screenshot / runtime curl) — give the LLM a way to check its own work; cap iterations; without it, the LLM self-grades and lies
+    ├── prove.md                          one vocabulary for "did it work?" (M4) — the 5-token verification-status enum (VERIFIED/FAIL/PARTIAL/UNVERIFIED/BLOCKED), regression-vs-validation, the per-behavior evidence fields, the 4-state Implemented!=Tested!=Verified!=Accepted ladder, and the test-weakening guard (a net drop in test-function count declares a reason)
     ├── deterministic-handlers.md         harness-injected pre-step pattern (auth / secret / lint / migration safety / tenant isolation). Pure code, fires every loop iteration before LLM, injects [HARNESS] message when it acts. 6 canonical handler examples + dynamic-handlers path
     ├── journal-schema.md                 6-section journal entry template
     ├── defer-vs-fix.md                   triage rule for review findings
     ├── where-does-this-go.md             routes a SIDE DISCOVERY — something real that surfaced mid-phase and is not that phase's subject, so none of the other three routers accepts it. Capture one line unprompted, decide once at close: fix now / backlog entry / main-line candidate / refused-to-a-human. Names the four classes it refuses, prices that hatch, and carries the three calibration landings it must reproduce
     ├── diagnose-loop.md                  hard-bug discipline: feedback loop → ranked hypotheses → fix + regression. Iron Law + 3-Fix Rule
+    ├── debug-session.md                  the behavior-locked debug session the intent gate OFFERS on a bug (never auto-start): lock the neighbors as PRESERVE rows first → diagnose-loop → findings-tier → prove; threads M1's lock onto the loop, no new script
     ├── document-map.md                   which file do I open? one row per document the skill tells you to keep — who writes it, who reads it first, when, whether it is truth or a derived view, and which document it is most confused with; settles the RESUME.md / docs/STATUS.md ambiguity (RESUME is the read-first doc; STATUS is what `status_doc` points at) and names the two documents the skill references but this repo does not keep
     ├── close-gate.md                     deterministic done-gate — task-done / phase-done checks (journal header / fresh test-evidence / handoff sections / CHANGELOG touch / smoke / ROADMAP), portable script + manifest, pre-push-hook wiring (the un-bypassable layer) + the close-gate policy key (per-task | pr-boundary — where the human-blocking approval sits, with the self-certification attack surface written out)
     ├── review-record.md                  trustworthy AI review — reviewer dispatch constraints (fresh context / read-only / tier asymmetry / refute-first / file:line evidence gate / computed verdicts), the bidirectional review record on the PR (reviewer report verbatim + builder per-finding response), finding→fix rules (reviewer snippets are untrusted input; mandatory final-pass), coverage-window check
@@ -273,8 +275,16 @@ skills/project-lifecycle/
     ├── progressive-disclosure.md         deciding what may leave an always-loaded surface: SKILL.md is read every session, references/ are not
     ├── checkpoint-segmentation.md        splitting a checkpoint-gated chain (like /ship's outer chain) into Workflow-scriptable segments
     ├── checkpoint-reflow.md              DESIGN-ONLY contract (this skill ships no runtime for it) — how an adopter's /ship folds prior checkpoint rejections back into the spec-writer
+    ├── checkpoint-modes.md               risk-sized PROGRESS checkpoints (M3) — the <=150-word schema, the qa-log marker, LOW owes none / MED-HIGH owe one mid-phase, and the load-bearing non-blocking property (post and keep going); distinct from the approval checkpoints above
     ├── agent-chats-registry.md           machine-local, per-repo index mapping this repo's CLI-agent conversations to their resume ids, across families
     ├── self-update-flow.md               how the AI updates this skill itself
+    │
+    │  ── relocated from SKILL.md ──
+    ├── skill-overview.md                 the agent-harness framing + the unattended-run judgment + the /builder-profile & comprehension opt-in blurbs, moved verbatim out of SKILL.md
+    ├── conventions.md                    the Mandatory Conventions detail (commits / versioning / docs / reviews / smoke / output-format / CI-CD / self-update / cost-aware), moved verbatim out of SKILL.md
+    ├── red-flags.md                      the full Red Flags STOP list — the anti-patterns that halt work, moved verbatim out of SKILL.md
+    ├── quick-reference.md                the situation-to-action lookup table, moved verbatim out of SKILL.md
+    ├── judgment-gate.md                  the build-before judgment gate contract — what the PreToolUse hook forces the AI to surface before its first edit, options + escape slot
     └── origin.md                         pilot history
 
 skills/project-lifecycle/hooks/            ← self-enforcing frontmatter hooks — fire only while the skill is active (see references/harness-primitives.md)

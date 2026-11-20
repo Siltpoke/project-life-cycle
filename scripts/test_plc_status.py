@@ -274,9 +274,31 @@ def test_mutant_deciding_the_version_once_per_file_reds_that(tmp_path: Path) -> 
 # ---------------------------------------------------------------------------
 # One dependency, and its absence is loud
 # ---------------------------------------------------------------------------
+def _path_without_jq(tmp_path: Path) -> Path:
+    """A PATH directory holding every command the host has EXCEPT jq.
+
+    This used to be an EMPTY directory, which hid coreutils too. The reader's first line calls
+    `dirname`; with it missing, older bash (macOS 3.2 measured; ubuntu-24.04 inferred from green
+    runs) treats the resulting `cd ""` as a silent no-op, so the run limped on to the jq check and
+    the test passed by accident. GitHub's ubuntu-26.04 image prints "cd: null directory" (its CI
+    log, 2026-10-28) and the reader dies before reaching the line under test.
+    Hiding only jq tests the one dependency this test is about, on either bash."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    for src in (Path("/usr/bin"), Path("/bin"), Path("/usr/local/bin")):
+        if not src.is_dir():
+            continue
+        for cmd in src.iterdir():
+            if cmd.name == "jq" or (bin_dir / cmd.name).exists() or (bin_dir / cmd.name).is_symlink():
+                continue
+            if os.access(cmd, os.X_OK):
+                (bin_dir / cmd.name).symlink_to(cmd)
+    assert not (bin_dir / "jq").exists(), "jq leaked into the PATH that is meant to hide it"
+    return bin_dir
+
+
 def _assert_jq_absent_is_loud_and_prints_nothing(impl: Path, tmp_path: Path) -> None:
-    empty_bin = tmp_path / "bin"
-    empty_bin.mkdir(exist_ok=True)
+    empty_bin = _path_without_jq(tmp_path)
     ledger_dir = _ledger(tmp_path, [{**BASE, "stage_id": "journal"}])
     result = subprocess.run(
         ["/bin/bash", str(impl), "--run", "live-1", "--ledger-dir", str(ledger_dir),

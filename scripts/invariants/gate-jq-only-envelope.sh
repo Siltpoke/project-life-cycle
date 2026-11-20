@@ -120,11 +120,20 @@ scripts/invariants/no-icloud-conflict-copies.sh
 scripts/invariants/adoption-rule-single-source.sh
 scripts/backlog-closures.sh
 scripts/invariants/backlog-closure-log.sh
+scripts/behavior-lock.sh
+scripts/invariants/behavior-lock-carriers-resolve.sh
+scripts/risk-tier.sh
+scripts/invariants/risk-tier-evidence-floor.sh
+scripts/invariants/checkpoint-floor.sh
+scripts/invariants/test-weakening-guard.sh
+scripts/invariants/protected-behavior-change.sh
 scripts/invariants/backlog-no-title-markers.sh
 scripts/invariants/where-does-this-go-contract.sh
 scripts/invariants/routers-stay-scoped.sh
 scripts/invariants/sidelines-never-tracked.sh
+scripts/invariants/roadmap-has-vision.sh
 scripts/invariants/ci-cd-gates-names-no-mode.sh
+scripts/invariants/smoke-docs-name-no-mode.sh
 scripts/invariants/documented-snippet-matches-reader.sh
 scripts/invariants/skill-checkset-matches-gate.sh
 scripts/invariants/roadmap-station-blocks-placement.sh
@@ -147,7 +156,6 @@ scripts/invariants/guide-map-covers-references.sh
 scripts/invariants/hot-cap-exemption-has-a-reason.sh
 scripts/invariants/tasklist-never-tracked.sh
 scripts/invariants/close-gate-wiring.sh
-scripts/retention-drain.sh
 scripts/ac-evidence.sh
 scripts/ac-baseline.sh
 scripts/invariants/close-gate-doc-has-check.sh
@@ -176,6 +184,8 @@ scripts/invariants/one-fragment-sentinel-reader.sh
 scripts/invariants/preimage-keep-faces-agree.sh
 scripts/invariants/no-ledger-evidence-under-preimages.sh
 scripts/invariants/growth-declares-a-deletion.sh
+scripts/invariants/no-welded-bold-bullets.sh
+scripts/invariants/skill-reconstruction.sh
 "
 
 # --- the exemption table. One line per file: `<path>|<reason>`. A bare name in a list is
@@ -194,17 +204,28 @@ MD="skills/project-lifecycle/references/close-gate.md"
 MD_ANCHOR='^## Portable gate script'
 INV_DIR="scripts/invariants"
 
+# The matcher, as ONE awk function, shared by every scan below -- the per-file range
+# scan here AND the batched whole-set scan in scan_set. The python-detection rule (the two
+# comment-truncating subs + the regex) therefore has exactly one source location. It used to be
+# copied at each call site; a second copy is a second thing to drift, and the mutation battery in
+# test_gate_envelope.py can only blind what it can name once -- blinding this `return` now darkens
+# every scan together, which is what M1/M2 assert. The `code ~ /(^|...` spelling is deliberate: the
+# checker's own self-scan (and its pytest twin) treat a line containing it as DATA, so this
+# function does not read as the checker invoking what it bans.
+AWK_MATCH='
+function is_python(line,   code) {
+  code = line
+  sub(/^[[:space:]]*#.*$/, "", code)
+  sub(/[[:space:]]#.*$/, "", code)
+  return code ~ /(^|[^[:alnum:]_])python[0-9]*/
+}'
+
 # Print `NR: line` for every line in [s,e] whose CODE (comment truncated per the rule above)
 # invokes a python interpreter.
 scan() {
-  awk -v s="$2" -v e="$3" '
+  awk -v s="$2" -v e="$3" "$AWK_MATCH"'
     NR < s || NR > e { next }
-    {
-      code = $0
-      sub(/^[[:space:]]*#.*$/, "", code)
-      sub(/[[:space:]]#.*$/, "", code)
-      if (code ~ /(^|[^[:alnum:]_])python[0-9]*/) print NR ": " $0
-    }
+    { if (is_python($0)) print NR ": " $0 }
   ' "$1"
 }
 
@@ -239,14 +260,76 @@ scan_set() {
     return 1
   fi
 
+  # One awk pass over every readable declared file, in place of one awk + one `grep -c`
+  # per file. The per-file form spawned ~2 processes times the declared count on EVERY call, and
+  # self_coverage calls scan_set once per declared file -- the O(files^2) process-spawn storm that
+  # made this invariant the slowest step in CI and in every local close gate. Hits (none on a clean
+  # tree) are written to one small file per offending path, keyed by the awk FILENAME with
+  # non-alphanumerics folded to `_`; the report loop below reads them back in DECLARED order, so
+  # every printed row -- ok, FAIL, and each `NR: line` hit -- is byte-identical to the old form.
+  # The match uses the shared `is_python()` awk function (the one `scan` also uses), so there is a
+  # single matcher; FNR is the per-file line number, the same value `scan` printed as NR over its
+  # whole-file range.
+  local hitdir full key hits
+  hitdir="$(mktemp -d)" || { echo "FAIL gate-jq-only-envelope: mktemp -d failed"; return 1; }
+  local -a readable=()
+  for f in $DECLARED; do [ -r "$root/$f" ] && readable+=("$root/$f"); done
+
+  # Guard : two declared paths must not FOLD to the
+  # same hit key, or the batched scan would report one file's hits under the other. The duplicate
+  # that first exposed this is gone, but a future `a-b.sh` + `a_b.sh` pair would collide; this makes
+  # it a loud fail at scan time rather than a silent mislabel.
+  local _ks _dups
+  if [ "${#readable[@]}" -gt 0 ]; then
+    _ks="$(for f in "${readable[@]}"; do echo "${f//[^A-Za-z0-9]/_}"; done)"
+    _dups="$(printf '%s\n' "$_ks" | sort | uniq -d)"
+    if [ -n "$_dups" ]; then
+      echo "FAIL gate-jq-only-envelope: two declared paths fold to the same hit key -- rename one so"
+      echo "  the batched scan cannot report one file's hits under another. Colliding key(s): $_dups"
+      rc=1
+    fi
+  fi
+
+  if [ "${#readable[@]}" -gt 0 ]; then
+    awk -v hitdir="$hitdir" "$AWK_MATCH"'
+      {
+        if (is_python($0)) {
+          key = FILENAME; gsub(/[^A-Za-z0-9]/, "_", key)
+          print FNR ": " $0 >> (hitdir "/" key)
+        }
+      }
+    ' "${readable[@]}"
+  fi
   for f in $DECLARED; do
     if [ ! -r "$root/$f" ]; then
       echo "FAIL gate-jq-only-envelope: $f missing or unreadable"
       rc=1
       continue
     fi
-    report "$f" "$(scan "$root/$f" 1 "$(grep -c '' "$root/$f")")"
+    full="$root/$f"; key="${full//[^A-Za-z0-9]/_}"
+    hits=""; [ -f "$hitdir/$key" ] && hits="$(cat "$hitdir/$key")"
+    report "$f" "$hits"
   done
+
+  # Guard ; the loop
+  # above read them keyed the SHELL way (${//}). If the two foldings ever diverge -- a different awk,
+  # a multibyte locale -- awk writes a hit the loop never reads, and a real python invocation prints
+  # `ok`: a silent false green. A hit file that no declared file claims is exactly that divergence.
+  local _hf _claimed
+  for _hf in "$hitdir"/*; do
+    [ -e "$_hf" ] || continue
+    _claimed=0
+    for f in "${readable[@]}"; do
+      [ "${f//[^A-Za-z0-9]/_}" = "${_hf##*/}" ] && { _claimed=1; break; }
+    done
+    if [ "$_claimed" -eq 0 ]; then
+      echo "FAIL gate-jq-only-envelope: a scan hit was written under key '${_hf##*/}' that no declared"
+      echo "  file reads back -- awk and the shell disagree on the hit-file key, so a real invocation"
+      echo "  would be silently missed. Re-key the scan (index or hash); do not trust the fold."
+      rc=1
+    fi
+  done
+  rm -rf "$hitdir"
 
   # --- the embedded gate: locate the fenced block under the anchor heading.
   if [ ! -r "$root/$MD" ]; then
@@ -291,6 +374,13 @@ scan_set() {
   report "$MD (embedded gate, lines $MD_START-$MD_END)" \
     "$(scan "$root/$MD" "$MD_START" "$MD_END")"
 
+  # The cleaned exemption list, computed ONCE. Both loops below used to recompute it with
+  # a `printf | grep` command-substitution inside a heredoc -- harmless in the exemption loop (runs
+  # once) but the completeness loop re-ran it per `.sh` in the directory, ~70 process spawns on every
+  # scan_set call. A here-string off this variable feeds the same bytes with no further spawn.
+  local EXEMPT_CLEAN
+  EXEMPT_CLEAN="$(printf '%s\n' "$EXEMPT" | grep -v '^[[:space:]]*$')"
+
   # --- each exemption must still be NEEDED. A file that no longer contains the token it was
   # exempted for would sit exempt forever, quietly unscanned; here it turns red and gets deleted.
   # Stated limit: this asks about the CODE-visible token, so an exempt file that moves its only
@@ -316,9 +406,7 @@ scan_set() {
     else
       echo "ok gate-jq-only-envelope: $f exempt, still needed ($reason)"
     fi
-  done <<EOF
-$(printf '%s\n' "$EXEMPT" | grep -v '^[[:space:]]*$')
-EOF
+  done <<< "$EXEMPT_CLEAN"
 
   # --- completeness: every .sh in the invariants directory is in exactly one of the two sets.
   # This is the stale-list risk the hooks-side envelope check NAMES and does not close. Reads the
@@ -336,7 +424,7 @@ EOF
   for path in "$root/$INV_DIR"/*.sh; do
     [ -e "$path" ] || continue
     found=$((found + 1))
-    base="$(basename "$path")"
+    base="${path##*/}"
     rel="$INV_DIR/$base"
     known=0
     for f in $DECLARED; do [ "$f" = "$rel" ] && known=1; done
@@ -348,9 +436,7 @@ EOF
     # to provide. The declared loop one line up is exact too; the two agree.
     while IFS='|' read -r ef _; do
       [ "$ef" = "$rel" ] && known=1
-    done <<EOF
-$(printf '%s\n' "$EXEMPT" | grep -v '^[[:space:]]*$')
-EOF
+    done <<< "$EXEMPT_CLEAN"
     if [ "$known" -eq 0 ]; then
       echo "FAIL gate-jq-only-envelope: $rel is in neither the declared set nor the exemptions"
       echo "  -> it runs inside the gate, so it is inside the envelope. Resolve it one of three"
@@ -406,32 +492,41 @@ EOF
 # read and clean.
 self_coverage() {
   local src="$1" rc=0 planted tmp out frc
+  # ONE fixture, reused across all plants. This loop used to `mktemp -d` + rebuild the
+  # whole ~94-file set per declared file -- O(files) full copytrees, which made this invariant, and
+  # every test that runs it, the slowest step in CI (823s for the single test that drives it 7x) AND
+  # the slowest step of every local close gate (~185s, process-spawn bound: `sys` > `user`). The set
+  # the plant sees is byte-identical to before; only the plant is applied to one file and then undone
+  # by restoring that one file from `src`, so each iteration still scans a set that is clean except
+  # for its own plant (its isolation clause is unchanged).
+  tmp="$(mktemp -d)" || { echo "FAIL gate-jq-only-envelope SELF-COVERAGE: mktemp -d failed"; return 1; }
+  if ! build_fixture "$src" "$tmp"; then
+    echo "FAIL gate-jq-only-envelope SELF-COVERAGE: could not build the fixture set"
+    rm -rf "$tmp"; return 1
+  fi
   for planted in $DECLARED; do
-    tmp="$(mktemp -d)" || { echo "FAIL gate-jq-only-envelope SELF-COVERAGE: mktemp -d failed"; return 1; }
-    if ! build_fixture "$src" "$tmp"; then
-      echo "FAIL gate-jq-only-envelope SELF-COVERAGE: could not build the fixture set"
-      rm -rf "$tmp"; return 1
-    fi
     printf '\nPLANTED=$(python3 -c "pass")\n' >> "$tmp/$planted"
     out="$(scan_set "$tmp" 2>&1)"; frc=$?
+    # Undo this plant by restoring exactly this one file, so the next iteration -- and the control
+    # below -- see the same clean set the per-iteration rebuild used to give them.
+    cp "$src/$planted" "$tmp/$planted" || { echo "FAIL gate-jq-only-envelope SELF-COVERAGE: could not restore $planted"; rm -rf "$tmp"; return 1; }
     if [ "$frc" -eq 0 ]; then
       echo "FAIL gate-jq-only-envelope SELF-COVERAGE: a python invocation planted in $planted did"
       echo "  not turn the scan red -- that file is DECLARED but never actually read."
       rc=1
-    elif ! printf '%s\n' "$out" | grep -qF "FAIL gate-jq-only-envelope: $planted invokes"; then
+    # NOT `printf '%s\n' "$out" | grep -qF ...`: under `pipefail`, `grep -q` exits at its first
+    # match while printf is still flushing the rest (~9.6 KB, written in 4 KiB chunks on glibc); the
+    # writer then dies of SIGPIPE, the pipeline reads as failed, and a correct, NAMED red is reported
+    # as "not attributable". Scheduler-dependent => Linux-under-load flake. A `case` glob has no writer
+    # process to race (and spawns nothing); "*" inside "$planted" is quoted so it matches literally.
+    elif case "$out" in *"FAIL gate-jq-only-envelope: $planted invokes"*) false ;; *) true ;; esac; then
       echo "FAIL gate-jq-only-envelope SELF-COVERAGE: the scan went red with $planted planted, but"
       echo "  the failure does not name that file -- the red is not attributable to the plant."
       rc=1
     fi
-    rm -rf "$tmp"
   done
 
-  # --- the control. Same fixture shape, nothing planted, must be green.
-  tmp="$(mktemp -d)" || { echo "FAIL gate-jq-only-envelope SELF-COVERAGE: mktemp -d failed"; return 1; }
-  if ! build_fixture "$src" "$tmp"; then
-    echo "FAIL gate-jq-only-envelope SELF-COVERAGE: could not build the control fixture"
-    rm -rf "$tmp"; return 1
-  fi
+  # --- the control. Same fixture, now restored clean, nothing planted, must be green.
   out="$(scan_set "$tmp" 2>&1)"; frc=$?
   rm -rf "$tmp"
   if [ "$frc" -ne 0 ]; then

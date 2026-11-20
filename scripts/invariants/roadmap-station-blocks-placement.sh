@@ -146,8 +146,15 @@ fi
 #
 # `.claude/roadmap-row-edits.txt` names each deliberately-edited row. Declared rows are dropped
 # from BOTH sides before the comparison and are PRINTED, so the exception is never silent. And a
-# declaration whose row did not actually change is an ERROR -- a stale exemption reads exactly
-# like coverage while providing none.
+# declaration THIS BRANCH ADDED whose row did not actually change is an ERROR -- a stale exemption
+# reads exactly like coverage while providing none.
+#
+# This check SCOPES "THIS BRANCH ADDED". A declaration already present at the base is INHERITED: a prior
+# merged phase added it, the row it names already matches the base, and it is not coverage for this
+# branch's diff. The stale error fired on it anyway, so every branch after a row-flip phase inherited
+# a red main until someone deleted the line. The stale-check now runs
+# only for declarations present now but absent at the base; an inherited one whose row equals the
+# base is the normal post-merge state, printed, not an error.
 # ---------------------------------------------------------------------------
 extract_mainline_table() {
   # stdin: a roadmap. stdout: the mainline section's table rows, verbatim.
@@ -178,23 +185,53 @@ else
   if [ -r "$DECL_FILE" ]; then
     decl_prefixes=$(awk -F'\t' '/^#/ { next } NF >= 2 { print $2 }' "$DECL_FILE")
   fi
+  # a declaration PRESENT AT THE BASE is INHERITED -- a prior merged phase added it,
+  # so it is not coverage for THIS branch's diff and the stale-check must not fire on it.
+  # Once a phase that flipped a row merges, the base catches up and the merged row equals
+  # the base; the surviving declaration would otherwise read "stale: nothing changed" on
+  # every later branch, which reddened main twice. The stale error below is
+  # therefore scoped to declarations this branch ADDED (present now, absent at the base).
+  base_decl_prefixes=""
+  if git cat-file -e "$BASE:$DECL_FILE" 2>/dev/null; then
+    base_decl_prefixes=$(git show "$BASE:$DECL_FILE" | awk -F'\t' '/^#/ { next } NF >= 2 { print $2 }')
+  fi
+  is_inherited() { printf '%s\n' "$base_decl_prefixes" | grep -Fxq -- "$1"; }
+  # The other half: ONLY a declaration this branch ADDED exempts its row
+  # from the byte comparison below. An inherited declaration must NOT: dropping its row from
+  # both sides would leave a standing exemption that outlives its phase, so a later branch
+  # could edit that row with no new declaration and no red -- exactly the forcing function the
+  # earlier stale red used to supply. Left in the comparison, an inherited+unchanged row equals
+  # the base and passes anyway, while a later EDIT to it reds until that branch declares its own.
+  branch_decl_prefixes=""
+  if [ -n "$decl_prefixes" ]; then
+    branch_decl_prefixes=$(
+      while IFS= read -r _p; do
+        [ -n "$_p" ] || continue
+        is_inherited "$_p" || printf '%s\n' "$_p"
+      done <<BRANCHDECL
+$decl_prefixes
+BRANCHDECL
+    )
+  fi
   # The prefix list reaches awk as a FILE, never through `-v`: a `-v` value cannot carry a
   # newline (awk rejects it outright with "newline in string"), which is how the first version
   # of this helper died. Same NR==FNR two-input shape no-stored-position.sh already uses.
   DECL_TMP=$(mktemp)
   trap 'rm -f "$DECL_TMP"' EXIT
-  printf '%s\n' "$decl_prefixes" > "$DECL_TMP"
+  printf '%s\n' "$branch_decl_prefixes" > "$DECL_TMP"
   drop_declared() {
-    if [ -z "$decl_prefixes" ]; then cat; return; fi
+    if [ -z "$branch_decl_prefixes" ]; then cat; return; fi
     awk 'NR == FNR { if ($0 != "") p[++n] = $0; next }
          { for (i = 1; i <= n; i++) if (index($0, p[i]) > 0) next; print }' "$DECL_TMP" -
   }
   before=$(git show "$BASE:$ROADMAP" | extract_mainline_table | drop_declared)
   after=$(extract_mainline_table < "$ROADMAP" | drop_declared)
 
-  # A declaration whose row did not change is an ERROR, checked here rather than trusted.
-  # A stale exemption reads like coverage and provides none, and it silently widens the
-  # hole every time somebody forgets to delete one.
+  # A declaration THIS BRANCH ADDED whose row did not change is an ERROR, checked here rather
+  # than trusted. A stale exemption reads like coverage and provides none, and it silently widens
+  # the hole every time somebody forgets to delete one. An INHERITED declaration (one already at
+  # the base) is exempt from the stale error only -- see is_inherited and the scoping note above; the
+  # exactly-one-row-each-side check below still applies to it.
   if [ -n "$decl_prefixes" ]; then
     while IFS= read -r pfx; do
       [ -n "$pfx" ] || continue
@@ -208,7 +245,11 @@ else
       if [ "$b_n" -ne 1 ] || [ "$a_n" -ne 1 ]; then
         bad "declared row edit \`$pfx\` matches $b_n row(s) at the base and $a_n now — it must name exactly one row on each side"
       elif [ "$b_row" = "$a_row" ]; then
-        bad "declared row edit is stale: nothing changed for \`$pfx\` — delete the line in $DECL_FILE"
+        if is_inherited "$pfx"; then
+          note "  inherited declared row edit (unchanged vs base — a prior merged phase's, not this branch's): $pfx"
+        else
+          bad "declared row edit is stale: nothing changed for \`$pfx\` — delete the line in $DECL_FILE"
+        fi
       else
         note "  declared row edit: $pfx"
       fi

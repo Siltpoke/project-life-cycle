@@ -38,8 +38,9 @@ A host listed here is shipped with a manifest but has **no row above that verifi
 links its "not yet verified" wording to this section, in every language, and a test holds it to that.
 
 - **Antigravity** — the row above says there was no command-line entry point; that is no longer
-  true (`agy` exists and loads the plugin, see [End-to-end run](#end-to-end-run)), but running a
-  session through it needs an interactive browser login, so it is still unverified.
+  true (`agy` exists and loads the plugin). A partial end-to-end run passed every row it reached,
+  but three rows (a small phase, `/handoff` then `/catchup`, the `/release` dry run) did not run, so
+  it is still unverified. See [Antigravity end-to-end run](#antigravity-end-to-end-run).
 - **Windows** (not a host, a platform) — see "Also not verified" above.
 
 ## Two things the probes turned up
@@ -82,6 +83,60 @@ Qoder `-p` with `bypass_permissions`, `codex exec`); interactive sessions were n
 
 Also seen on Antigravity at load time: commands are converted to skills on install, and only the
 first 24,000 bytes of the main skill file are read, which is about a fifth of it.
+
+## Skill hooks on CodeBuddy and Qoder
+
+2026-10-24, follow-up to the end-to-end run. The question: is there a setting that makes the skill's
+frontmatter hooks run on these two hosts?
+
+**CodeBuddy 2.167.0.** Its documentation says frontmatter hooks from non-built-in sources are off unless
+`allowUntrustedFrontmatterHooks: true` is set. Three one-minute probes, each in a fresh repo on a
+a phase branch, with an isolated config directory, asked the agent to load the skill and then
+write a file without a task list:
+
+| arm | where the setting was | skill loaded | write intercepted |
+|---|---|---|---|
+| control | not set | yes | no |
+| treatment | project `.codebuddy/settings.json` | yes | no |
+| treatment | the (isolated) user `settings.json`, with user settings enabled | yes | no |
+
+The installed binary explains it: the function that registers frontmatter hooks returns at once when
+there is no subagent session (`registerFrontmatterHooks(…){if(!this.subAgentSession?.id)return; …`),
+and the bundled docs say these hooks are registered "in the subagent / fork skill lifecycle". This
+skill runs in the main session, so its hooks are never registered, whatever the setting says. This
+does not depend on interactive vs. non-interactive mode.
+
+**Qoder 1.1.65.** Its hook documentation covers settings files and a plugin's `hooks/hooks.json`;
+it does not describe hooks in a skill's frontmatter. In the end-to-end run the guard did not
+intercept. Interactive mode was not tested.
+
+**What is not tried here:** both hosts load hooks from a plugin's `hooks/hooks.json`. Those run in
+every session on the host, not only while this skill is in use, so they are a different design, not a
+fix of this one.
+
+## Antigravity end-to-end run
+
+2026-10-27, `agy` 1.4.8, plugin `5.0.1`, macOS. Same rows, same checker and the same
+isolation as the [End-to-end run](#end-to-end-run) above, with `HOME` pointed at a throwaway
+directory that held one browser login. Driven with `agy --dangerously-skip-permissions -p`. Commands are
+skills on this host, so each was asked for by skill name.
+
+| row | result |
+|---|---|
+| loads | yes — `project-lifecycle (enabled, 5.0.1)`, 2 skills |
+| `/catchup` read-only | yes — exit 0, repo unchanged |
+| `/init-harness` + active pre-push | yes — all nine items, hook wired through `.githooks` + `core.hooksPath`; its report opened with the self-check line `COMPLETE -- all 9 required items present` |
+| incomplete branch push refused | yes — exit 1 |
+| small phase · `/handoff` then `/catchup` · `/release` dry run | **not run** — the account's quota ran out after `/init-harness` (`RESOURCE_EXHAUSTED (code 429): Individual quota reached … Resets in 167h`) |
+| skill hooks | not claimed |
+| the user's real `~/.gemini` | unchanged — 1,533 registration/settings files byte-identical before and after |
+
+**What Antigravity reads of the main skill file.** `agy plugin validate` reports
+`the body is 116018 bytes; only the first 24000 are loaded`. By byte position in that body, the
+Definition of Done section runs from 6,702 to 16,325 and so is loaded whole, including the close-gate
+rules; the per-phase workflow starts at 18,902 and is cut at 24,000. `scripts/test_antigravity_budget.py`
+fails if the Definition of Done section ever ends past the cut. **This is position, not behaviour:**
+a probe asking the agent about sections on both sides of the cut was planned and did not run (same quota).
 
 ## The marker the README must carry
 

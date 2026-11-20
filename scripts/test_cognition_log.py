@@ -165,3 +165,16 @@ def test_cli_append_source_defaults_capture(tmp_path):
     frags = glob.glob(str(tmp_path / "docs" / "cognition-log.d" / "*.jsonl"))
     rec = json.loads(Path(frags[0]).read_text().strip().splitlines()[-1])
     assert rec["source"] == "capture"
+
+def test_cli_now_lands_verbatim_in_ts(tmp_path):
+    # an explicit --now overrides the wall clock and lands verbatim in the entry ts
+    # (and picks the dated fragment), mirroring cognition_measure's --now. No --now = current time.
+    r = subprocess.run([sys.executable, SCRIPT, "append",
+                        "--intent", "why", "--subject", "s", "--criterion", "c",
+                        "--branch", "feat/x", "--root", str(tmp_path),
+                        "--now", "2026-01-02T03:04:05"],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    rec = json.loads(r.stdout)
+    assert rec["ts"] == "2026-01-02T03:04:05"
+    assert cl.fragment_path(tmp_path, "feat/x", "2026-01-02").exists()

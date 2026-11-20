@@ -64,6 +64,16 @@ Eight fields, split **core (required)** vs **progressive (omit-if-empty)**. MOME
    not just thinking.
 7. **Blockers / open questions.**
 8. **Gotchas / context** — env quirks, flaky tests, non-obvious constraints.
+9. **Behavior contracts** (conditional — rendered only when the branch has behavior-lock rows) —
+   one line per active `.claude/behavior-lock.tsv` row, each **self-contained**:
+   `BL-<id> <class> · <behavior, one line> · carrier <path::name> · baseline <recorded|not>`. The
+   baseline state is read from `.claude/behavior-baseline.tsv` (a row has `recorded` when it carries both
+   a `before` and an `after`). This field exists so a resuming session reconstructs *what is locked and
+   whether it is verified* straight from `RESUME.md`, **without re-running `behavior-lock.sh`** — a field
+   that merely said "see behavior-lock.tsv" would force the re-derivation the whole snapshot exists to
+   avoid. Omit the whole section when the branch has no behavior-lock rows (progressive-prune, like every
+   other field). It is a pointer to a durable registry, not a second copy of it: the registry stays the
+   source of truth; this is the resume-time reconstruction aid.
 
 ### MOMENT-tense rule
 
@@ -93,6 +103,9 @@ I am <task>, in <phase>.                             ← core 1
 
 ## Blockers / Gotchas    (progressive — fields 7 + 8, co-rendered)
 - <blocker or gotcha>
+
+## Behavior contracts     (progressive — field 9; omit if no behavior-lock rows)
+- BL-<id> <class> · <behavior> · carrier <path::name> · baseline <recorded|not>
 ```
 
 The snapshot **replaces** the prior one in `RESUME.md` — it does not append, so the hot file the

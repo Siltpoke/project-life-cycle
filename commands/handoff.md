@@ -27,10 +27,15 @@ committed vs written-local.
 
 ## Flow (delegates to the brief — do not re-implement here)
 
-1. **Assemble.** Gather the session's invisible state into the 8-field schema — core (task+phase /
+1. **Assemble.** Gather the session's invisible state into the 9-field schema — core (task+phase /
    next-action / staleness-anchor) + progressive (state-so-far / decisions / what-NOT-to-retry /
-   blockers / gotchas). Actively scan for the what-NOT-to-retry field (reverted edits, abandoned
-   approaches), not just forward progress. See `handoff-snapshot.md` §"The snapshot schema".
+   blockers / gotchas / behavior-contracts). Actively scan for the what-NOT-to-retry field (reverted
+   edits, abandoned approaches), not just forward progress. When `.claude/behavior-lock.tsv` has rows
+   reachable on the branch, render the conditional **behavior-contracts** field — one
+   self-contained line per row (id · class · behavior · carrier · baseline-state read from
+   `.claude/behavior-baseline.tsv`) so resume reconstructs the locked behaviors without re-running
+   `behavior-lock.sh`; omit the field entirely when there are no rows. See `handoff-snapshot.md`
+   §"The snapshot schema".
 2. **Self-validate.** Run the five generation-time checks — core-check (refuse if any core field is
    unfillable), fabrication-guard (mark-absent, never invent), progressive-prune (drop empties, no
    "None"), staleness-stamp (`git rev-parse HEAD` + branch + timestamp; `no-git` fallback), and

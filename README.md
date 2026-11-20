@@ -4,7 +4,7 @@
 
 **Project Life Cycle turns ad-hoc AI coding sessions into a repeatable, traceable software workflow** — one [Claude Code](https://docs.claude.com/en/docs/claude-code) skill that runs the same spec → plan → build → verify → ship → release discipline on every project, driven by three slash commands: `/init-harness` → `/ship` → `/release`.
 
-Verified to load in [Claude Code](#claude-code-setup), [Codex](#codex-setup), [Qoder](#qoder-setup) and [CodeBuddy](#codebuddy-setup) — each checked with that host's own plugin validator, with the output recorded in [HOST-VERIFICATION.md](HOST-VERIFICATION.md). [Antigravity](#antigravity-setup) ships a manifest and is [**not yet verified**](HOST-VERIFICATION.md#unverified) (its `agy` CLI loads the plugin, but running a session needs an interactive browser login the unattended checks could not do). Those checks cover discovery and loading. A later end-to-end run drove a small phase through each of the four hosts; what it found — including where the skill's hooks do **not** run — is in the same file. None of it ran on Windows.
+Verified to load in [Claude Code](#claude-code-setup), [Codex](#codex-setup), [Qoder](#qoder-setup) and [CodeBuddy](#codebuddy-setup) — each checked with that host's own plugin validator, with the output recorded in [HOST-VERIFICATION.md](HOST-VERIFICATION.md). [Antigravity](#antigravity-setup) ships a manifest and is [**not yet verified**](HOST-VERIFICATION.md#unverified) (its `agy` CLI loads the plugin, and a partial end-to-end run passed every row it reached; three rows are still unrun — see [Antigravity end-to-end run](HOST-VERIFICATION.md#antigravity-end-to-end-run)). Those checks cover discovery and loading. A later end-to-end run drove a small phase through each of the four hosts; what it found — including where the skill's hooks do **not** run — is in the same file. None of it ran on Windows.
 
 **Want the details?** The [**Guide**](GUIDE.md) covers what it does, when to use it, the full workflow, and a file-by-file repo map. [CHANGELOG.md](CHANGELOG.md) is what shipped.
 
@@ -75,7 +75,7 @@ Then start a new Codex thread. The cachebuster step stamps the version in `.code
 
 ### Qoder setup
 
-This repo also ships Qoder plugin metadata in `.qoder-plugin/plugin.json` (the plugin manifest) and `.qoder-plugin/marketplace.json` (required for `qodercli plugins marketplace add`). The `skills/` directory layout and `SKILL.md` frontmatter match Qoder's plugin conventions, and the frontmatter hook paths use `${QODER_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}`, so the skill loads in both Qoder and Claude Code. **The skill's frontmatter hooks were not observed to run in Qoder:** in an end-to-end run the skill loaded and the task-list guard never intercepted a write ([HOST-VERIFICATION.md](HOST-VERIFICATION.md#end-to-end-run)). Treat those hooks as Claude Code-only until that is resolved. The pre-push close gate is a git hook, not a skill hook, and is unaffected.
+This repo also ships Qoder plugin metadata in `.qoder-plugin/plugin.json` (the plugin manifest) and `.qoder-plugin/marketplace.json` (required for `qodercli plugins marketplace add`). The `skills/` directory layout and `SKILL.md` frontmatter match Qoder's plugin conventions, and the frontmatter hook paths use `${QODER_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}`, so the skill loads in both Qoder and Claude Code. **The skill's frontmatter hooks do not run in Qoder.** Qoder's hook documentation describes hooks in settings files and in a plugin's `hooks/hooks.json`, not in a skill's frontmatter, and in an end-to-end run the task-list guard never intercepted a write ([HOST-VERIFICATION.md](HOST-VERIFICATION.md#skill-hooks-on-codebuddy-and-qoder)). The skill's hooks are Claude Code-only. The pre-push close gate is a git hook, not a skill hook, and is unaffected.
 
 Install from a local checkout:
 
@@ -108,6 +108,12 @@ This repo also ships a native Antigravity (`agy`) plugin manifest:
 - `plugin.json` makes the checkout a native Antigravity plugin.
 - `skills/` contains the custom skills.
 
+**Limits on Antigravity** (measured with `agy` 1.4.8; check your own version with `agy plugin validate /path/to/project-life-cycle`):
+
+- **Only the first 24,000 bytes of the main skill file are loaded.** The file is about 116,000 bytes, so roughly the last four fifths are not read. The Definition of Done and the close-gate rules sit within those first 24,000 bytes (a test checks their byte position; whether the agent then follows them has not been tested); the per-phase workflow and the sections after it are beyond the cut.
+- **Commands become skills on install.** Antigravity has no slash commands; ask for the skill by name (for example, "use the project-lifecycle plugin's `init-harness` skill").
+- **The skill's hooks do not run.** Antigravity has no frontmatter hooks. The pre-push close gate is a git hook, so it is unaffected.
+
 To install it locally in the Antigravity CLI:
 
 ```bash
@@ -130,7 +136,7 @@ agy plugin install /path/to/project-life-cycle
 
 ### CodeBuddy setup
 
-This repo ships CodeBuddy plugin metadata in `.codebuddy-plugin/plugin.json` (the plugin manifest) and `.codebuddy-plugin/marketplace.json` (required for `/plugin marketplace add`). CodeBuddy natively supports `${CLAUDE_PLUGIN_ROOT}` as a Claude Code compatibility alias, so the hook commands resolve there. **They were not observed to run, though:** in an end-to-end run the skill loaded and the task-list guard never intercepted a write ([HOST-VERIFICATION.md](HOST-VERIFICATION.md#end-to-end-run)). Treat the skill's frontmatter hooks as Claude Code-only until that is resolved. The pre-push close gate is a git hook, not a skill hook, and is unaffected.
+This repo ships CodeBuddy plugin metadata in `.codebuddy-plugin/plugin.json` (the plugin manifest) and `.codebuddy-plugin/marketplace.json` (required for `/plugin marketplace add`). **The skill's frontmatter hooks do not run in CodeBuddy.** CodeBuddy registers a skill's frontmatter hooks only inside a subagent or a forked skill; this skill runs in the main session, so they are never registered. Its `allowUntrustedFrontmatterHooks` setting does not change that: with the setting on, the task-list guard still did not intercept a write ([HOST-VERIFICATION.md](HOST-VERIFICATION.md#skill-hooks-on-codebuddy-and-qoder)). The skill's hooks are Claude Code-only. The pre-push close gate is a git hook, not a skill hook, and is unaffected.
 
 Load from a local checkout:
 

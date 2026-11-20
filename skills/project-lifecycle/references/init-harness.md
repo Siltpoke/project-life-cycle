@@ -28,6 +28,8 @@ A project is bootstrapped when these artifacts exist + are wired together:
 | `.github/release.yml` | Only if Claude-plugin OR user opts in | PR-label release-notes config |
 | `.github/workflows/release.yml` | Only if Claude-plugin OR user opts in | Tag-driven GitHub Release builder |
 
+**Whether those artifacts are actually there is counted by a script, not by the model's report:** `/init-harness` ends by running `bash "${CLAUDE_PLUGIN_ROOT}/scripts/init-harness-check.sh"`, which checks nine of them on disk (the always-required rows above, the gate byte-equal to §Portable gate script in `references/close-gate.md`, and an *active* pre-push hook) and prints `COMPLETE` or `INCOMPLETE` plus the missing list. The final report opens with that line.
+
 After `/init-harness` completes, the project should pass: "Day 1 anchor checklist" (per `references/onboarding.md` Step 1) — i.e., any new contributor can read those files and have a usable mental model.
 
 ## Detection signals (Phase 1 of /init-harness)

@@ -1,6 +1,6 @@
 # Archaeology — brownfield adoption pass
 
-One-time, **read-only** pass offered when the skill is adopted on an existing codebase (brownfield). It derives the baseline context artifacts a greenfield project would have accumulated progressively — ROADMAP, glossary, backfilled ADRs, journal start line, RESUME, plus an adoption-snapshot review index — from repo evidence, every one clearly marked as an **AI-inferred draft** the human must review. The artifacts are **seeds of living docs**: after adoption they are maintained by the normal milestone flow (roadmap updates at milestone boundaries, glossary growth per phase, ADRs at decision time). They are never regenerated wholesale — re-running the pass is an idempotent merge, not a refresh.
+One-time pass offered when the skill is adopted on an existing codebase (brownfield). Its document derivation is **read-only**; its one behavior-baseline step (the seventh artifact, below) additionally **runs the repo's carrier tests** — executing code, but writing only to `.claude/`, never to source. It derives the baseline context artifacts a greenfield project would have accumulated progressively — ROADMAP, glossary, backfilled ADRs, journal start line, RESUME, an adoption-snapshot review index, plus a **behavior baseline** (seeded behavior-lock rows + recorded baselines, so the repo arrives with a runnable regression net — not just documents) — from repo evidence, every one clearly marked as an **AI-inferred draft** the human must review. The artifacts are **seeds of living docs**: after adoption they are maintained by the normal milestone flow (roadmap updates at milestone boundaries, glossary growth per phase, ADRs at decision time). They are never regenerated wholesale — re-running the pass is an idempotent merge, not a refresh.
 
 ## Detection contract
 
@@ -49,6 +49,7 @@ An accepted pass produces exactly these drafts — no more:
 | 4 | `docs/iteration-journal.md` adoption preamble | controller |
 | 5 | `docs/RESUME.md` initial state (the path `/init-harness` generates; root `RESUME.md` if the project already uses that location) | controller |
 | 6 | `docs/adoption-snapshot.md` index | controller |
+| 7 | behavior baseline — seeded `.claude/behavior-lock.tsv` PRESERVE rows + recorded `.claude/behavior-baseline.tsv` baselines (see "Behavior baseline" below) | controller (baseline step) |
 
 ## Pre-flight — the pass looks at what it is about to read, BEFORE it drafts
 
@@ -115,6 +116,34 @@ The controller (not the subagents) assembles three artifacts from the fan-out re
 
 Drafts then flow into Phase 2's normal generate/merge set; checkpoints 2–4 are unchanged.
 
+## Behavior baseline
+
+**The seventh artifact.** A greenfield project accumulates a Behavior Lock (the behavior-capture step in `references/careful-paths.md`, backed by `scripts/behavior-lock.sh`) as it changes code; a brownfield repo arrives with none, so the behavior it *already* has is unpinned and the M1 promise — "the requested change works, but something that used to work no longer does gets caught" — does not hold until someone writes rows by hand. This step lays down a runnable regression baseline at intake, so the lock is there from day one.
+
+**No new machinery — documented commands over the two M1 scripts.** PLC does not run the tests; the adopting coding agent does, and records the result. For each critical surface the read-only fan-out surfaced (the behaviors named in the position/ADR drafts — not a row per tested function), the controller:
+
+1. **Decides the carrier** — the existing test that proves the surface — and asks whether it resolves:
+
+   ```sh
+   bash "${CLAUDE_PLUGIN_ROOT}/scripts/behavior-lock.sh" --resolve "<carrier>" "<repo-root>"
+   ```
+
+2. **Carrier resolves (exit 0)** → run **that carrier** — the specific test, NOT the whole suite — from the repo root, and read its own exit. The baseline is per behavior: one carrier's exit records against one row, because a whole-suite exit shared across rows would red every row for one unrelated failure.
+
+   - **The carrier passes (exit 0)** → append ONE `PRESERVE` row to the adopted repo's `.claude/behavior-lock.tsv` (`BL-<n><TAB>PRESERVE<TAB><behavior><TAB><carrier><TAB><why>`; create the file with its `# id<TAB>class<TAB>behavior<TAB>carrier<TAB>why` header if absent) and record `before` = `0`:
+
+     ```sh
+     bash "${CLAUDE_PLUGIN_ROOT}/scripts/behavior-baseline.sh" --record BL-<n> before 0 "<carrier-cmd>" "<env>"
+     ```
+
+   - **The carrier fails (non-zero)** → do **NOT** seed a `PRESERVE` row: a behavior that does not currently pass is not a PRESERVE (which is `pass→pass`), and `behavior-baseline.sh --check-transition` would rightly call a PRESERVE whose `before` is non-zero a CONTRADICTION. Record it under `## Coverage gaps` as a *failing* surface the adopter must triage first.
+
+3. **Carrier does NOT resolve (exit 1)** → the surface has no test that proves it. Add a line under the snapshot's `## Coverage gaps` ("`<surface>` has no test — candidate for a characterization test") and **seed NO row**. This is the one correctness property that matters: a PRESERVE row whose carrier does not resolve reds the adopter's very first `close-gate` (M1's `scripts/invariants/behavior-lock-carriers-resolve.sh`), so intake must never seed a dangling row. An untested-but-critical surface is a gap to fill, not a lie to pin.
+
+Seed **lean**: only the critical surfaces the fan-out already judged worth a draft become rows — the registry grows with churn and risk, not with codebase size (`references/careful-paths.md`). **Provenance, stated precisely:** a strict 5-column TSV row cannot carry the markdown provenance header the document drafts use, so the seeded block is prefixed with a `# AI-inferred draft — see docs/adoption-snapshot.md` comment line (the parsers skip `#`), and the human-review pointer lives in the snapshot index, not on the row. **What the step writes vs what it runs:** it writes only to the adopted repo's `.claude/` (the registry + the baseline record), never to source — but it does **run** the carrier tests, which execute code and carry whatever side effects the adopter's own suite has; PLC neither sandboxes nor guards those. This is the one step of the pass that executes code, as against the read-only document derivation above.
+
+**What this step can and cannot enforce, stated rather than implied** (the same honest position as the pre-flight). Once a row exists, the carrier-resolve invariant mechanically reds if its carrier stops resolving. Whether an agent reading this section actually performs the baseline step is a prose instruction like every other one here — this phase adds no gate forcing intake to produce a baseline. It moves the baseline from "never offered" to "a documented, tested command path that M1's guard then protects," and claims no more.
+
 ## Provenance rules
 
 Every generated file carries this header block:
@@ -145,10 +174,12 @@ Backfilled ADRs additionally carry:
 | `docs/ROADMAP.md` | inferred whole-plan map | ☐ pending |
 | `CONTEXT.md` | glossary draft | ☐ pending |
 | `docs/adr/0001-....md` | backfilled ADR | ☐ pending |
+| `.claude/behavior-lock.tsv` `BL-1` (+ its `.claude/behavior-baseline.tsv` `before` record) | PRESERVE row seeded from a passing tested surface, with its recorded baseline | ☐ pending |
 
 ## Coverage gaps
 - <agent> hit its read budget before covering <area>
 - git history unavailable (shallow clone) — position derived from tree+README only
+- `<surface>` has no test that proves it — candidate for a characterization test (behavior baseline seeded no row for it)
 ```
 
 - Status values: `☐ pending` / `✅ reviewed YYYY-MM-DD` — per-item reviewed dates, not a single sign-off.

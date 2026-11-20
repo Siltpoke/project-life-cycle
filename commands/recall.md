@@ -2,6 +2,8 @@
 description: Brief the current session from the most-recent PLC session digest for THIS repo (written automatically by the save_session Stop hook to ~/.claude/plc-session-data/). Read-only — surfaces where you left off (tasks in flight, files touched, tools used) and stops; never auto-starts work or edits files. PLC's native session-recall command (named /recall, not /resume, to avoid colliding with Claude Code's built-in /resume conversation-picker). Args — none = newest digest for the current repo; a YYYY-MM-DD or a file path = that specific digest.
 ---
 
+> ⚠️ **Deprecated (Unreleased).** Superseded by `/catchup`, which reads the same mechanical digest **plus** `RESUME.md` and live git into a richer welcome-back card. `/recall` still works but is scheduled for removal in the next MAJOR — use `/catchup`.
+
 # /recall — session briefing from the automatic save digest, PLC-native
 
 The read half of PLC's automatic session save/recall pair. The `save_session` Stop hook writes
